@@ -1,12 +1,12 @@
 {
-  "task_id": "b4-import",
+  "task_id": "g1-export",
   "token_budget": 8000,
-  "tokens_used": 363,
+  "tokens_used": 365,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement SRT and VTT parsers in ar-edit-core/src/transcript.rs. Convert to internal Transcript JSON format. Also accept raw whisper.cpp JSON passthrough. Preserve word-level timestamps where available, fall back to segment-level. Implements REQ-007.",
-      "token_cost": 62,
+      "content": "Implement ar-edit transcripts export --format editable per DATA-MODEL section 6: generate annotated markdown with segment-level HTML comment annotations <!-- ar-edit:src-NNN:wX-wY -->. Default to compact segment-level format. Per CON-003. Implements REQ-020.",
+      "token_cost": 64,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T08:26:17Z"
+  "constructed_at": "2026-02-19T08:32:25Z"
 }
