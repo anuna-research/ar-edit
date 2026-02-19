@@ -101,7 +101,10 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         Commands::Mark(args) => cmd_mark(cli, args),
         Commands::Markers { source_id, label } => cmd_markers(cli, source_id.as_deref(), label.as_deref()),
         Commands::Schema { command } => match command {
-            SchemaCommand::Edit => todo!("schema edit"),
+            SchemaCommand::Edit => {
+                println!("{}", ar_edit_core::schema::edit_document_schema());
+                Ok(())
+            }
         },
         Commands::Tui => {
             #[cfg(feature = "tui")]

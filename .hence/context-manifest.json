@@ -1,12 +1,12 @@
 {
-  "task_id": "e6-tests",
+  "task_id": "i4-schema",
   "token_budget": 8000,
-  "tokens_used": 341,
+  "tokens_used": 339,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Write integration tests TEST-021 (segment preview), TEST-022 (full edit playback), TEST-023 (overlay present via ffprobe), TEST-024 (source playback at timestamp).",
-      "token_cost": 40,
+      "content": "Implement ar-edit schema edit: output JSON Schema for the edit document format. Schema should validate the examples from DATA-MODEL.md. Implements REQ-019.",
+      "token_cost": 38,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T08:03:44Z"
+  "constructed_at": "2026-02-19T08:15:47Z"
 }
