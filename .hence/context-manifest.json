@@ -1,12 +1,12 @@
 {
-  "task_id": "g4-tests",
+  "task_id": "d5-search",
   "token_budget": 8000,
-  "tokens_used": 340,
+  "tokens_used": 375,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Write tests TEST-018 (edit from annotated transcript with 3 segments from 2 sources) and TEST-020 (export then reimport round-trip produces identical edit).",
-      "token_cost": 39,
+      "content": "Implement unified search in ar-edit-core/src/search.rs spanning transcripts AND scene descriptions. Results typed as transcript/scene/metadata with source_id, timestamps, context. Wire CLI: ar-edit search <query> [--source <id>] [--type transcript|scene|metadata]. Per CON-008. Implements REQ-034.",
+      "token_cost": 74,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T11:10:32Z"
+  "constructed_at": "2026-02-19T11:46:58Z"
 }
