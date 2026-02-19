@@ -1,12 +1,12 @@
 {
-  "task_id": "c7-tests",
+  "task_id": "b2-whisper",
   "token_budget": 8000,
-  "tokens_used": 401,
+  "tokens_used": 361,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Write tests TEST-011 (edit creation), TEST-012 (segment addition for all 3 range types), TEST-013 (reordering), TEST-014 (removal), TEST-015 (trimming), TEST-016 (display resolves ranges), TEST-017 (validation catches all error types), TEST-018 (edit from annotated transcript), TEST-019 (direct JSON authoring), TEST-051 (undo), TEST-052 (redo), TEST-053 (fork behavior), TEST-053b (history display).",
-      "token_cost": 100,
+      "content": "Implement whisper.cpp subprocess invocation per ADR-003: whisper-cli -m <model-path> -f <audio.wav> --output-json --print-progress. Support model selection (tiny/base/small/medium/large), default base per REQ-006. Parse progress from stderr.",
+      "token_cost": 60,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T06:13:57Z"
+  "constructed_at": "2026-02-19T06:26:39Z"
 }
