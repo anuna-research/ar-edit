@@ -1,12 +1,12 @@
 {
-  "task_id": "c4-resolve",
+  "task_id": "c1-ops",
   "token_budget": 8000,
-  "tokens_used": 140,
+  "tokens_used": 213,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement range resolution in ar-edit-core/src/resolve.rs: resolve ShotRange to (start_ms, end_ms). Words variant: transcript.word[from].start_ms .. word[to].end_ms. Scenes variant: index.scene[from].start_ms .. scene[to].end_ms. Time variant: direct passthrough. Loads transcript/index JSON as needed.",
-      "token_cost": 75,
+      "content": "Implement edit document operations in ar-edit-core/src/edit.rs per ADR-001 event-sourced design: create (empty edit with ops:[], head:-1), add_shot (append AddShot op), move_shot (append MoveShot op with from/to positions), remove_shot (append RemoveShot op preserving full shot data for undo), trim_shot (append TrimShot op with old/new range). All ops append to log and update snapshot. Implements REQ-011 through REQ-015.",
+      "token_cost": 106,
       "priority": "PlanMeta"
     },
     {
@@ -20,8 +20,14 @@
       "content": "Modified 2 files (+632, -5): .hence/context-manifest.json, crates/ar-edit-core/src/models/mod.rs",
       "token_cost": 24,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-c4-resolve-changes",
+      "content": "Modified 5 files (+574, -6): .hence/context-manifest.json, Cargo.lock, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/resolve.rs",
+      "token_cost": 42,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:10:01Z"
+  "constructed_at": "2026-02-19T04:12:50Z"
 }
