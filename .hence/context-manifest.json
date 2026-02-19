@@ -1,12 +1,12 @@
 {
-  "task_id": "e2-segment",
+  "task_id": "c5-validate",
   "token_budget": 8000,
-  "tokens_used": 376,
+  "tokens_used": 378,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Launch player at start/end timestamps for a single shot. Resolve shot range to timestamps via resolve.rs, then launch player subprocess with seek arguments. Also support source playback: ar-edit play <source-id> --at <timecode> / --at-word <N> / --at-scene <N>. Per CON-006. Implements REQ-021, REQ-024.",
-      "token_cost": 75,
+      "content": "Implement all validation checks from CON-005: source exists in project, transcript exists (for word range), index exists (for scene range), word index in bounds, scene index in bounds, time in bounds, from <= to, non-zero duration. Return structured errors with patterns matching CON-005. Implements REQ-017.",
+      "token_cost": 77,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T05:28:48Z"
+  "constructed_at": "2026-02-19T05:34:12Z"
 }
