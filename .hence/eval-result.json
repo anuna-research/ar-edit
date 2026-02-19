@@ -3,24 +3,25 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 3,
-    "insertions": 138,
-    "deletions": 5,
+    "files_changed": 4,
+    "insertions": 780,
+    "deletions": 8,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit/src/tui/events.rs",
-      "crates/ar-edit/src/tui/mod.rs"
+      "crates/ar-edit-core/src/lib.rs",
+      "crates/ar-edit-core/src/transcript_ops.rs",
+      "crates/ar-edit/src/main.rs"
     ],
-    "dirty_files": 713
+    "dirty_files": 5970
   },
   "learnings": [
     {
-      "key": "task-h7-watcher-changes",
-      "content": "Modified 3 files (+138, -5): .hence/context-manifest.json, crates/ar-edit/src/tui/events.rs, crates/ar-edit/src/tui/mod.rs",
+      "key": "task-b5-ops-changes",
+      "content": "Modified 4 files (+780, -8): .hence/context-manifest.json, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/transcript_ops.rs, crates/ar-edit/src/main.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/h7-watcher-v1",
-  "evaluated_at": "2026-02-19T06:58:27Z"
+  "branch_name": "hence/b5-ops-v1",
+  "evaluated_at": "2026-02-19T07:05:09Z"
 }
