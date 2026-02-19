@@ -1,12 +1,12 @@
 {
-  "task_id": "b1-audio",
+  "task_id": "h2-timeline",
   "token_budget": 8000,
-  "tokens_used": 362,
+  "tokens_used": 360,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement ffmpeg subprocess to extract WAV audio from video in ar-edit-core/src/transcript.rs. Command: ffmpeg -i <source> -vn -acodec pcm_s16le -ar 16000 -ac 1 <output.wav>. Per ADR-003 subprocess architecture. Handle missing audio stream error.",
-      "token_cost": 61,
+      "content": "Implement edit timeline panel in ar-edit/src/tui/panels/timeline.rs: vertical shot list showing shot ID, source ID, duration, text preview. Highlighted selection, j/k or arrow key navigation, scrolling for long edits. Implements REQ-039.",
+      "token_cost": 59,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T05:45:47Z"
+  "constructed_at": "2026-02-19T05:48:44Z"
 }
