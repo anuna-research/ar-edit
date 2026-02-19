@@ -3,26 +3,23 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 5,
-    "insertions": 782,
-    "deletions": 44,
+    "files_changed": 2,
+    "insertions": 207,
+    "deletions": 37,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit/src/tui/input.rs",
-      "crates/ar-edit/src/tui/mod.rs",
-      "crates/ar-edit/src/tui/panels/mod.rs",
-      "crates/ar-edit/src/tui/panels/transcript.rs"
+      "crates/ar-edit-core/src/transcript.rs"
     ],
-    "dirty_files": 7163
+    "dirty_files": 5920
   },
   "learnings": [
     {
-      "key": "task-h3-transcript-changes",
-      "content": "Modified 5 files (+782, -44): .hence/context-manifest.json, crates/ar-edit/src/tui/input.rs, crates/ar-edit/src/tui/mod.rs, crates/ar-edit/src/tui/panels/mod.rs, crates/ar-edit/src/tui/panels/transcript.rs",
+      "key": "task-b3-ingest-changes",
+      "content": "Modified 2 files (+207, -37): .hence/context-manifest.json, crates/ar-edit-core/src/transcript.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/h3-transcript-v1",
-  "evaluated_at": "2026-02-19T06:46:30Z"
+  "branch_name": "hence/b3-ingest-v1",
+  "evaluated_at": "2026-02-19T06:53:49Z"
 }
