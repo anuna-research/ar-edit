@@ -3,24 +3,26 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 3,
-    "insertions": 810,
-    "deletions": 5,
+    "files_changed": 5,
+    "insertions": 782,
+    "deletions": 44,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit-core/src/transcript.rs",
-      "crates/ar-edit-core/tests/test_005_whisper_invocation.rs"
+      "crates/ar-edit/src/tui/input.rs",
+      "crates/ar-edit/src/tui/mod.rs",
+      "crates/ar-edit/src/tui/panels/mod.rs",
+      "crates/ar-edit/src/tui/panels/transcript.rs"
     ],
-    "dirty_files": 3924
+    "dirty_files": 7163
   },
   "learnings": [
     {
-      "key": "task-b2-whisper-changes",
-      "content": "Modified 3 files (+810, -5): .hence/context-manifest.json, crates/ar-edit-core/src/transcript.rs, crates/ar-edit-core/tests/test_005_whisper_invocation.rs",
+      "key": "task-h3-transcript-changes",
+      "content": "Modified 5 files (+782, -44): .hence/context-manifest.json, crates/ar-edit/src/tui/input.rs, crates/ar-edit/src/tui/mod.rs, crates/ar-edit/src/tui/panels/mod.rs, crates/ar-edit/src/tui/panels/transcript.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/b2-whisper-v1",
-  "evaluated_at": "2026-02-19T06:36:00Z"
+  "branch_name": "hence/h3-transcript-v1",
+  "evaluated_at": "2026-02-19T06:46:30Z"
 }
