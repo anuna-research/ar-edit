@@ -1,12 +1,12 @@
 {
-  "task_id": "j5-tests",
+  "task_id": "d4-describe",
   "token_budget": 8000,
-  "tokens_used": 353,
+  "tokens_used": 368,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Write tests TEST-054 (marker creation), TEST-055 (marker listing with filters), TEST-056 (shot notes append-only), TEST-057 (agent reads markers in transcript), TEST-058 (agent reads shot notes in edit show).",
-      "token_cost": 52,
+      "content": "Generate description:null placeholders for all scenes. Implement ar-edit index set-description <source-id> --scene <N> --text '<desc>' to populate them (append-only, old value logged). Implement ar-edit index show <source-id>. Per CON-008. Implements REQ-033, REQ-035.",
+      "token_cost": 67,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T07:52:01Z"
+  "constructed_at": "2026-02-19T07:59:21Z"
 }

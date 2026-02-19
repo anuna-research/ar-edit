@@ -181,13 +181,14 @@ pub fn save_index(project_dir: &Path, index: &SourceIndex) -> Result<(), IndexEr
 /// Set the description for a scene in an existing index.
 ///
 /// Loads the index, updates the scene description, and saves it back.
-/// Returns the updated SourceIndex.
+/// Returns a tuple of (updated SourceIndex, old description).
+/// The old value is preserved for audit logging (append-only semantics).
 pub fn set_scene_description(
     project_dir: &Path,
     source_id: &str,
     scene_index: u32,
     text: &str,
-) -> Result<SourceIndex, IndexError> {
+) -> Result<(SourceIndex, Option<String>), IndexError> {
     let mut index = load_index(project_dir, source_id)?;
 
     if scene_index >= index.scene_count {
@@ -197,10 +198,11 @@ pub fn set_scene_description(
         });
     }
 
+    let old_description = index.scenes[scene_index as usize].description.clone();
     index.scenes[scene_index as usize].description = Some(text.to_string());
     save_index(project_dir, &index)?;
 
-    Ok(index)
+    Ok((index, old_description))
 }
 
 // ---------------------------------------------------------------------------
@@ -658,8 +660,9 @@ mod tests {
         };
         save_index(tmp.path(), &index).unwrap();
 
-        let updated =
+        let (updated, old_desc) =
             set_scene_description(tmp.path(), "src-002", 1, "Close-up interview").unwrap();
+        assert_eq!(old_desc, None);
         assert_eq!(
             updated.scenes[1].description.as_deref(),
             Some("Close-up interview")
@@ -673,6 +676,15 @@ mod tests {
         assert_eq!(
             reloaded.scenes[1].description.as_deref(),
             Some("Close-up interview")
+        );
+
+        // Overwrite returns old value
+        let (updated2, old_desc2) =
+            set_scene_description(tmp.path(), "src-002", 1, "Wide shot exterior").unwrap();
+        assert_eq!(old_desc2.as_deref(), Some("Close-up interview"));
+        assert_eq!(
+            updated2.scenes[1].description.as_deref(),
+            Some("Wide shot exterior")
         );
     }
 
