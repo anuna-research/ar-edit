@@ -1,0 +1,38 @@
+{
+  "source_id": "src-002",
+  "model": "small",
+  "language": "en",
+  "duration_ms": 8000,
+  "segments": [
+    {
+      "index": 0,
+      "start_ms": 0,
+      "end_ms": 4000,
+      "text": "The economy has shown strong growth this quarter.",
+      "words": [
+        { "index": 0, "text": "The", "start_ms": 100, "end_ms": 300, "confidence": 0.97 },
+        { "index": 1, "text": "economy", "start_ms": 300, "end_ms": 700, "confidence": 0.93 },
+        { "index": 2, "text": "has", "start_ms": 700, "end_ms": 900, "confidence": 0.98 },
+        { "index": 3, "text": "shown", "start_ms": 900, "end_ms": 1200, "confidence": 0.95 },
+        { "index": 4, "text": "strong", "start_ms": 1200, "end_ms": 1600, "confidence": 0.94 },
+        { "index": 5, "text": "growth", "start_ms": 1600, "end_ms": 2000, "confidence": 0.96 },
+        { "index": 6, "text": "this", "start_ms": 2000, "end_ms": 2300, "confidence": 0.97 },
+        { "index": 7, "text": "quarter.", "start_ms": 2300, "end_ms": 2700, "confidence": 0.91 }
+      ]
+    },
+    {
+      "index": 1,
+      "start_ms": 4000,
+      "end_ms": 8000,
+      "text": "Experts predict continued improvement ahead.",
+      "words": [
+        { "index": 8, "text": "Experts", "start_ms": 4100, "end_ms": 4500, "confidence": 0.92 },
+        { "index": 9, "text": "predict", "start_ms": 4500, "end_ms": 4900, "confidence": 0.94 },
+        { "index": 10, "text": "continued", "start_ms": 4900, "end_ms": 5400, "confidence": 0.93 },
+        { "index": 11, "text": "improvement", "start_ms": 5400, "end_ms": 5900, "confidence": 0.90 },
+        { "index": 12, "text": "ahead.", "start_ms": 5900, "end_ms": 6300, "confidence": 0.96 }
+      ]
+    }
+  ],
+  "word_count": 13
+}
