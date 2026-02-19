@@ -1,12 +1,12 @@
 {
-  "task_id": "a2-models",
+  "task_id": "c4-resolve",
   "token_budget": 8000,
-  "tokens_used": 148,
+  "tokens_used": 140,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement all serde structs in ar-edit-core/src/models/: Manifest, Source, Defaults, Transcript, TranscriptSegment, Word, EditDocument, EditSnapshot, Shot, ShotNote, ShotRange (tagged union enum per ADR-002), EditOp, EditOpKind, SourceIndex, SourceMetadata, Thumbnail, Scene, SourceMarkers, Marker. All derive Serialize/Deserialize. ShotRange uses serde adjacently-tagged enum: words{from,to}, scenes{from,to}, time{from_ms,to_ms}.",
-      "token_cost": 107,
+      "content": "Implement range resolution in ar-edit-core/src/resolve.rs: resolve ShotRange to (start_ms, end_ms). Words variant: transcript.word[from].start_ms .. word[to].end_ms. Scenes variant: index.scene[from].start_ms .. scene[to].end_ms. Time variant: direct passthrough. Loads transcript/index JSON as needed.",
+      "token_cost": 75,
       "priority": "PlanMeta"
     },
     {
@@ -14,8 +14,14 @@
       "content": "Modified 7 files (+1514, -0): Cargo.lock, Cargo.toml, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/models/mod.rs and 2 more",
       "token_cost": 41,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-a2-models-changes",
+      "content": "Modified 2 files (+632, -5): .hence/context-manifest.json, crates/ar-edit-core/src/models/mod.rs",
+      "token_cost": 24,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:04:43Z"
+  "constructed_at": "2026-02-19T04:10:01Z"
 }
