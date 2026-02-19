@@ -1,13 +1,14 @@
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Project Manifest (manifest.json)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Manifest {
     pub version: String,
     pub name: String,
@@ -17,7 +18,7 @@ pub struct Manifest {
     pub defaults: Defaults,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Source {
     pub id: String,
     pub path: PathBuf,
@@ -34,7 +35,7 @@ pub struct Source {
     pub indexed: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Defaults {
     pub whisper_model: String,
     pub thumbnail_interval_sec: u32,
@@ -46,7 +47,7 @@ pub struct Defaults {
 // Transcript (src-NNN.transcript.json)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Transcript {
     pub source_id: String,
     pub model: String,
@@ -56,7 +57,7 @@ pub struct Transcript {
     pub word_count: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TranscriptSegment {
     pub index: u32,
     pub start_ms: u64,
@@ -65,7 +66,7 @@ pub struct TranscriptSegment {
     pub words: Vec<Word>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Word {
     pub index: u32,
     pub text: String,
@@ -86,7 +87,7 @@ pub struct Word {
 /// { "scenes": { "from": 0, "to": 2 } }
 /// { "time":   { "from_ms": 15000, "to_ms": 22000 } }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ShotRange {
     Words { from: u32, to: u32 },
@@ -98,7 +99,7 @@ pub enum ShotRange {
 // Edit Document (*.edit.json) — event-sourced per ADR-001
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EditDocument {
     pub name: String,
     pub created: DateTime<Utc>,
@@ -108,12 +109,12 @@ pub struct EditDocument {
     pub snapshot: EditSnapshot,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EditSnapshot {
     pub shots: Vec<Shot>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Shot {
     pub id: String,
     pub source: String,
@@ -122,7 +123,7 @@ pub struct Shot {
     pub notes: Vec<ShotNote>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ShotNote {
     pub text: String,
     pub created: DateTime<Utc>,
@@ -132,7 +133,7 @@ pub struct ShotNote {
 // Edit Operations
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EditOp {
     pub id: u32,
     pub ts: DateTime<Utc>,
@@ -140,7 +141,7 @@ pub struct EditOp {
     pub op: EditOpKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum EditOpKind {
     AddShot { shot: Shot },
@@ -155,7 +156,7 @@ pub enum EditOpKind {
 // Source Index (src-NNN.index.json)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceIndex {
     pub source_id: String,
     pub indexed_at: DateTime<Utc>,
@@ -165,7 +166,7 @@ pub struct SourceIndex {
     pub scenes: Vec<Scene>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceMetadata {
     pub duration_ms: u64,
     pub resolution: (u32, u32),
@@ -173,14 +174,14 @@ pub struct SourceMetadata {
     pub file_size_bytes: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Thumbnail {
     pub path: PathBuf,
     pub timestamp_ms: u64,
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Scene {
     pub index: u32,
     pub start_ms: u64,
@@ -193,13 +194,13 @@ pub struct Scene {
 // Source Markers (annotations/src-NNN.markers.json)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceMarkers {
     pub source_id: String,
     pub markers: Vec<Marker>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Marker {
     pub id: String,
     pub range: ShotRange,

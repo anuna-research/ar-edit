@@ -8,6 +8,7 @@ pub mod overlay;
 pub mod playback;
 pub mod project;
 pub mod render;
+pub mod schema;
 pub mod resolve;
 pub mod transcript;
 pub mod transcript_ops;
