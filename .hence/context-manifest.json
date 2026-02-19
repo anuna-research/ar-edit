@@ -1,12 +1,12 @@
 {
-  "task_id": "a5-tests",
+  "task_id": "d2-thumbs",
   "token_budget": 8000,
-  "tokens_used": 285,
+  "tokens_used": 313,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Write unit tests TEST-001 (project init structure), TEST-002 (source registration + metadata), TEST-003 (non-video rejection), TEST-030 (exit codes). Create tests/fixtures/ directory with placeholder structure for future test videos and pre-generated transcripts.",
-      "token_cost": 65,
+      "content": "Extract representative JPEG frames at scene changes AND fixed intervals (default 10s, configurable via --interval). 640px wide. Filenames: src-NNN_MMmSSs.jpg in thumbnails/ directory. Per REQ-032.",
+      "token_cost": 49,
       "priority": "PlanMeta"
     },
     {
@@ -50,8 +50,14 @@
       "content": "Modified 3 files (+1034, -16): .hence/context-manifest.json, crates/ar-edit/src/cli/mod.rs, crates/ar-edit/src/main.rs",
       "token_cost": 29,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-a5-tests-changes",
+      "content": "Modified 12 files (+819, -6): .hence/context-manifest.json, Cargo.lock, Cargo.toml, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/tests/test_001_project_init.rs and 7 more",
+      "token_cost": 44,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:35:56Z"
+  "constructed_at": "2026-02-19T04:44:01Z"
 }

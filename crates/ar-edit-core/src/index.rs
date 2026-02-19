@@ -1,10 +1,10 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use regex::Regex;
 use thiserror::Error;
 
-use crate::models::Scene;
+use crate::models::{Scene, Thumbnail};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -52,6 +52,44 @@ pub fn detect_scenes(
     let scenes = build_scenes(&timestamps, duration_ms);
 
     Ok(scenes)
+}
+
+/// Extract representative JPEG thumbnails at scene changes and fixed intervals.
+///
+/// Generates 640px-wide JPEG frames at:
+/// - The start of each detected scene
+/// - Fixed intervals (default 10 s, configurable via `interval_sec`)
+///
+/// Timestamps are merged and deduplicated. Filenames follow the pattern
+/// `src-NNN_MMmSSs.jpg` inside the `thumbs_dir` directory.
+///
+/// Returns the list of generated thumbnails sorted by timestamp.
+pub fn generate_thumbnails(
+    source: &Path,
+    source_id: &str,
+    duration_ms: u64,
+    scenes: &[Scene],
+    interval_sec: u32,
+    thumbs_dir: &Path,
+) -> Result<Vec<Thumbnail>, IndexError> {
+    let timestamps = collect_timestamps(scenes, duration_ms, interval_sec);
+
+    let mut thumbnails = Vec::new();
+    for ts_ms in &timestamps {
+        let filename = format_thumbnail_filename(source_id, *ts_ms);
+        let out_path = thumbs_dir.join(&filename);
+        let rel_path = PathBuf::from("thumbnails").join(&filename);
+
+        extract_frame(source, *ts_ms, &out_path)?;
+
+        thumbnails.push(Thumbnail {
+            path: rel_path,
+            timestamp_ms: *ts_ms,
+            description: None,
+        });
+    }
+
+    Ok(thumbnails)
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +160,68 @@ fn build_scenes(timestamps: &[u64], duration_ms: u64) -> Vec<Scene> {
     });
 
     scenes
+}
+
+/// Collect and deduplicate thumbnail timestamps from scene boundaries
+/// and fixed intervals.
+fn collect_timestamps(scenes: &[Scene], duration_ms: u64, interval_sec: u32) -> Vec<u64> {
+    let mut timestamps = std::collections::BTreeSet::new();
+
+    // Scene-change timestamps (start of each scene).
+    for scene in scenes {
+        timestamps.insert(scene.start_ms);
+    }
+
+    // Fixed-interval timestamps.
+    if interval_sec > 0 && duration_ms > 0 {
+        let interval_ms = u64::from(interval_sec) * 1000;
+        let mut t = 0u64;
+        while t < duration_ms {
+            timestamps.insert(t);
+            t += interval_ms;
+        }
+    }
+
+    timestamps.into_iter().collect()
+}
+
+/// Format a thumbnail filename: `src-NNN_MMmSSs.jpg`.
+fn format_thumbnail_filename(source_id: &str, timestamp_ms: u64) -> String {
+    let total_secs = timestamp_ms / 1000;
+    let minutes = total_secs / 60;
+    let seconds = total_secs % 60;
+    format!("{source_id}_{minutes:02}m{seconds:02}s.jpg")
+}
+
+/// Extract a single JPEG frame from `source` at `timestamp_ms`, scaled to 640px wide.
+fn extract_frame(source: &Path, timestamp_ms: u64, out_path: &Path) -> Result<(), IndexError> {
+    let secs = timestamp_ms as f64 / 1000.0;
+    let ss = format!("{secs:.3}");
+
+    let output = Command::new("ffmpeg")
+        .args(["-y", "-ss", &ss, "-i"])
+        .arg(source)
+        .args([
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=640:-2",
+            "-q:v",
+            "2",
+        ])
+        .arg(out_path)
+        .output()
+        .map_err(|e| IndexError::FfmpegFailed(format!("failed to run ffmpeg: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(IndexError::FfmpegFailed(format!(
+            "ffmpeg frame extraction failed (ts={ss}s): {}",
+            stderr.lines().last().unwrap_or("unknown error")
+        )));
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -251,5 +351,70 @@ mod tests {
         for (i, scene) in scenes.iter().enumerate() {
             assert_eq!(scene.index, i as u32);
         }
+    }
+
+    // -- collect_timestamps ---------------------------------------------------
+
+    #[test]
+    fn collect_timestamps_merges_scenes_and_intervals() {
+        let scenes = build_scenes(&[18000, 45000], 60000);
+        let ts = collect_timestamps(&scenes, 60000, 10);
+
+        // Interval: 0, 10000, 20000, 30000, 40000, 50000
+        // Scene starts: 0, 18000, 45000
+        // Merged (sorted, deduped): 0, 10000, 18000, 20000, 30000, 40000, 45000, 50000
+        assert_eq!(ts, vec![0, 10000, 18000, 20000, 30000, 40000, 45000, 50000]);
+    }
+
+    #[test]
+    fn collect_timestamps_no_scenes() {
+        let ts = collect_timestamps(&[], 30000, 10);
+        assert_eq!(ts, vec![0, 10000, 20000]);
+    }
+
+    #[test]
+    fn collect_timestamps_zero_interval() {
+        let scenes = build_scenes(&[5000], 10000);
+        let ts = collect_timestamps(&scenes, 10000, 0);
+        // Only scene starts: 0, 5000
+        assert_eq!(ts, vec![0, 5000]);
+    }
+
+    #[test]
+    fn collect_timestamps_zero_duration() {
+        let ts = collect_timestamps(&[], 0, 10);
+        assert!(ts.is_empty());
+    }
+
+    // -- format_thumbnail_filename --------------------------------------------
+
+    #[test]
+    fn format_filename_zero() {
+        assert_eq!(format_thumbnail_filename("src-001", 0), "src-001_00m00s.jpg");
+    }
+
+    #[test]
+    fn format_filename_seconds() {
+        assert_eq!(
+            format_thumbnail_filename("src-001", 18000),
+            "src-001_00m18s.jpg"
+        );
+    }
+
+    #[test]
+    fn format_filename_minutes_and_seconds() {
+        assert_eq!(
+            format_thumbnail_filename("src-002", 124000),
+            "src-002_02m04s.jpg"
+        );
+    }
+
+    #[test]
+    fn format_filename_truncates_sub_second() {
+        // 18500ms → 18s (integer division)
+        assert_eq!(
+            format_thumbnail_filename("src-001", 18500),
+            "src-001_00m18s.jpg"
+        );
     }
 }
