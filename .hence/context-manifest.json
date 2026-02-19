@@ -1,12 +1,12 @@
 {
-  "task_id": "a4-cli",
+  "task_id": "a5-tests",
   "token_budget": 8000,
-  "tokens_used": 297,
+  "tokens_used": 285,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement clap derive subcommand structure in ar-edit/src/cli/mod.rs covering all commands from contracts: init, add, doctor, transcribe, transcripts (list/read/search/export), edit (create/add-segment/move-segment/remove-segment/trim-segment/show/history/from-transcript/note), undo, redo, validate, play, render, index (show/set-description), search, mark, markers, schema, tui. Global --json flag. Exit codes per CON-009.",
-      "token_cost": 106,
+      "content": "Write unit tests TEST-001 (project init structure), TEST-002 (source registration + metadata), TEST-003 (non-video rejection), TEST-030 (exit codes). Create tests/fixtures/ directory with placeholder structure for future test videos and pre-generated transcripts.",
+      "token_cost": 65,
       "priority": "PlanMeta"
     },
     {
@@ -44,8 +44,14 @@
       "content": "Modified 3 files (+267, -5): .hence/context-manifest.json, crates/ar-edit-core/src/index.rs, crates/ar-edit-core/src/lib.rs",
       "token_cost": 30,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-a4-cli-changes",
+      "content": "Modified 3 files (+1034, -16): .hence/context-manifest.json, crates/ar-edit/src/cli/mod.rs, crates/ar-edit/src/main.rs",
+      "token_cost": 29,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:28:32Z"
+  "constructed_at": "2026-02-19T04:35:56Z"
 }
