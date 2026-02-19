@@ -1,12 +1,12 @@
 {
-  "task_id": "c5-validate",
+  "task_id": "h1-skeleton",
   "token_budget": 8000,
-  "tokens_used": 378,
+  "tokens_used": 375,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement all validation checks from CON-005: source exists in project, transcript exists (for word range), index exists (for scene range), word index in bounds, scene index in bounds, time in bounds, from <= to, non-zero duration. Return structured errors with patterns matching CON-005. Implements REQ-017.",
-      "token_cost": 77,
+      "content": "Implement ratatui app skeleton in ar-edit/src/tui/ per ADR-004: crossterm terminal setup/teardown, event loop, app state (current edit, selected shot, mode), panel layout (timeline left, transcript right, sources bottom-left, status bottom). Feature-gated behind --features tui. Implements REQ-038.",
+      "token_cost": 74,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T05:34:12Z"
+  "constructed_at": "2026-02-19T05:40:53Z"
 }

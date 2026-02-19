@@ -1,4 +1,6 @@
 mod cli;
+#[cfg(feature = "tui")]
+mod tui;
 
 use std::path::PathBuf;
 use std::process;
@@ -99,7 +101,18 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         Commands::Schema { command } => match command {
             SchemaCommand::Edit => todo!("schema edit"),
         },
-        Commands::Tui => todo!("tui"),
+        Commands::Tui => {
+            #[cfg(feature = "tui")]
+            {
+                tui::run(PathBuf::from("."))
+            }
+            #[cfg(not(feature = "tui"))]
+            {
+                anyhow::bail!(
+                    "TUI support is not enabled. Rebuild with: cargo build --features tui"
+                )
+            }
+        }
         Commands::Completions { shell } => {
             Cli::print_completions(*shell);
             Ok(())
