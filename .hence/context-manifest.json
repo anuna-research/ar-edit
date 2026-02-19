@@ -1,12 +1,12 @@
 {
-  "task_id": "j1-markers",
+  "task_id": "e1-detect",
   "token_budget": 8000,
-  "tokens_used": 383,
+  "tokens_used": 352,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement source marker creation per DATA-MODEL section 5: ar-edit mark <source-id> with --from-word/--to-word, --from-scene/--to-scene, or --from-ms/--to-ms range, --label <label> (select/hero/avoid/maybe/freeform), optional --note. Store in annotations/src-NNN.markers.json. Sequential marker IDs (mark-NNN). Implements REQ-049.",
-      "token_cost": 82,
+      "content": "Implement video player detection in ar-edit-core/src/playback.rs: VLC (cvlc/vlc) preferred, ffplay fallback, per ADR-003 subprocess architecture. Use which crate. Report structured error if neither found.",
+      "token_cost": 51,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T05:04:09Z"
+  "constructed_at": "2026-02-19T05:09:17Z"
 }
