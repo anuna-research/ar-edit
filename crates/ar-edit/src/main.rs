@@ -399,15 +399,17 @@ fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
 
     let is_source = args.target.starts_with("src-");
 
+    if !is_source && args.shot.is_none() {
+        // Full edit playback (REQ-022): render all shots concatenated, then play
+        return cmd_play_full(cli, &project_dir, &args.target, &player);
+    }
+
     let req = if is_source {
         // Source playback: ar-edit play <source-id> [--at/--at-word/--at-scene]
         build_source_play_request(&project_dir, &args.target, args)?
     } else {
-        // Edit playback: ar-edit play <edit-name> --shot <shot-id>
-        let shot_id = args.shot.as_deref().ok_or_else(|| {
-            anyhow::anyhow!("--shot is required when playing an edit")
-        })?;
-        build_edit_play_request(&project_dir, &args.target, shot_id)?
+        // Single-shot playback: ar-edit play <edit-name> --shot <shot-id>
+        build_edit_play_request(&project_dir, &args.target, args.shot.as_deref().unwrap())?
     };
 
     if cli.json {
@@ -436,6 +438,51 @@ fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
     }
 
     let mut child = playback::launch_player(&player, &req).map_err(|e| anyhow::anyhow!("{e}"))?;
+    child.wait()?;
+
+    Ok(())
+}
+
+/// Full edit playback: render a preview of all shots concatenated, then launch player.
+fn cmd_play_full(
+    cli: &Cli,
+    project_dir: &PathBuf,
+    edit_name: &str,
+    player: &playback::Player,
+) -> anyhow::Result<()> {
+    let path = edit_path(edit_name);
+    let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let shot_count = doc.snapshot.shots.len();
+    if !cli.json {
+        println!("Rendering full preview of \"{edit_name}\" ({shot_count} shots)...");
+    }
+
+    let preview_path = ar_edit_core::render::render_preview(&doc, project_dir)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let req = playback::PlayRequest {
+        file: preview_path.clone(),
+        start_ms: 0,
+        end_ms: None,
+    };
+
+    if cli.json {
+        let output = serde_json::json!({
+            "player": player.name,
+            "file": preview_path.display().to_string(),
+            "edit": edit_name,
+            "shot_count": shot_count,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!(
+            "Playing full edit preview  [{}]",
+            player.name,
+        );
+    }
+
+    let mut child = playback::launch_player(player, &req).map_err(|e| anyhow::anyhow!("{e}"))?;
     child.wait()?;
 
     Ok(())

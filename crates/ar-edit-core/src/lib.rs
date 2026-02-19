@@ -5,6 +5,7 @@ pub mod marker;
 pub mod models;
 pub mod playback;
 pub mod project;
+pub mod render;
 pub mod resolve;
 pub mod transcript;
 pub mod transcript_ops;

@@ -1,12 +1,12 @@
 {
-  "task_id": "j2-listing",
+  "task_id": "e3-full",
   "token_budget": 8000,
-  "tokens_used": 357,
+  "tokens_used": 342,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement ar-edit markers [<source-id>] [--label <filter>]: list markers showing marker ID, source, label, note, resolved time range, transcript/scene text at that range. --json support per CON-003 patterns. Implements REQ-050.",
-      "token_cost": 56,
+      "content": "Render lightweight preview of full edit by concatenating all shots via ffmpeg, then launch player. This is the primary review mode. Per CON-006. Implements REQ-022.",
+      "token_cost": 41,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T07:12:32Z"
+  "constructed_at": "2026-02-19T07:19:05Z"
 }
