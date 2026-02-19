@@ -1,12 +1,12 @@
 {
-  "task_id": "h3-transcript",
+  "task_id": "b3-ingest",
   "token_budget": 8000,
-  "tokens_used": 357,
+  "tokens_used": 370,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement transcript/description panel in ar-edit/src/tui/panels/transcript.rs: full transcript for selected source, word/scene range of selected shot highlighted. Scrollable, auto-scrolls to selected range. Implements REQ-040.",
-      "token_cost": 56,
+      "content": "Parse whisper.cpp JSON into internal Transcript format per DATA-MODEL section 2. Filter word tokens (strip [BLANK], [SOT] etc.), assign sequential global word indices across segments, convert timestamps to integer milliseconds, preserve segment boundaries. Implements REQ-005.",
+      "token_cost": 69,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T06:36:38Z"
+  "constructed_at": "2026-02-19T06:47:22Z"
 }

@@ -36,6 +36,8 @@ pub enum TranscriptError {
         path: PathBuf,
         source: serde_json::Error,
     },
+    #[error("failed to parse whisper JSON: {0}")]
+    WhisperJsonParse(serde_json::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -208,7 +210,14 @@ pub fn invoke_whisper(
         .unwrap_or("unknown")
         .to_string();
 
-    let transcript = parse_whisper_json(&json_path, source_id, &model_name)?;
+    let data = std::fs::read_to_string(&json_path)?;
+    let transcript = parse_whisper_json(&data, source_id, &model_name).map_err(|e| match e {
+        TranscriptError::WhisperJsonParse(source) => TranscriptError::WhisperOutputParse {
+            path: json_path.clone(),
+            source,
+        },
+        other => other,
+    })?;
 
     // Clean up the intermediate whisper JSON file
     let _ = std::fs::remove_file(&json_path);
@@ -265,21 +274,26 @@ struct WhisperTokenBlock {
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers
+// Ingest (REQ-005)
 // ---------------------------------------------------------------------------
 
-/// Parse whisper.cpp JSON output into our Transcript model.
-fn parse_whisper_json(
-    json_path: &Path,
+/// Parse whisper.cpp JSON output into our internal [`Transcript`] model (REQ-005).
+///
+/// This is the core ingest function. It:
+/// 1. Filters word tokens only (strips special tokens like `[BLANK]`, `[SOT]`, etc.)
+/// 2. Assigns sequential global word indices across all segments
+/// 3. Timestamps are integer milliseconds (whisper.cpp `offsets.from` / `offsets.to`)
+/// 4. Preserves segment boundaries from whisper.cpp output
+///
+/// The `json` parameter should contain the raw JSON string produced by
+/// `whisper-cli --output-json`.
+pub fn parse_whisper_json(
+    json: &str,
     source_id: &str,
     model: &str,
 ) -> Result<Transcript, TranscriptError> {
-    let data = std::fs::read_to_string(json_path)?;
     let whisper: WhisperJson =
-        serde_json::from_str(&data).map_err(|e| TranscriptError::WhisperOutputParse {
-            path: json_path.to_path_buf(),
-            source: e,
-        })?;
+        serde_json::from_str(json).map_err(TranscriptError::WhisperJsonParse)?;
 
     let mut segments = Vec::new();
     let mut global_word_index: u32 = 0;
@@ -327,7 +341,12 @@ fn parse_whisper_json(
 }
 
 /// Returns true if a whisper token represents an actual word (not a special token).
-fn is_word_token(text: &str) -> bool {
+///
+/// Rejects:
+/// - Empty or whitespace-only strings
+/// - Bracket tokens like `[_BEG_]`, `[_SOT_]`, `[_EOT_]`, `[BLANK]`
+/// - Angle-bracket tokens like `<|0.00|>`, `<|endoftext|>`
+pub fn is_word_token(text: &str) -> bool {
     let trimmed = text.trim();
     !trimmed.is_empty()
         && !trimmed.starts_with('[')
@@ -494,11 +513,7 @@ whisper_print_progress_callback: progress =  50%";
             ]
         }"#;
 
-        let tmp = tempfile::tempdir().unwrap();
-        let json_path = tmp.path().join("audio.wav.json");
-        std::fs::write(&json_path, json).unwrap();
-
-        let transcript = parse_whisper_json(&json_path, "src-001", "base").unwrap();
+        let transcript = parse_whisper_json(json, "src-001", "base").unwrap();
 
         assert_eq!(transcript.source_id, "src-001");
         assert_eq!(transcript.model, "base");
@@ -558,11 +573,7 @@ whisper_print_progress_callback: progress =  50%";
             ]
         }"#;
 
-        let tmp = tempfile::tempdir().unwrap();
-        let json_path = tmp.path().join("audio.wav.json");
-        std::fs::write(&json_path, json).unwrap();
-
-        let transcript = parse_whisper_json(&json_path, "src-001", "base").unwrap();
+        let transcript = parse_whisper_json(json, "src-001", "base").unwrap();
         assert_eq!(transcript.word_count, 2);
         assert_eq!(transcript.segments[0].words.len(), 2);
         assert_eq!(transcript.segments[0].words[0].text, "Hello");
@@ -593,18 +604,14 @@ whisper_print_progress_callback: progress =  50%";
             ]
         }"#;
 
-        let tmp = tempfile::tempdir().unwrap();
-        let json_path = tmp.path().join("audio.wav.json");
-        std::fs::write(&json_path, json).unwrap();
-
-        let transcript = parse_whisper_json(&json_path, "src-002", "small").unwrap();
+        let transcript = parse_whisper_json(json, "src-002", "small").unwrap();
 
         assert_eq!(transcript.model, "small");
         assert_eq!(transcript.duration_ms, 10000);
         assert_eq!(transcript.word_count, 4);
         assert_eq!(transcript.segments.len(), 2);
 
-        // Word indices are globally sequential
+        // Word indices are globally sequential across segments
         assert_eq!(transcript.segments[0].words[0].index, 0);
         assert_eq!(transcript.segments[0].words[1].index, 1);
         assert_eq!(transcript.segments[1].words[0].index, 2);
@@ -627,16 +634,179 @@ whisper_print_progress_callback: progress =  50%";
             ]
         }"#;
 
-        let tmp = tempfile::tempdir().unwrap();
-        let json_path = tmp.path().join("audio.wav.json");
-        std::fs::write(&json_path, json).unwrap();
-
-        let transcript = parse_whisper_json(&json_path, "src-001", "base").unwrap();
+        let transcript = parse_whisper_json(json, "src-001", "base").unwrap();
 
         assert_eq!(transcript.segments.len(), 1);
         assert_eq!(transcript.word_count, 0);
         assert!(transcript.segments[0].words.is_empty());
         assert_eq!(transcript.segments[0].text, "No token data available");
+    }
+
+    #[test]
+    fn parse_whisper_json_empty_transcription() {
+        let json = r#"{
+            "result": { "language": "en" },
+            "transcription": []
+        }"#;
+
+        let transcript = parse_whisper_json(json, "src-001", "base").unwrap();
+
+        assert_eq!(transcript.segments.len(), 0);
+        assert_eq!(transcript.word_count, 0);
+        assert_eq!(transcript.duration_ms, 0);
+    }
+
+    #[test]
+    fn parse_whisper_json_segment_with_only_special_tokens() {
+        let json = r#"{
+            "result": { "language": "en" },
+            "transcription": [
+                {
+                    "offsets": { "from": 0, "to": 2000 },
+                    "text": "",
+                    "tokens": [
+                        { "text": "[_BEG_]", "offsets": { "from": 0, "to": 0 }, "p": 0.0 },
+                        { "text": "[_SOT_]", "offsets": { "from": 0, "to": 0 }, "p": 0.0 },
+                        { "text": "<|0.00|>", "offsets": { "from": 0, "to": 0 }, "p": 0.0 },
+                        { "text": "<|endoftext|>", "offsets": { "from": 2000, "to": 2000 }, "p": 0.0 }
+                    ]
+                },
+                {
+                    "offsets": { "from": 2000, "to": 5000 },
+                    "text": " Real words here",
+                    "tokens": [
+                        { "text": " Real", "offsets": { "from": 2000, "to": 3000 }, "p": 0.85 },
+                        { "text": " words", "offsets": { "from": 3000, "to": 4000 }, "p": 0.90 },
+                        { "text": " here", "offsets": { "from": 4000, "to": 5000 }, "p": 0.88 }
+                    ]
+                }
+            ]
+        }"#;
+
+        let transcript = parse_whisper_json(json, "src-001", "base").unwrap();
+
+        assert_eq!(transcript.segments.len(), 2);
+        assert_eq!(transcript.word_count, 3);
+
+        // First segment has no words after filtering
+        assert!(transcript.segments[0].words.is_empty());
+
+        // Second segment words start at global index 0 (no words in first segment)
+        assert_eq!(transcript.segments[1].words[0].index, 0);
+        assert_eq!(transcript.segments[1].words[0].text, "Real");
+        assert_eq!(transcript.segments[1].words[2].index, 2);
+    }
+
+    #[test]
+    fn parse_whisper_json_trims_whitespace_from_words() {
+        let json = r#"{
+            "result": { "language": "en" },
+            "transcription": [
+                {
+                    "offsets": { "from": 0, "to": 3000 },
+                    "text": " Hello world",
+                    "tokens": [
+                        { "text": " Hello", "offsets": { "from": 0, "to": 1500 }, "p": 0.90 },
+                        { "text": "  world ", "offsets": { "from": 1500, "to": 3000 }, "p": 0.88 }
+                    ]
+                }
+            ]
+        }"#;
+
+        let transcript = parse_whisper_json(json, "src-001", "base").unwrap();
+
+        assert_eq!(transcript.segments[0].words[0].text, "Hello");
+        assert_eq!(transcript.segments[0].words[1].text, "world");
+    }
+
+    #[test]
+    fn parse_whisper_json_preserves_confidence() {
+        let json = r#"{
+            "result": { "language": "fr" },
+            "transcription": [
+                {
+                    "offsets": { "from": 0, "to": 2000 },
+                    "text": " Bonjour monde",
+                    "tokens": [
+                        { "text": " Bonjour", "offsets": { "from": 0, "to": 1000 }, "p": 0.42 },
+                        { "text": " monde", "offsets": { "from": 1000, "to": 2000 }, "p": 0.99 }
+                    ]
+                }
+            ]
+        }"#;
+
+        let transcript = parse_whisper_json(json, "src-003", "large").unwrap();
+
+        assert_eq!(transcript.language, "fr");
+        assert_eq!(transcript.model, "large");
+        assert_eq!(transcript.segments[0].words[0].confidence, 0.42);
+        assert_eq!(transcript.segments[0].words[1].confidence, 0.99);
+    }
+
+    #[test]
+    fn parse_whisper_json_invalid_json() {
+        let result = parse_whisper_json("not valid json", "src-001", "base");
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("parse whisper JSON"));
+    }
+
+    #[test]
+    fn parse_whisper_json_duration_from_max_segment() {
+        let json = r#"{
+            "result": { "language": "en" },
+            "transcription": [
+                {
+                    "offsets": { "from": 0, "to": 5000 },
+                    "text": " A",
+                    "tokens": [
+                        { "text": " A", "offsets": { "from": 0, "to": 5000 }, "p": 0.9 }
+                    ]
+                },
+                {
+                    "offsets": { "from": 5000, "to": 15000 },
+                    "text": " B",
+                    "tokens": [
+                        { "text": " B", "offsets": { "from": 5000, "to": 15000 }, "p": 0.9 }
+                    ]
+                },
+                {
+                    "offsets": { "from": 15000, "to": 12000 },
+                    "text": " C",
+                    "tokens": [
+                        { "text": " C", "offsets": { "from": 15000, "to": 12000 }, "p": 0.9 }
+                    ]
+                }
+            ]
+        }"#;
+
+        let transcript = parse_whisper_json(json, "src-001", "base").unwrap();
+        // duration_ms should be the max segment end time (15000)
+        assert_eq!(transcript.duration_ms, 15000);
+    }
+
+    #[test]
+    fn parse_whisper_json_transcript_roundtrips_as_serde() {
+        let json = r#"{
+            "result": { "language": "en" },
+            "transcription": [
+                {
+                    "offsets": { "from": 0, "to": 5000 },
+                    "text": " Hello world",
+                    "tokens": [
+                        { "text": " Hello", "offsets": { "from": 0, "to": 2500 }, "p": 0.95 },
+                        { "text": " world", "offsets": { "from": 2500, "to": 5000 }, "p": 0.90 }
+                    ]
+                }
+            ]
+        }"#;
+
+        let transcript = parse_whisper_json(json, "src-001", "base").unwrap();
+
+        // Serialize to JSON and deserialize back — round-trip fidelity
+        let serialized = serde_json::to_string(&transcript).unwrap();
+        let deserialized: crate::models::Transcript = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(transcript, deserialized);
     }
 
     // -- invoke_whisper (error paths) -----------------------------------------
