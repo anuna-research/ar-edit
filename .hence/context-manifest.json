@@ -1,12 +1,12 @@
 {
-  "task_id": "g1-export",
+  "task_id": "f1-extract",
   "token_budget": 8000,
-  "tokens_used": 365,
+  "tokens_used": 359,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement ar-edit transcripts export --format editable per DATA-MODEL section 6: generate annotated markdown with segment-level HTML comment annotations <!-- ar-edit:src-NNN:wX-wY -->. Default to compact segment-level format. Per CON-003. Implements REQ-020.",
-      "token_cost": 64,
+      "content": "Implement ffmpeg segment extraction in ar-edit-core/src/render.rs per ADR-003: ffmpeg -i <source> -ss <start> -to <end> -c copy <segment.mp4> for each shot. Resolve ranges to timestamps first. Temp files in a render working directory.",
+      "token_cost": 58,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T08:32:25Z"
+  "constructed_at": "2026-02-19T08:38:59Z"
 }
