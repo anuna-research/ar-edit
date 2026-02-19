@@ -1,10 +1,11 @@
+mod input;
 mod panels;
 
 use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -13,7 +14,8 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
 use ar_edit_core::display::{self, ResolvedShot};
-use ar_edit_core::models::{EditDocument, Source};
+use ar_edit_core::models::{EditDocument, ShotRange, Source};
+use ar_edit_core::playback;
 
 // ---------------------------------------------------------------------------
 // App mode
@@ -23,6 +25,23 @@ use ar_edit_core::models::{EditDocument, Source};
 pub enum Mode {
     Normal,
     Command,
+    Prompt,
+    Search,
+}
+
+// ---------------------------------------------------------------------------
+// Prompt action — what to do when a prompt is submitted
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub enum PromptAction {
+    AddShotSource,
+    AddShotRange { source: String },
+    TrimShot,
+    NoteInput,
+    MarkerSource,
+    MarkerRange { source: String },
+    MarkerLabel { source: String, range: ShotRange },
 }
 
 // ---------------------------------------------------------------------------
@@ -38,6 +57,11 @@ pub struct App {
     pub project_dir: PathBuf,
     pub status_message: String,
     pub should_quit: bool,
+    pub edit_path: Option<PathBuf>,
+    pub prompt_label: String,
+    pub prompt_buffer: String,
+    pub prompt_action: Option<PromptAction>,
+    pub pending_play: Option<playback::PlayRequest>,
 }
 
 impl App {
@@ -52,8 +76,13 @@ impl App {
             selected_shot,
             mode: Mode::Normal,
             project_dir,
-            status_message: String::from("Press q to quit, j/k to navigate"),
+            status_message: input::default_status(),
             should_quit: false,
+            edit_path: None,
+            prompt_label: String::new(),
+            prompt_buffer: String::new(),
+            prompt_action: None,
+            pending_play: None,
         }
     }
 
@@ -74,10 +103,12 @@ impl App {
                         .is_some_and(|ext| ext == "json")
                 })
             {
+                let path = entry.path();
                 let doc =
-                    EditDocument::load(&entry.path()).map_err(|e| anyhow::anyhow!("{e}"))?;
+                    EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
                 self.status_message = format!("Loaded edit: {}", doc.name);
                 self.edit = Some(doc);
+                self.edit_path = Some(path);
                 self.resolve_shots();
             }
         }
@@ -89,7 +120,7 @@ impl App {
     ///
     /// Uses `display::resolve_edit` to get duration and text previews. Falls
     /// back to basic shot data if resolution fails (e.g. missing transcripts).
-    fn resolve_shots(&mut self) {
+    pub(crate) fn resolve_shots(&mut self) {
         self.resolved_shots = match &self.edit {
             Some(doc) => match display::resolve_edit(doc, &self.project_dir) {
                 Ok(resolved) => resolved,
@@ -99,11 +130,11 @@ impl App {
         };
     }
 
-    fn shot_count(&self) -> usize {
+    pub(crate) fn shot_count(&self) -> usize {
         self.resolved_shots.len()
     }
 
-    fn select_next(&mut self) {
+    pub(crate) fn select_next(&mut self) {
         let count = self.shot_count();
         if count == 0 {
             return;
@@ -112,14 +143,19 @@ impl App {
         self.selected_shot.select(Some((i + 1).min(count - 1)));
     }
 
-    fn select_previous(&mut self) {
+    pub(crate) fn select_previous(&mut self) {
         let i = self.selected_shot.selected().unwrap_or(0);
         self.selected_shot.select(Some(i.saturating_sub(1)));
     }
 
-    fn selected_resolved_shot(&self) -> Option<&ResolvedShot> {
+    pub(crate) fn selected_resolved_shot(&self) -> Option<&ResolvedShot> {
         let idx = self.selected_shot.selected()?;
         self.resolved_shots.get(idx)
+    }
+
+    pub(crate) fn selected_shot_id(&self) -> Option<String> {
+        let idx = self.selected_shot.selected()?;
+        self.resolved_shots.get(idx).map(|s| s.id.clone())
     }
 }
 
@@ -181,7 +217,7 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
         let timeout = TICK_RATE.saturating_sub(last_tick.elapsed());
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                handle_key(app, key);
+                input::handle_key(app, key);
             }
         }
 
@@ -189,41 +225,31 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
             last_tick = Instant::now();
         }
 
+        // Handle pending play: leave TUI, launch player, re-enter TUI.
+        if let Some(req) = app.pending_play.take() {
+            match playback::detect_player() {
+                Ok(player) => {
+                    restore_terminal(terminal)?;
+                    match playback::launch_player(&player, &req) {
+                        Ok(mut child) => {
+                            let _ = child.wait();
+                        }
+                        Err(e) => {
+                            app.status_message = format!("Play failed: {e}");
+                        }
+                    }
+                    *terminal = setup_terminal()?;
+                }
+                Err(_) => {
+                    app.status_message =
+                        "No video player found (install VLC or ffplay)".into();
+                }
+            }
+        }
+
         if app.should_quit {
             return Ok(());
         }
-    }
-}
-
-fn handle_key(app: &mut App, key: KeyEvent) {
-    // Ctrl-C always quits
-    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-        app.should_quit = true;
-        return;
-    }
-
-    match app.mode {
-        Mode::Normal => match key.code {
-            KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Char('j') | KeyCode::Down => app.select_next(),
-            KeyCode::Char('k') | KeyCode::Up => app.select_previous(),
-            KeyCode::Char(':') => {
-                app.mode = Mode::Command;
-                app.status_message = String::from(":");
-            }
-            _ => {}
-        },
-        Mode::Command => match key.code {
-            KeyCode::Esc => {
-                app.mode = Mode::Normal;
-                app.status_message = String::from("Press q to quit, j/k to navigate");
-            }
-            KeyCode::Enter => {
-                app.mode = Mode::Normal;
-                app.status_message = String::from("Press q to quit, j/k to navigate");
-            }
-            _ => {}
-        },
     }
 }
 
@@ -343,6 +369,8 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let mode_label = match app.mode {
         Mode::Normal => "NORMAL",
         Mode::Command => "COMMAND",
+        Mode::Prompt => "PROMPT",
+        Mode::Search => "SEARCH",
     };
 
     let edit_label = app
