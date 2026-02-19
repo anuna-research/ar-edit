@@ -291,6 +291,81 @@ fn truncate_preview(s: &str, max: usize) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Interleaved transcript + markers (REQ-052)
+// ---------------------------------------------------------------------------
+
+/// An item in an interleaved transcript+markers stream.
+///
+/// Used by `transcripts read --json --with-markers` to produce a
+/// single chronological sequence that agents can consume directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum TranscriptItem {
+    Segment(TranscriptSegment),
+    Marker(ResolvedMarker),
+}
+
+impl TranscriptItem {
+    fn start_ms(&self) -> u64 {
+        match self {
+            TranscriptItem::Segment(s) => s.start_ms,
+            TranscriptItem::Marker(m) => m.start_ms,
+        }
+    }
+}
+
+/// A transcript with markers interleaved at their timestamp positions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterleavedTranscript {
+    pub source_id: String,
+    pub duration_ms: u64,
+    pub word_count: u32,
+    pub marker_count: usize,
+    pub items: Vec<TranscriptItem>,
+}
+
+/// Build an interleaved transcript: segments and resolved markers merged
+/// into a single list sorted by `start_ms`.
+///
+/// Markers are resolved against the transcript and source index on disk,
+/// then spliced between (or among) the transcript segments in chronological
+/// order. When a marker and a segment share the same `start_ms`, the
+/// segment appears first.
+pub fn interleave_transcript_with_markers(
+    transcript: &Transcript,
+    markers: &[ResolvedMarker],
+) -> InterleavedTranscript {
+    let mut items: Vec<TranscriptItem> = Vec::with_capacity(
+        transcript.segments.len() + markers.len(),
+    );
+
+    for seg in &transcript.segments {
+        items.push(TranscriptItem::Segment(seg.clone()));
+    }
+
+    for marker in markers {
+        items.push(TranscriptItem::Marker(marker.clone()));
+    }
+
+    // Stable sort: segments before markers when start_ms ties.
+    items.sort_by_key(|item| {
+        let tie_break = match item {
+            TranscriptItem::Segment(_) => 0u8,
+            TranscriptItem::Marker(_) => 1u8,
+        };
+        (item.start_ms(), tie_break)
+    });
+
+    InterleavedTranscript {
+        source_id: transcript.source_id.clone(),
+        duration_ms: transcript.duration_ms,
+        word_count: transcript.word_count,
+        marker_count: markers.len(),
+        items,
+    }
+}
+
 /// Format milliseconds as `MM:SS.sss`.
 pub fn format_time(ms: u64) -> String {
     let total_secs = ms / 1000;
@@ -614,5 +689,122 @@ mod tests {
             resolved[1].text_preview.as_deref(),
             Some("Today we discuss climate")
         );
+    }
+
+    // -- interleave_transcript_with_markers -----------------------------------
+
+    fn make_resolved_marker(id: &str, label: &str, start_ms: u64, end_ms: u64) -> ResolvedMarker {
+        ResolvedMarker {
+            id: id.into(),
+            source_id: "src-001".into(),
+            range: ShotRange::Time { from_ms: start_ms, to_ms: end_ms },
+            label: label.into(),
+            note: None,
+            created: "2026-02-19T14:00:00Z".parse().unwrap(),
+            start_ms,
+            end_ms,
+            duration_ms: end_ms.saturating_sub(start_ms),
+            text_preview: None,
+            scene_preview: None,
+        }
+    }
+
+    #[test]
+    fn interleave_no_markers() {
+        let t = make_transcript();
+        let result = interleave_transcript_with_markers(&t, &[]);
+        assert_eq!(result.source_id, "src-001");
+        assert_eq!(result.word_count, 8);
+        assert_eq!(result.marker_count, 0);
+        assert_eq!(result.items.len(), 2); // 2 segments
+        assert!(matches!(&result.items[0], TranscriptItem::Segment(s) if s.index == 0));
+        assert!(matches!(&result.items[1], TranscriptItem::Segment(s) if s.index == 1));
+    }
+
+    #[test]
+    fn interleave_marker_between_segments() {
+        let t = make_transcript();
+        let markers = vec![
+            make_resolved_marker("mark-001", "select", 3000, 4000),
+        ];
+        let result = interleave_transcript_with_markers(&t, &markers);
+        assert_eq!(result.items.len(), 3);
+        assert_eq!(result.marker_count, 1);
+        // seg 0 (0ms), marker (3000ms), seg 1 (5230ms)
+        assert!(matches!(&result.items[0], TranscriptItem::Segment(s) if s.index == 0));
+        assert!(matches!(&result.items[1], TranscriptItem::Marker(m) if m.id == "mark-001"));
+        assert!(matches!(&result.items[2], TranscriptItem::Segment(s) if s.index == 1));
+    }
+
+    #[test]
+    fn interleave_marker_at_segment_start() {
+        let t = make_transcript();
+        // Marker at same start_ms as segment 0 — segment should come first
+        let markers = vec![
+            make_resolved_marker("mark-001", "review", 0, 500),
+        ];
+        let result = interleave_transcript_with_markers(&t, &markers);
+        assert_eq!(result.items.len(), 3);
+        assert!(matches!(&result.items[0], TranscriptItem::Segment(s) if s.index == 0));
+        assert!(matches!(&result.items[1], TranscriptItem::Marker(m) if m.id == "mark-001"));
+    }
+
+    #[test]
+    fn interleave_multiple_markers() {
+        let t = make_transcript();
+        let markers = vec![
+            make_resolved_marker("mark-001", "select", 400, 1200),
+            make_resolved_marker("mark-002", "avoid", 6000, 6800),
+        ];
+        let result = interleave_transcript_with_markers(&t, &markers);
+        assert_eq!(result.items.len(), 4);
+        assert_eq!(result.marker_count, 2);
+        // seg 0 (0ms), mark-001 (400ms), seg 1 (5230ms), mark-002 (6000ms)
+        assert!(matches!(&result.items[0], TranscriptItem::Segment(s) if s.index == 0));
+        assert!(matches!(&result.items[1], TranscriptItem::Marker(m) if m.id == "mark-001"));
+        assert!(matches!(&result.items[2], TranscriptItem::Segment(s) if s.index == 1));
+        assert!(matches!(&result.items[3], TranscriptItem::Marker(m) if m.id == "mark-002"));
+    }
+
+    #[test]
+    fn interleave_marker_after_all_segments() {
+        let t = make_transcript();
+        let markers = vec![
+            make_resolved_marker("mark-001", "note", 100000, 110000),
+        ];
+        let result = interleave_transcript_with_markers(&t, &markers);
+        assert_eq!(result.items.len(), 3);
+        assert!(matches!(&result.items[2], TranscriptItem::Marker(m) if m.id == "mark-001"));
+    }
+
+    #[test]
+    fn interleave_preserves_transcript_metadata() {
+        let t = make_transcript();
+        let markers = vec![
+            make_resolved_marker("mark-001", "select", 1000, 2000),
+        ];
+        let result = interleave_transcript_with_markers(&t, &markers);
+        assert_eq!(result.source_id, "src-001");
+        assert_eq!(result.duration_ms, 124500);
+        assert_eq!(result.word_count, 8);
+    }
+
+    #[test]
+    fn interleave_serialization_roundtrip() {
+        let t = make_transcript();
+        let markers = vec![
+            make_resolved_marker("mark-001", "select", 3000, 4000),
+        ];
+        let result = interleave_transcript_with_markers(&t, &markers);
+        let json = serde_json::to_value(&result).unwrap();
+
+        // Verify tagged union serialization
+        assert_eq!(json["items"][0]["type"], "segment");
+        assert_eq!(json["items"][1]["type"], "marker");
+        assert_eq!(json["items"][2]["type"], "segment");
+        assert_eq!(json["marker_count"], 1);
+
+        let back: InterleavedTranscript = serde_json::from_value(json).unwrap();
+        assert_eq!(back.items.len(), 3);
     }
 }

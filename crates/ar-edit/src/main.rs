@@ -50,7 +50,9 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         }
         Commands::Transcripts { command } => match command {
             TranscriptsCommand::List => cmd_transcripts_list(cli),
-            TranscriptsCommand::Read { source_id } => cmd_transcripts_read(cli, source_id),
+            TranscriptsCommand::Read { source_id, with_markers } => {
+                cmd_transcripts_read(cli, source_id, *with_markers)
+            }
             TranscriptsCommand::Search { query, source } => {
                 cmd_transcripts_search(cli, query, source.as_deref())
             }
@@ -248,12 +250,55 @@ fn cmd_transcripts_list(cli: &Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_transcripts_read(cli: &Cli, source_id: &str) -> anyhow::Result<()> {
+fn cmd_transcripts_read(cli: &Cli, source_id: &str, with_markers: bool) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
     let transcript = ar_edit_core::transcript_ops::read(&project_dir, source_id)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    if cli.json {
+    if with_markers {
+        // Load and resolve markers for this source
+        let source_markers = ar_edit_core::marker::list_markers(&project_dir, source_id)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let resolved = ar_edit_core::display::resolve_markers(
+            &source_markers.markers,
+            source_id,
+            &project_dir,
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        let interleaved =
+            ar_edit_core::display::interleave_transcript_with_markers(&transcript, &resolved);
+
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&interleaved)?);
+        } else {
+            for item in &interleaved.items {
+                match item {
+                    ar_edit_core::display::TranscriptItem::Segment(seg) => {
+                        println!("{}", seg.text);
+                        println!();
+                    }
+                    ar_edit_core::display::TranscriptItem::Marker(m) => {
+                        let time_range = format!(
+                            "{}-{}",
+                            ar_edit_core::display::format_time(m.start_ms),
+                            ar_edit_core::display::format_time(m.end_ms),
+                        );
+                        let note_part = m
+                            .note
+                            .as_deref()
+                            .map(|n| format!(" \"{n}\""))
+                            .unwrap_or_default();
+                        println!(
+                            "  [{} {}] [{}]{}",
+                            m.id, m.label, time_range, note_part
+                        );
+                        println!();
+                    }
+                }
+            }
+        }
+    } else if cli.json {
         println!("{}", serde_json::to_string_pretty(&transcript)?);
     } else {
         for seg in &transcript.segments {
