@@ -38,6 +38,12 @@ pub enum TranscriptError {
     },
     #[error("failed to parse whisper JSON: {0}")]
     WhisperJsonParse(serde_json::Error),
+    #[error("unsupported import format: {0}")]
+    UnsupportedFormat(String),
+    #[error("invalid SRT: {0}")]
+    InvalidSrt(String),
+    #[error("invalid VTT: {0}")]
+    InvalidVtt(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -352,6 +358,363 @@ pub fn is_word_token(text: &str) -> bool {
         && !trimmed.starts_with('[')
         && !trimmed.starts_with("<|")
         && !trimmed.ends_with("|>")
+}
+
+// ---------------------------------------------------------------------------
+// Import (REQ-007)
+// ---------------------------------------------------------------------------
+
+/// Import a transcript from an external file (SRT, VTT, or whisper.cpp JSON).
+///
+/// The format is auto-detected from the file extension:
+/// - `.srt` → SubRip subtitle format
+/// - `.vtt` → WebVTT subtitle format
+/// - `.json` → whisper.cpp JSON passthrough
+///
+/// For SRT/VTT, word-level timestamps are interpolated from segment boundaries
+/// (even distribution across words within each segment), with confidence set to
+/// 1.0 since these formats carry no confidence information.
+///
+/// For whisper.cpp JSON, word-level timestamps and confidence values are
+/// preserved directly via [`parse_whisper_json`].
+pub fn import_transcript(
+    path: &Path,
+    source_id: &str,
+) -> Result<Transcript, TranscriptError> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let content = std::fs::read_to_string(path)?;
+
+    match ext.as_str() {
+        "srt" => parse_srt(&content, source_id),
+        "vtt" => parse_vtt(&content, source_id),
+        "json" => parse_whisper_json(&content, source_id, "imported"),
+        _ => Err(TranscriptError::UnsupportedFormat(ext)),
+    }
+}
+
+/// Parse an SRT (SubRip) subtitle file into a [`Transcript`].
+///
+/// SRT format:
+/// ```text
+/// 1
+/// 00:00:00,000 --> 00:00:05,230
+/// Welcome to the interview
+///
+/// 2
+/// 00:00:05,230 --> 00:00:11,800
+/// This is the second segment
+/// ```
+///
+/// Timestamps use comma as the millisecond separator: `HH:MM:SS,mmm`.
+/// Words within each segment receive evenly interpolated timestamps.
+pub fn parse_srt(content: &str, source_id: &str) -> Result<Transcript, TranscriptError> {
+    let blocks = split_subtitle_blocks(content);
+    let mut segments = Vec::new();
+    let mut global_word_index: u32 = 0;
+    let mut duration_ms: u64 = 0;
+
+    for (seg_idx, block) in blocks.iter().enumerate() {
+        let lines: Vec<&str> = block.lines().collect();
+
+        // Find the timestamp line (contains "-->")
+        let ts_line_idx = lines
+            .iter()
+            .position(|l| l.contains("-->"))
+            .ok_or_else(|| {
+                TranscriptError::InvalidSrt(format!("block {} has no timestamp line", seg_idx + 1))
+            })?;
+
+        let (start_ms, end_ms) = parse_srt_timestamp_line(lines[ts_line_idx])?;
+
+        // Text is everything after the timestamp line
+        let text: String = lines[ts_line_idx + 1..]
+            .iter()
+            .copied()
+            .collect::<Vec<&str>>()
+            .join(" ");
+        let text = text.trim().to_string();
+
+        if end_ms > duration_ms {
+            duration_ms = end_ms;
+        }
+
+        let words = interpolate_words(&text, start_ms, end_ms, &mut global_word_index);
+
+        segments.push(TranscriptSegment {
+            index: seg_idx as u32,
+            start_ms,
+            end_ms,
+            text,
+            words,
+        });
+    }
+
+    Ok(Transcript {
+        source_id: source_id.to_string(),
+        model: "imported".to_string(),
+        language: "und".to_string(),
+        duration_ms,
+        word_count: global_word_index,
+        segments,
+    })
+}
+
+/// Parse a WebVTT subtitle file into a [`Transcript`].
+///
+/// VTT format:
+/// ```text
+/// WEBVTT
+///
+/// 00:00:00.000 --> 00:00:05.230
+/// Welcome to the interview
+///
+/// 00:00:05.230 --> 00:00:11.800
+/// This is the second segment
+/// ```
+///
+/// Timestamps use period as the millisecond separator: `HH:MM:SS.mmm`.
+/// Optional cue identifiers and NOTE blocks are ignored.
+pub fn parse_vtt(content: &str, source_id: &str) -> Result<Transcript, TranscriptError> {
+    // Validate WEBVTT header
+    let trimmed = content.trim_start_matches('\u{feff}'); // strip BOM
+    if !trimmed.starts_with("WEBVTT") {
+        return Err(TranscriptError::InvalidVtt(
+            "missing WEBVTT header".to_string(),
+        ));
+    }
+
+    // Skip the header line(s) and any metadata before the first blank line
+    let body = trimmed
+        .splitn(2, "\n\n")
+        .nth(1)
+        .or_else(|| trimmed.splitn(2, "\r\n\r\n").nth(1))
+        .unwrap_or("");
+
+    let blocks = split_subtitle_blocks(body);
+    let mut segments = Vec::new();
+    let mut global_word_index: u32 = 0;
+    let mut duration_ms: u64 = 0;
+
+    for (seg_idx, block) in blocks.iter().enumerate() {
+        // Skip NOTE blocks
+        if block.trim_start().starts_with("NOTE") {
+            continue;
+        }
+
+        let lines: Vec<&str> = block.lines().collect();
+
+        // Find the timestamp line (contains "-->")
+        let ts_line_idx = match lines.iter().position(|l| l.contains("-->")) {
+            Some(idx) => idx,
+            None => continue, // skip blocks without timestamps (e.g. STYLE)
+        };
+
+        let (start_ms, end_ms) = parse_vtt_timestamp_line(lines[ts_line_idx])?;
+
+        // Text is everything after the timestamp line
+        let text: String = lines[ts_line_idx + 1..]
+            .iter()
+            .copied()
+            .collect::<Vec<&str>>()
+            .join(" ");
+        let text = text.trim().to_string();
+
+        if text.is_empty() {
+            continue;
+        }
+
+        if end_ms > duration_ms {
+            duration_ms = end_ms;
+        }
+
+        let words = interpolate_words(&text, start_ms, end_ms, &mut global_word_index);
+
+        segments.push(TranscriptSegment {
+            index: seg_idx as u32,
+            start_ms,
+            end_ms,
+            text,
+            words,
+        });
+    }
+
+    // Re-index segments sequentially (since we may have skipped NOTE/STYLE blocks)
+    for (i, seg) in segments.iter_mut().enumerate() {
+        seg.index = i as u32;
+    }
+
+    Ok(Transcript {
+        source_id: source_id.to_string(),
+        model: "imported".to_string(),
+        language: "und".to_string(),
+        duration_ms,
+        word_count: global_word_index,
+        segments,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Import helpers
+// ---------------------------------------------------------------------------
+
+/// Split subtitle content into blocks separated by blank lines.
+fn split_subtitle_blocks(content: &str) -> Vec<String> {
+    // Normalise line endings
+    let normalised = content.replace("\r\n", "\n").replace('\r', "\n");
+
+    normalised
+        .split("\n\n")
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty())
+        .collect()
+}
+
+/// Parse an SRT timestamp line: `00:00:00,000 --> 00:00:05,230`
+fn parse_srt_timestamp_line(line: &str) -> Result<(u64, u64), TranscriptError> {
+    let parts: Vec<&str> = line.split("-->").collect();
+    if parts.len() != 2 {
+        return Err(TranscriptError::InvalidSrt(format!(
+            "invalid timestamp line: {line}"
+        )));
+    }
+
+    let start = parse_srt_time(parts[0].trim())?;
+    let end = parse_srt_time(parts[1].trim())?;
+    Ok((start, end))
+}
+
+/// Parse an SRT time: `HH:MM:SS,mmm` → milliseconds.
+fn parse_srt_time(s: &str) -> Result<u64, TranscriptError> {
+    // Split on comma to separate seconds from milliseconds
+    let (time_part, ms_part) = s.split_once(',').ok_or_else(|| {
+        TranscriptError::InvalidSrt(format!("missing comma in timestamp: {s}"))
+    })?;
+
+    let hms: Vec<&str> = time_part.split(':').collect();
+    if hms.len() != 3 {
+        return Err(TranscriptError::InvalidSrt(format!(
+            "invalid time format: {s}"
+        )));
+    }
+
+    let h: u64 = hms[0]
+        .parse()
+        .map_err(|_| TranscriptError::InvalidSrt(format!("invalid hours: {s}")))?;
+    let m: u64 = hms[1]
+        .parse()
+        .map_err(|_| TranscriptError::InvalidSrt(format!("invalid minutes: {s}")))?;
+    let sec: u64 = hms[2]
+        .parse()
+        .map_err(|_| TranscriptError::InvalidSrt(format!("invalid seconds: {s}")))?;
+    let ms: u64 = ms_part
+        .parse()
+        .map_err(|_| TranscriptError::InvalidSrt(format!("invalid milliseconds: {s}")))?;
+
+    Ok(h * 3_600_000 + m * 60_000 + sec * 1_000 + ms)
+}
+
+/// Parse a VTT timestamp line: `00:00:00.000 --> 00:00:05.230`
+///
+/// VTT allows optional settings after the end timestamp (e.g. `position:10%`).
+fn parse_vtt_timestamp_line(line: &str) -> Result<(u64, u64), TranscriptError> {
+    let parts: Vec<&str> = line.split("-->").collect();
+    if parts.len() != 2 {
+        return Err(TranscriptError::InvalidVtt(format!(
+            "invalid timestamp line: {line}"
+        )));
+    }
+
+    let start = parse_vtt_time(parts[0].trim())?;
+    // End timestamp may have positioning settings after it; take only the time
+    let end_str = parts[1].trim().split_whitespace().next().unwrap_or("");
+    let end = parse_vtt_time(end_str)?;
+    Ok((start, end))
+}
+
+/// Parse a VTT time: `HH:MM:SS.mmm` or `MM:SS.mmm` → milliseconds.
+fn parse_vtt_time(s: &str) -> Result<u64, TranscriptError> {
+    let (time_part, ms_part) = s.split_once('.').ok_or_else(|| {
+        TranscriptError::InvalidVtt(format!("missing period in timestamp: {s}"))
+    })?;
+
+    let hms: Vec<&str> = time_part.split(':').collect();
+    let (h, m, sec) = match hms.len() {
+        3 => {
+            let h: u64 = hms[0]
+                .parse()
+                .map_err(|_| TranscriptError::InvalidVtt(format!("invalid hours: {s}")))?;
+            let m: u64 = hms[1]
+                .parse()
+                .map_err(|_| TranscriptError::InvalidVtt(format!("invalid minutes: {s}")))?;
+            let sec: u64 = hms[2]
+                .parse()
+                .map_err(|_| TranscriptError::InvalidVtt(format!("invalid seconds: {s}")))?;
+            (h, m, sec)
+        }
+        2 => {
+            let m: u64 = hms[0]
+                .parse()
+                .map_err(|_| TranscriptError::InvalidVtt(format!("invalid minutes: {s}")))?;
+            let sec: u64 = hms[1]
+                .parse()
+                .map_err(|_| TranscriptError::InvalidVtt(format!("invalid seconds: {s}")))?;
+            (0, m, sec)
+        }
+        _ => {
+            return Err(TranscriptError::InvalidVtt(format!(
+                "invalid time format: {s}"
+            )));
+        }
+    };
+
+    let ms: u64 = ms_part
+        .parse()
+        .map_err(|_| TranscriptError::InvalidVtt(format!("invalid milliseconds: {s}")))?;
+
+    Ok(h * 3_600_000 + m * 60_000 + sec * 1_000 + ms)
+}
+
+/// Generate words from segment text with evenly interpolated timestamps.
+///
+/// Words inherit the segment time range, spread evenly across the duration.
+/// Confidence is set to 1.0 since SRT/VTT have no confidence data.
+fn interpolate_words(
+    text: &str,
+    start_ms: u64,
+    end_ms: u64,
+    global_word_index: &mut u32,
+) -> Vec<Word> {
+    let word_texts: Vec<&str> = text.split_whitespace().collect();
+    let count = word_texts.len();
+
+    if count == 0 {
+        return Vec::new();
+    }
+
+    let duration = end_ms.saturating_sub(start_ms);
+
+    word_texts
+        .into_iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let word_start = start_ms + (duration * i as u64) / count as u64;
+            let word_end = start_ms + (duration * (i + 1) as u64) / count as u64;
+            let word = Word {
+                index: *global_word_index,
+                text: w.to_string(),
+                start_ms: word_start,
+                end_ms: word_end,
+                confidence: 1.0,
+            };
+            *global_word_index += 1;
+            word
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -828,5 +1191,354 @@ whisper_print_progress_callback: progress =  50%";
         let err = find_model("huge").unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("huge"));
+    }
+
+    // -- parse_srt ------------------------------------------------------------
+
+    #[test]
+    fn parse_srt_basic() {
+        let srt = "\
+1
+00:00:00,000 --> 00:00:05,230
+Welcome to the interview
+
+2
+00:00:05,230 --> 00:00:11,800
+This is the second segment";
+
+        let transcript = parse_srt(srt, "src-001").unwrap();
+
+        assert_eq!(transcript.source_id, "src-001");
+        assert_eq!(transcript.model, "imported");
+        assert_eq!(transcript.language, "und");
+        assert_eq!(transcript.duration_ms, 11800);
+        assert_eq!(transcript.segments.len(), 2);
+        assert_eq!(transcript.word_count, 9);
+
+        let seg0 = &transcript.segments[0];
+        assert_eq!(seg0.index, 0);
+        assert_eq!(seg0.start_ms, 0);
+        assert_eq!(seg0.end_ms, 5230);
+        assert_eq!(seg0.text, "Welcome to the interview");
+        assert_eq!(seg0.words.len(), 4);
+
+        // Words have interpolated timestamps
+        assert_eq!(seg0.words[0].index, 0);
+        assert_eq!(seg0.words[0].text, "Welcome");
+        assert_eq!(seg0.words[0].start_ms, 0);
+        assert_eq!(seg0.words[0].confidence, 1.0);
+
+        assert_eq!(seg0.words[3].index, 3);
+        assert_eq!(seg0.words[3].text, "interview");
+
+        let seg1 = &transcript.segments[1];
+        assert_eq!(seg1.index, 1);
+        assert_eq!(seg1.start_ms, 5230);
+        assert_eq!(seg1.end_ms, 11800);
+        assert_eq!(seg1.text, "This is the second segment");
+        assert_eq!(seg1.words.len(), 5);
+
+        // Global word indices continue from previous segment
+        assert_eq!(seg1.words[0].index, 4);
+        assert_eq!(seg1.words[4].index, 8);
+    }
+
+    #[test]
+    fn parse_srt_multiline_text() {
+        let srt = "\
+1
+00:00:00,000 --> 00:00:03,000
+First line
+Second line";
+
+        let transcript = parse_srt(srt, "src-001").unwrap();
+
+        assert_eq!(transcript.segments[0].text, "First line Second line");
+        assert_eq!(transcript.word_count, 4);
+    }
+
+    #[test]
+    fn parse_srt_invalid_no_timestamp() {
+        let srt = "1\nNo timestamp here\n";
+        let result = parse_srt(srt, "src-001");
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("no timestamp line"));
+    }
+
+    #[test]
+    fn parse_srt_invalid_timestamp_format() {
+        let srt = "1\n00:00:00.000 --> 00:00:05.230\nHello";
+        let result = parse_srt(srt, "src-001");
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("missing comma"));
+    }
+
+    #[test]
+    fn parse_srt_windows_line_endings() {
+        let srt = "1\r\n00:00:00,000 --> 00:00:05,000\r\nHello world\r\n\r\n2\r\n00:00:05,000 --> 00:00:10,000\r\nGoodbye\r\n";
+
+        let transcript = parse_srt(srt, "src-001").unwrap();
+        assert_eq!(transcript.segments.len(), 2);
+        assert_eq!(transcript.word_count, 3);
+    }
+
+    #[test]
+    fn parse_srt_with_hours() {
+        let srt = "\
+1
+01:30:00,500 --> 01:30:05,000
+Long video segment";
+
+        let transcript = parse_srt(srt, "src-001").unwrap();
+        assert_eq!(transcript.segments[0].start_ms, 5_400_500);
+        assert_eq!(transcript.segments[0].end_ms, 5_405_000);
+    }
+
+    // -- parse_vtt ------------------------------------------------------------
+
+    #[test]
+    fn parse_vtt_basic() {
+        let vtt = "\
+WEBVTT
+
+00:00:00.000 --> 00:00:05.230
+Welcome to the interview
+
+00:00:05.230 --> 00:00:11.800
+This is the second segment";
+
+        let transcript = parse_vtt(vtt, "src-001").unwrap();
+
+        assert_eq!(transcript.source_id, "src-001");
+        assert_eq!(transcript.model, "imported");
+        assert_eq!(transcript.language, "und");
+        assert_eq!(transcript.duration_ms, 11800);
+        assert_eq!(transcript.segments.len(), 2);
+        assert_eq!(transcript.word_count, 9);
+
+        assert_eq!(transcript.segments[0].text, "Welcome to the interview");
+        assert_eq!(transcript.segments[1].text, "This is the second segment");
+    }
+
+    #[test]
+    fn parse_vtt_missing_header() {
+        let vtt = "00:00:00.000 --> 00:00:05.000\nHello";
+        let result = parse_vtt(vtt, "src-001");
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("WEBVTT"));
+    }
+
+    #[test]
+    fn parse_vtt_with_cue_identifiers() {
+        let vtt = "\
+WEBVTT
+
+intro
+00:00:00.000 --> 00:00:05.000
+Hello world
+
+outro
+00:00:05.000 --> 00:00:10.000
+Goodbye";
+
+        let transcript = parse_vtt(vtt, "src-001").unwrap();
+        assert_eq!(transcript.segments.len(), 2);
+        assert_eq!(transcript.segments[0].text, "Hello world");
+        assert_eq!(transcript.segments[1].text, "Goodbye");
+    }
+
+    #[test]
+    fn parse_vtt_short_timestamps() {
+        // VTT allows MM:SS.mmm format (no hours)
+        let vtt = "\
+WEBVTT
+
+00:05.000 --> 00:10.000
+Short format";
+
+        let transcript = parse_vtt(vtt, "src-001").unwrap();
+        assert_eq!(transcript.segments[0].start_ms, 5000);
+        assert_eq!(transcript.segments[0].end_ms, 10000);
+    }
+
+    #[test]
+    fn parse_vtt_with_positioning() {
+        let vtt = "\
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000 position:10% line:0
+Hello world";
+
+        let transcript = parse_vtt(vtt, "src-001").unwrap();
+        assert_eq!(transcript.segments[0].start_ms, 0);
+        assert_eq!(transcript.segments[0].end_ms, 5000);
+        assert_eq!(transcript.segments[0].text, "Hello world");
+    }
+
+    #[test]
+    fn parse_vtt_skips_note_blocks() {
+        let vtt = "\
+WEBVTT
+
+NOTE This is a comment
+
+00:00:00.000 --> 00:00:05.000
+Hello world";
+
+        let transcript = parse_vtt(vtt, "src-001").unwrap();
+        assert_eq!(transcript.segments.len(), 1);
+        assert_eq!(transcript.segments[0].text, "Hello world");
+        assert_eq!(transcript.segments[0].index, 0);
+    }
+
+    #[test]
+    fn parse_vtt_with_bom() {
+        let vtt = "\u{feff}WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nHello";
+
+        let transcript = parse_vtt(vtt, "src-001").unwrap();
+        assert_eq!(transcript.segments.len(), 1);
+        assert_eq!(transcript.segments[0].text, "Hello");
+    }
+
+    // -- interpolate_words ----------------------------------------------------
+
+    #[test]
+    fn interpolate_words_even_distribution() {
+        let mut idx = 0;
+        let words = interpolate_words("one two three four", 0, 4000, &mut idx);
+
+        assert_eq!(words.len(), 4);
+        assert_eq!(idx, 4);
+
+        assert_eq!(words[0].start_ms, 0);
+        assert_eq!(words[0].end_ms, 1000);
+        assert_eq!(words[1].start_ms, 1000);
+        assert_eq!(words[1].end_ms, 2000);
+        assert_eq!(words[2].start_ms, 2000);
+        assert_eq!(words[2].end_ms, 3000);
+        assert_eq!(words[3].start_ms, 3000);
+        assert_eq!(words[3].end_ms, 4000);
+    }
+
+    #[test]
+    fn interpolate_words_empty_text() {
+        let mut idx = 5;
+        let words = interpolate_words("", 0, 1000, &mut idx);
+        assert!(words.is_empty());
+        assert_eq!(idx, 5);
+    }
+
+    #[test]
+    fn interpolate_words_single_word() {
+        let mut idx = 0;
+        let words = interpolate_words("hello", 100, 500, &mut idx);
+
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].start_ms, 100);
+        assert_eq!(words[0].end_ms, 500);
+        assert_eq!(words[0].confidence, 1.0);
+    }
+
+    // -- import_transcript (file-based) ---------------------------------------
+
+    #[test]
+    fn import_transcript_srt_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test.srt");
+        std::fs::write(
+            &path,
+            "1\n00:00:00,000 --> 00:00:03,000\nHello world\n",
+        )
+        .unwrap();
+
+        let transcript = import_transcript(&path, "src-001").unwrap();
+        assert_eq!(transcript.segments.len(), 1);
+        assert_eq!(transcript.word_count, 2);
+    }
+
+    #[test]
+    fn import_transcript_vtt_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test.vtt");
+        std::fs::write(
+            &path,
+            "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nHello world\n",
+        )
+        .unwrap();
+
+        let transcript = import_transcript(&path, "src-001").unwrap();
+        assert_eq!(transcript.segments.len(), 1);
+        assert_eq!(transcript.word_count, 2);
+    }
+
+    #[test]
+    fn import_transcript_json_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test.json");
+        std::fs::write(
+            &path,
+            r#"{"result":{"language":"en"},"transcription":[{"offsets":{"from":0,"to":3000},"text":" Hello world","tokens":[{"text":" Hello","offsets":{"from":0,"to":1500},"p":0.9},{"text":" world","offsets":{"from":1500,"to":3000},"p":0.85}]}]}"#,
+        )
+        .unwrap();
+
+        let transcript = import_transcript(&path, "src-001").unwrap();
+        assert_eq!(transcript.model, "imported");
+        assert_eq!(transcript.language, "en");
+        assert_eq!(transcript.word_count, 2);
+        // JSON preserves original confidence
+        assert_eq!(transcript.segments[0].words[0].confidence, 0.9);
+    }
+
+    #[test]
+    fn import_transcript_unsupported_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test.ass");
+        std::fs::write(&path, "some content").unwrap();
+
+        let result = import_transcript(&path, "src-001");
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("unsupported"));
+    }
+
+    // -- SRT/VTT round-trip through serde ------------------------------------
+
+    #[test]
+    fn srt_transcript_roundtrips_as_serde() {
+        let srt = "\
+1
+00:00:00,000 --> 00:00:05,230
+Welcome to the interview
+
+2
+00:00:05,230 --> 00:00:11,800
+This is the second segment";
+
+        let transcript = parse_srt(srt, "src-001").unwrap();
+
+        let serialized = serde_json::to_string(&transcript).unwrap();
+        let deserialized: crate::models::Transcript = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(transcript, deserialized);
+    }
+
+    #[test]
+    fn vtt_transcript_roundtrips_as_serde() {
+        let vtt = "\
+WEBVTT
+
+00:00:00.000 --> 00:00:05.230
+Welcome to the interview
+
+00:00:05.230 --> 00:00:11.800
+This is the second segment";
+
+        let transcript = parse_vtt(vtt, "src-001").unwrap();
+
+        let serialized = serde_json::to_string(&transcript).unwrap();
+        let deserialized: crate::models::Transcript = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(transcript, deserialized);
     }
 }
