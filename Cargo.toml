@@ -1,0 +1,29 @@
+[workspace]
+members = ["crates/ar-edit-core", "crates/ar-edit"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+# Shared
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+
+# Core
+thiserror = "2"
+which = "7"
+regex = "1"
+
+# Binary
+ar-edit-core = { path = "crates/ar-edit-core" }
+clap = { version = "4", features = ["derive"] }
+ratatui = "0.29"
+crossterm = "0.28"
+notify = "7"
+indicatif = "0.17"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"

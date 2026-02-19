@@ -1,0 +1,15 @@
+{
+  "task_id": "a1-workspace",
+  "token_budget": 8000,
+  "tokens_used": 64,
+  "elements_selected": [
+    {
+      "source": "plan-meta/description",
+      "content": "Set up Cargo workspace with ar-edit-core (library) and ar-edit (binary) crates. Configure workspace Cargo.toml. Core deps: serde, serde_json, chrono, thiserror, which, regex. Binary deps: clap (derive), ratatui, crossterm, notify, indicatif, tokio, anyhow.",
+      "token_cost": 64,
+      "priority": "PlanMeta"
+    }
+  ],
+  "elements_excluded": [],
+  "constructed_at": "2026-02-19T04:02:39Z"
+}
