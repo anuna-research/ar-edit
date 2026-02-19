@@ -4,24 +4,24 @@
   "exit_code": 0,
   "diff_summary": {
     "files_changed": 4,
-    "insertions": 611,
-    "deletions": 6,
+    "insertions": 1222,
+    "deletions": 7,
     "file_list": [
       ".hence/context-manifest.json",
+      "crates/ar-edit-core/src/fuzzy.rs",
       "crates/ar-edit-core/src/import.rs",
-      "crates/ar-edit-core/src/lib.rs",
-      "crates/ar-edit/src/main.rs"
+      "crates/ar-edit-core/src/lib.rs"
     ],
-    "dirty_files": 6251
+    "dirty_files": 4502
   },
   "learnings": [
     {
-      "key": "task-g2-import-changes",
-      "content": "Modified 4 files (+611, -6): .hence/context-manifest.json, crates/ar-edit-core/src/import.rs, crates/ar-edit-core/src/lib.rs, crates/ar-edit/src/main.rs",
+      "key": "task-g3-fuzzy-changes",
+      "content": "Modified 4 files (+1222, -7): .hence/context-manifest.json, crates/ar-edit-core/src/fuzzy.rs, crates/ar-edit-core/src/import.rs, crates/ar-edit-core/src/lib.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/g2-import-v1",
-  "evaluated_at": "2026-02-19T10:56:44Z"
+  "branch_name": "hence/g3-fuzzy-v1",
+  "evaluated_at": "2026-02-19T11:09:13Z"
 }
