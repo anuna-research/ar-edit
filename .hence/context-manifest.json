@@ -1,12 +1,12 @@
 {
-  "task_id": "g2-import",
+  "task_id": "g3-fuzzy",
   "token_budget": 8000,
-  "tokens_used": 373,
+  "tokens_used": 356,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement ar-edit edit from-transcript per CON-004: parse edited annotated markdown, resolve HTML comment annotations to source/word-index pairs, produce edit document with one shot per surviving annotation block. Report errors with line numbers for unresolvable text. Implements REQ-018.",
-      "token_cost": 72,
+      "content": "Handle split/merged annotation blocks via fuzzy text matching against source transcripts. When user splits a segment-level block mid-sentence, match text fragments against transcript words to find precise word boundaries.",
+      "token_cost": 55,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T10:48:00Z"
+  "constructed_at": "2026-02-19T10:58:01Z"
 }
