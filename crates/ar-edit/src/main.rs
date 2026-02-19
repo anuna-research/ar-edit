@@ -99,5 +99,9 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             SchemaCommand::Edit => todo!("schema edit"),
         },
         Commands::Tui => todo!("tui"),
+        Commands::Completions { shell } => {
+            Cli::print_completions(*shell);
+            Ok(())
+        }
     }
 }

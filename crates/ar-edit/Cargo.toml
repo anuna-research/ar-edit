@@ -13,6 +13,7 @@ notify.workspace = true
 indicatif.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
+clap_complete.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
