@@ -1,12 +1,12 @@
 {
-  "task_id": "e3-full",
+  "task_id": "j4-integrate",
   "token_budget": 8000,
-  "tokens_used": 342,
+  "tokens_used": 361,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Render lightweight preview of full edit by concatenating all shots via ffmpeg, then launch player. This is the primary review mode. Per CON-006. Implements REQ-022.",
-      "token_cost": 41,
+      "content": "Implement marker interleaving for agent consumption: ar-edit markers --json outputs markers with resolved context; ar-edit transcripts read <source-id> --json --with-markers interleaves markers at their timestamp positions. Implements REQ-052.",
+      "token_cost": 60,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T07:19:05Z"
+  "constructed_at": "2026-02-19T07:25:21Z"
 }

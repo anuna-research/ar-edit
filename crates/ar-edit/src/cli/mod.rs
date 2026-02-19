@@ -207,6 +207,10 @@ pub enum TranscriptsCommand {
     Read {
         /// Source ID
         source_id: String,
+
+        /// Interleave markers at their timestamp positions
+        #[arg(long)]
+        with_markers: bool,
     },
 
     /// Search within transcripts
@@ -573,6 +577,47 @@ mod tests {
                 assert!(args.source_id.is_none());
             }
             _ => panic!("expected Transcribe"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_transcripts_read_with_markers() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "transcripts",
+            "read",
+            "src-001",
+            "--with-markers",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Transcripts {
+                command: TranscriptsCommand::Read { ref source_id, with_markers },
+            } => {
+                assert_eq!(source_id, "src-001");
+                assert!(with_markers);
+            }
+            _ => panic!("expected Transcripts Read"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_transcripts_read_without_markers() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "transcripts",
+            "read",
+            "src-001",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Transcripts {
+                command: TranscriptsCommand::Read { ref source_id, with_markers },
+            } => {
+                assert_eq!(source_id, "src-001");
+                assert!(!with_markers);
+            }
+            _ => panic!("expected Transcripts Read"),
         }
     }
 
