@@ -1,3 +1,4 @@
+mod events;
 mod input;
 mod panels;
 
@@ -146,6 +147,31 @@ impl App {
         };
     }
 
+    /// Reload the edit document from disk (called when the watcher detects a
+    /// change).  Preserves the current shot selection when possible.
+    pub(crate) fn reload_edit(&mut self) {
+        let path = match self.edit_path.as_ref() {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        match EditDocument::load(&path) {
+            Ok(doc) => {
+                self.status_message = format!("Reloaded: {}", doc.name);
+                self.edit = Some(doc);
+                self.resolve_shots();
+                // Clamp selection to the (possibly changed) shot count.
+                let count = self.shot_count();
+                if count > 0 {
+                    let idx = self.selected_shot.selected().unwrap_or(0);
+                    self.selected_shot.select(Some(idx.min(count - 1)));
+                }
+            }
+            Err(e) => {
+                self.status_message = format!("Reload failed: {e}");
+            }
+        }
+    }
+
     pub(crate) fn shot_count(&self) -> usize {
         self.resolved_shots.len()
     }
@@ -246,6 +272,12 @@ const TICK_RATE: Duration = Duration::from_millis(250);
 fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
     let mut last_tick = Instant::now();
 
+    // Start watching the edit document for external changes.
+    let mut watcher = app
+        .edit_path
+        .as_deref()
+        .and_then(events::FileWatcher::new);
+
     loop {
         terminal.draw(|f| ui(f, app))?;
 
@@ -258,6 +290,13 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
 
         if last_tick.elapsed() >= TICK_RATE {
             last_tick = Instant::now();
+        }
+
+        // Check for external file changes and reload if needed.
+        if let Some(w) = watcher.as_mut() {
+            if w.poll() {
+                app.reload_edit();
+            }
         }
 
         // Handle pending play: leave TUI, launch player, re-enter TUI.
