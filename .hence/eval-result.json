@@ -4,23 +4,23 @@
   "exit_code": 0,
   "diff_summary": {
     "files_changed": 3,
-    "insertions": 586,
+    "insertions": 267,
     "deletions": 5,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit-core/src/lib.rs",
-      "crates/ar-edit-core/src/project.rs"
+      "crates/ar-edit-core/src/index.rs",
+      "crates/ar-edit-core/src/lib.rs"
     ],
-    "dirty_files": 751
+    "dirty_files": 829
   },
   "learnings": [
     {
-      "key": "task-a3-project-changes",
-      "content": "Modified 3 files (+586, -5): .hence/context-manifest.json, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/project.rs",
+      "key": "task-d1-scenes-changes",
+      "content": "Modified 3 files (+267, -5): .hence/context-manifest.json, crates/ar-edit-core/src/index.rs, crates/ar-edit-core/src/lib.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/a3-project-v1",
-  "evaluated_at": "2026-02-19T04:24:35Z"
+  "branch_name": "hence/d1-scenes-v1",
+  "evaluated_at": "2026-02-19T04:28:20Z"
 }

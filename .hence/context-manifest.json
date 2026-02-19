@@ -1,12 +1,12 @@
 {
-  "task_id": "a3-project",
+  "task_id": "d1-scenes",
   "token_budget": 8000,
-  "tokens_used": 214,
+  "tokens_used": 229,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement project operations in ar-edit-core/src/project.rs: init (create dir structure + manifest.json per CON-001), add (symlink/copy source, extract metadata via ffprobe subprocess per ADR-003, assign src-NNN ID, update manifest per CON-001), doctor (detect ffmpeg/whisper.cpp/VLC via which crate). Reject non-video files per REQ-003.",
-      "token_cost": 84,
+      "content": "Implement ffmpeg scene detection subprocess in ar-edit-core/src/index.rs per ADR-003. Command: ffmpeg -i <source> -vf \"select='gt(scene,0.3)'\" -vsync vfr ... Parse output to extract scene change timestamps. Create Scene structs with sequential indices and start_ms/end_ms.",
+      "token_cost": 68,
       "priority": "PlanMeta"
     },
     {
@@ -32,8 +32,14 @@
       "content": "Modified 2 files (+406, -0): crates/ar-edit-core/src/edit.rs, crates/ar-edit-core/src/lib.rs",
       "token_cost": 23,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-a3-project-changes",
+      "content": "Modified 3 files (+586, -5): .hence/context-manifest.json, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/project.rs",
+      "token_cost": 31,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:18:15Z"
+  "constructed_at": "2026-02-19T04:24:47Z"
 }
