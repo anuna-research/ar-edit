@@ -1,12 +1,12 @@
 {
-  "task_id": "i4-schema",
+  "task_id": "b4-import",
   "token_budget": 8000,
-  "tokens_used": 339,
+  "tokens_used": 363,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement ar-edit schema edit: output JSON Schema for the edit document format. Schema should validate the examples from DATA-MODEL.md. Implements REQ-019.",
-      "token_cost": 38,
+      "content": "Implement SRT and VTT parsers in ar-edit-core/src/transcript.rs. Convert to internal Transcript JSON format. Also accept raw whisper.cpp JSON passthrough. Preserve word-level timestamps where available, fall back to segment-level. Implements REQ-007.",
+      "token_cost": 62,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T08:15:47Z"
+  "constructed_at": "2026-02-19T08:26:17Z"
 }

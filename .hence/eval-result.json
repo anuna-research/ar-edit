@@ -3,29 +3,23 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 8,
-    "insertions": 1258,
-    "deletions": 26,
+    "files_changed": 2,
+    "insertions": 717,
+    "deletions": 5,
     "file_list": [
       ".hence/context-manifest.json",
-      "Cargo.lock",
-      "Cargo.toml",
-      "crates/ar-edit-core/Cargo.toml",
-      "crates/ar-edit-core/src/lib.rs",
-      "crates/ar-edit-core/src/models/mod.rs",
-      "crates/ar-edit-core/src/schema.rs",
-      "crates/ar-edit/src/main.rs"
+      "crates/ar-edit-core/src/transcript.rs"
     ],
-    "dirty_files": 5246
+    "dirty_files": 680
   },
   "learnings": [
     {
-      "key": "task-i4-schema-changes",
-      "content": "Modified 8 files (+1258, -26): .hence/context-manifest.json, Cargo.lock, Cargo.toml, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/src/lib.rs and 3 more",
+      "key": "task-b4-import-changes",
+      "content": "Modified 2 files (+717, -5): .hence/context-manifest.json, crates/ar-edit-core/src/transcript.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/i4-schema-v1",
-  "evaluated_at": "2026-02-19T08:24:46Z"
+  "branch_name": "hence/b4-import-v1",
+  "evaluated_at": "2026-02-19T08:31:21Z"
 }
