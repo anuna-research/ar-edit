@@ -4,8 +4,10 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use chrono::{DateTime, Utc};
+
 use crate::models::{
-    EditDocument, Shot, ShotNote, ShotRange, SourceIndex, Transcript, TranscriptSegment,
+    EditDocument, Marker, Shot, ShotNote, ShotRange, SourceIndex, Transcript, TranscriptSegment,
 };
 use crate::resolve;
 
@@ -72,6 +74,85 @@ pub fn resolve_edit(
     for shot in &doc.snapshot.shots {
         let r = resolve_shot(shot, project_dir, &mut transcripts, &mut indices)?;
         resolved.push(r);
+    }
+
+    Ok(resolved)
+}
+
+// ---------------------------------------------------------------------------
+// Resolved marker
+// ---------------------------------------------------------------------------
+
+/// A marker resolved against its source transcript/index, ready for display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedMarker {
+    pub id: String,
+    pub source_id: String,
+    pub range: ShotRange,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub created: DateTime<Utc>,
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub duration_ms: u64,
+    /// For words ranges: first ~80 chars of transcript text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_preview: Option<String>,
+    /// For scenes ranges: joined scene descriptions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scene_preview: Option<String>,
+}
+
+/// Resolve a list of markers for a given source against transcript/index data.
+pub fn resolve_markers(
+    markers: &[Marker],
+    source_id: &str,
+    project_dir: &Path,
+) -> Result<Vec<ResolvedMarker>, DisplayError> {
+    let mut transcripts: HashMap<String, Option<Transcript>> = HashMap::new();
+    let mut indices: HashMap<String, Option<SourceIndex>> = HashMap::new();
+
+    let mut resolved = Vec::with_capacity(markers.len());
+
+    for marker in markers {
+        let transcript = load_transcript_cached(project_dir, source_id, &mut transcripts);
+        let index = load_index_cached(project_dir, source_id, &mut indices);
+
+        let (start_ms, end_ms) = resolve::resolve_range(
+            &marker.range,
+            transcript.as_ref(),
+            index.as_ref(),
+        )?;
+        let duration_ms = end_ms.saturating_sub(start_ms);
+
+        let text_preview = match &marker.range {
+            ShotRange::Words { from, to } => {
+                transcript.as_ref().map(|t| extract_text_preview(t, *from, *to))
+            }
+            _ => None,
+        };
+
+        let scene_preview = match &marker.range {
+            ShotRange::Scenes { from, to } => {
+                index.as_ref().map(|idx| extract_scene_preview(idx, *from, *to))
+            }
+            _ => None,
+        };
+
+        resolved.push(ResolvedMarker {
+            id: marker.id.clone(),
+            source_id: source_id.to_string(),
+            range: marker.range.clone(),
+            label: marker.label.clone(),
+            note: marker.note.clone(),
+            created: marker.created,
+            start_ms,
+            end_ms,
+            duration_ms,
+            text_preview,
+            scene_preview,
+        });
     }
 
     Ok(resolved)

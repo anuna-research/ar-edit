@@ -97,7 +97,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         },
         Commands::Search(args) => todo!("search: {}", args.query),
         Commands::Mark(args) => cmd_mark(cli, args),
-        Commands::Markers { source_id } => cmd_markers(cli, source_id),
+        Commands::Markers { source_id, label } => cmd_markers(cli, source_id.as_deref(), label.as_deref()),
         Commands::Schema { command } => match command {
             SchemaCommand::Edit => todo!("schema edit"),
         },
@@ -562,29 +562,74 @@ fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_markers(cli: &Cli, source_id: &str) -> anyhow::Result<()> {
+fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
 
-    let doc = ar_edit_core::marker::list_markers(&project_dir, source_id)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Collect source markers: either one source or all
+    let source_docs = if let Some(sid) = source_id {
+        let doc = ar_edit_core::marker::list_markers(&project_dir, sid)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        vec![doc]
+    } else {
+        ar_edit_core::marker::list_all_markers(&project_dir)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+    };
+
+    // Resolve all markers and apply label filter
+    let mut all_resolved = Vec::new();
+    for doc in &source_docs {
+        let markers: Vec<_> = if let Some(lbl) = label {
+            doc.markers.iter().filter(|m| m.label == lbl).cloned().collect()
+        } else {
+            doc.markers.clone()
+        };
+
+        if markers.is_empty() {
+            continue;
+        }
+
+        let resolved = ar_edit_core::display::resolve_markers(&markers, &doc.source_id, &project_dir)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        all_resolved.extend(resolved);
+    }
 
     if cli.json {
-        println!("{}", serde_json::to_string_pretty(&doc)?);
+        let output = serde_json::json!({ "markers": all_resolved });
+        println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        if doc.markers.is_empty() {
-            println!("No markers for {source_id}.");
+        if all_resolved.is_empty() {
+            if let Some(sid) = source_id {
+                println!("No markers for {sid}.");
+            } else {
+                println!("No markers.");
+            }
         } else {
-            for m in &doc.markers {
+            for m in &all_resolved {
+                let time_range = format!(
+                    "{}-{}",
+                    ar_edit_core::display::format_time(m.start_ms),
+                    ar_edit_core::display::format_time(m.end_ms),
+                );
+
                 let note_part = m
                     .note
                     .as_deref()
                     .map(|n| format!("  \"{n}\""))
                     .unwrap_or_default();
+
+                let preview = m
+                    .text_preview
+                    .as_deref()
+                    .or(m.scene_preview.as_deref())
+                    .unwrap_or("");
+
                 println!(
-                    "  {}  {:<8} [{}]{}",
+                    "  {}  {}  {:<8} [{}] {}{}",
                     m.id,
+                    m.source_id,
                     m.label,
-                    range_summary(&m.range),
+                    time_range,
+                    preview,
                     note_part,
                 );
             }

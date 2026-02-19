@@ -3,25 +3,26 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 4,
-    "insertions": 408,
-    "deletions": 41,
+    "files_changed": 5,
+    "insertions": 212,
+    "deletions": 24,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit/src/tui/mod.rs",
-      "crates/ar-edit/src/tui/panels/mod.rs",
-      "crates/ar-edit/src/tui/panels/status.rs"
+      "crates/ar-edit-core/src/display.rs",
+      "crates/ar-edit-core/src/marker.rs",
+      "crates/ar-edit/src/cli/mod.rs",
+      "crates/ar-edit/src/main.rs"
     ],
-    "dirty_files": 4399
+    "dirty_files": 3704
   },
   "learnings": [
     {
-      "key": "task-h5-status-changes",
-      "content": "Modified 4 files (+408, -41): .hence/context-manifest.json, crates/ar-edit/src/tui/mod.rs, crates/ar-edit/src/tui/panels/mod.rs, crates/ar-edit/src/tui/panels/status.rs",
+      "key": "task-j2-listing-changes",
+      "content": "Modified 5 files (+212, -24): .hence/context-manifest.json, crates/ar-edit-core/src/display.rs, crates/ar-edit-core/src/marker.rs, crates/ar-edit/src/cli/mod.rs, crates/ar-edit/src/main.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/h5-status-v1",
-  "evaluated_at": "2026-02-19T07:11:45Z"
+  "branch_name": "hence/j2-listing-v1",
+  "evaluated_at": "2026-02-19T07:18:15Z"
 }
