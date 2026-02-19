@@ -4,23 +4,23 @@
   "exit_code": 0,
   "diff_summary": {
     "files_changed": 3,
-    "insertions": 267,
-    "deletions": 5,
+    "insertions": 1034,
+    "deletions": 16,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit-core/src/index.rs",
-      "crates/ar-edit-core/src/lib.rs"
+      "crates/ar-edit/src/cli/mod.rs",
+      "crates/ar-edit/src/main.rs"
     ],
-    "dirty_files": 829
+    "dirty_files": 960
   },
   "learnings": [
     {
-      "key": "task-d1-scenes-changes",
-      "content": "Modified 3 files (+267, -5): .hence/context-manifest.json, crates/ar-edit-core/src/index.rs, crates/ar-edit-core/src/lib.rs",
+      "key": "task-a4-cli-changes",
+      "content": "Modified 3 files (+1034, -16): .hence/context-manifest.json, crates/ar-edit/src/cli/mod.rs, crates/ar-edit/src/main.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/d1-scenes-v1",
-  "evaluated_at": "2026-02-19T04:28:20Z"
+  "branch_name": "hence/a4-cli-v1",
+  "evaluated_at": "2026-02-19T04:35:42Z"
 }

@@ -1,12 +1,12 @@
 {
-  "task_id": "d1-scenes",
+  "task_id": "a4-cli",
   "token_budget": 8000,
-  "tokens_used": 229,
+  "tokens_used": 297,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement ffmpeg scene detection subprocess in ar-edit-core/src/index.rs per ADR-003. Command: ffmpeg -i <source> -vf \"select='gt(scene,0.3)'\" -vsync vfr ... Parse output to extract scene change timestamps. Create Scene structs with sequential indices and start_ms/end_ms.",
-      "token_cost": 68,
+      "content": "Implement clap derive subcommand structure in ar-edit/src/cli/mod.rs covering all commands from contracts: init, add, doctor, transcribe, transcripts (list/read/search/export), edit (create/add-segment/move-segment/remove-segment/trim-segment/show/history/from-transcript/note), undo, redo, validate, play, render, index (show/set-description), search, mark, markers, schema, tui. Global --json flag. Exit codes per CON-009.",
+      "token_cost": 106,
       "priority": "PlanMeta"
     },
     {
@@ -38,8 +38,14 @@
       "content": "Modified 3 files (+586, -5): .hence/context-manifest.json, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/project.rs",
       "token_cost": 31,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-d1-scenes-changes",
+      "content": "Modified 3 files (+267, -5): .hence/context-manifest.json, crates/ar-edit-core/src/index.rs, crates/ar-edit-core/src/lib.rs",
+      "token_cost": 30,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:24:47Z"
+  "constructed_at": "2026-02-19T04:28:32Z"
 }
