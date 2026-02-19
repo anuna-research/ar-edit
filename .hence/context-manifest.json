@@ -1,12 +1,12 @@
 {
-  "task_id": "b6-tests",
+  "task_id": "g2-import",
   "token_budget": 8000,
-  "tokens_used": 368,
+  "tokens_used": 373,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Write tests TEST-004 (valid JSON output), TEST-005 (sequential word indices), TEST-006 (model selection), TEST-007 (SRT/VTT import), TEST-008 (listing), TEST-009 (reading), TEST-010 (search). Create pre-generated transcript fixtures for CI (no whisper.cpp dependency).",
-      "token_cost": 67,
+      "content": "Implement ar-edit edit from-transcript per CON-004: parse edited annotated markdown, resolve HTML comment annotations to source/word-index pairs, produce edit document with one shot per surviving annotation block. Report errors with line numbers for unresolvable text. Implements REQ-018.",
+      "token_cost": 72,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T08:45:11Z"
+  "constructed_at": "2026-02-19T10:48:00Z"
 }
