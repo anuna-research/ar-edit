@@ -2,7 +2,7 @@ mod cli;
 #[cfg(feature = "tui")]
 mod tui;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use ar_edit_core::models::{EditDocument, EditOpKind, ShotRange, Source};
@@ -57,7 +57,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 cmd_transcripts_search(cli, query, source.as_deref())
             }
             TranscriptsCommand::Export { format, output } => {
-                todo!("transcripts export: format={format}, output={output:?}")
+                cmd_transcripts_export(cli, format, output.as_deref())
             }
         },
         Commands::Edit { command } => match command {
@@ -350,6 +350,29 @@ fn cmd_transcripts_search(
                 println!();
             }
         }
+    }
+
+    Ok(())
+}
+
+fn cmd_transcripts_export(
+    _cli: &Cli,
+    format: &str,
+    output: Option<&Path>,
+) -> anyhow::Result<()> {
+    if format != "editable" {
+        anyhow::bail!("unsupported export format: {format} (only 'editable' is supported)");
+    }
+
+    let project_dir = PathBuf::from(".");
+    let markdown = ar_edit_core::export::export_editable(&project_dir)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if let Some(path) = output {
+        std::fs::write(path, &markdown)?;
+        eprintln!("Exported to {}", path.display());
+    } else {
+        print!("{markdown}");
     }
 
     Ok(())

@@ -1057,6 +1057,48 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_transcripts_export_default() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "transcripts",
+            "export",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Transcripts {
+                command: TranscriptsCommand::Export { ref format, ref output },
+            } => {
+                assert_eq!(format, "editable");
+                assert!(output.is_none());
+            }
+            _ => panic!("expected Transcripts Export"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_transcripts_export_with_output() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "transcripts",
+            "export",
+            "--format",
+            "editable",
+            "-o",
+            "draft.md",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Transcripts {
+                command: TranscriptsCommand::Export { ref format, ref output },
+            } => {
+                assert_eq!(format, "editable");
+                assert_eq!(output.as_deref(), Some(std::path::Path::new("draft.md")));
+            }
+            _ => panic!("expected Transcripts Export"),
+        }
+    }
+
+    #[test]
     fn exit_codes_match_con_009() {
         assert_eq!(exit_code::SUCCESS, 0);
         assert_eq!(exit_code::USER_ERROR, 1);
