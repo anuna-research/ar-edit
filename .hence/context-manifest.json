@@ -1,12 +1,12 @@
 {
-  "task_id": "f5-subtitles",
+  "task_id": "f6-tests",
   "token_budget": 8000,
-  "tokens_used": 359,
+  "tokens_used": 343,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Generate SRT subtitle file from transcript word timestamps for the edit's shots. Embed via ffmpeg -i <video> -i <srt> -c copy -c:s mov_text <output>. Activated by --subtitles flag. Timing matches word boundaries. Implements REQ-036.",
-      "token_cost": 58,
+      "content": "Write tests TEST-025 (basic render, correct duration), TEST-026 (codec options), TEST-027 (progress reporting --json), TEST-042 (subtitle embedding verified by ffprobe).",
+      "token_cost": 42,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T13:32:05Z"
+  "constructed_at": "2026-02-19T13:44:00Z"
 }
