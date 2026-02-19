@@ -1,12 +1,12 @@
 {
-  "task_id": "b2-whisper",
+  "task_id": "h3-transcript",
   "token_budget": 8000,
-  "tokens_used": 361,
+  "tokens_used": 357,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement whisper.cpp subprocess invocation per ADR-003: whisper-cli -m <model-path> -f <audio.wav> --output-json --print-progress. Support model selection (tiny/base/small/medium/large), default base per REQ-006. Parse progress from stderr.",
-      "token_cost": 60,
+      "content": "Implement transcript/description panel in ar-edit/src/tui/panels/transcript.rs: full transcript for selected source, word/scene range of selected shot highlighted. Scrollable, auto-scrolls to selected range. Implements REQ-040.",
+      "token_cost": 56,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T06:26:39Z"
+  "constructed_at": "2026-02-19T06:36:38Z"
 }

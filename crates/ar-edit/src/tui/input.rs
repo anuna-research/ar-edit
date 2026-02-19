@@ -61,6 +61,8 @@ fn handle_normal_timeline(app: &mut App, key: KeyEvent) {
         KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Char('j') | KeyCode::Down => app.select_next(),
         KeyCode::Char('k') | KeyCode::Up => app.select_previous(),
+        KeyCode::Char('{') => super::panels::transcript::scroll_up(&mut app.transcript_scroll),
+        KeyCode::Char('}') => super::panels::transcript::scroll_down(&mut app.transcript_scroll, u16::MAX),
         KeyCode::Char('J') => do_move_shot_down(app),
         KeyCode::Char('K') => do_move_shot_up(app),
         KeyCode::Char('d') => do_delete_shot(app),
