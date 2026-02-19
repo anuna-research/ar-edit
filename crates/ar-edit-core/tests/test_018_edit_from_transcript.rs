@@ -7,6 +7,7 @@
 //! 4. Validating the resulting edit against project data
 
 use ar_edit_core::display::resolve_edit;
+use ar_edit_core::import::from_transcript_str;
 use ar_edit_core::models::*;
 use ar_edit_core::validate::validate;
 use chrono::Utc;
@@ -279,4 +280,190 @@ fn edit_from_markers_roundtrip() {
 
     let recomputed = EditDocument::recompute_snapshot(&loaded.ops, loaded.head);
     assert_eq!(recomputed, loaded.snapshot);
+}
+
+// -- Import from annotated markdown with multiple sources ---------------------
+
+fn make_transcript_src002() -> Transcript {
+    Transcript {
+        source_id: "src-002".into(),
+        model: "base".into(),
+        language: "en".into(),
+        duration_ms: 10000,
+        segments: vec![TranscriptSegment {
+            index: 0,
+            start_ms: 0,
+            end_ms: 10000,
+            text: "The economy has shown strong growth this quarter".into(),
+            words: (0..8)
+                .map(|i| Word {
+                    index: i,
+                    text: [
+                        "The", "economy", "has", "shown", "strong", "growth",
+                        "this", "quarter",
+                    ][i as usize]
+                        .into(),
+                    start_ms: (i as u64) * 1200,
+                    end_ms: (i as u64) * 1200 + 1000,
+                    confidence: 0.94,
+                })
+                .collect(),
+        }],
+        word_count: 8,
+    }
+}
+
+fn make_manifest_multi() -> Manifest {
+    Manifest {
+        version: "1.0.0".into(),
+        name: "test-project".into(),
+        created: Utc::now(),
+        sources: vec![
+            Source {
+                id: "src-001".into(),
+                path: "sources/src-001.mp4".into(),
+                original_filename: "interview.mp4".into(),
+                duration_ms: 30000,
+                video_codec: "h264".into(),
+                audio_codec: "aac".into(),
+                resolution: (1920, 1080),
+                frame_rate: 29.97,
+                audio_channels: 2,
+                audio_sample_rate: 48000,
+                added: Utc::now(),
+                transcribed: true,
+                indexed: false,
+            },
+            Source {
+                id: "src-002".into(),
+                path: "sources/src-002.mp4".into(),
+                original_filename: "economy.mp4".into(),
+                duration_ms: 10000,
+                video_codec: "h264".into(),
+                audio_codec: "aac".into(),
+                resolution: (1920, 1080),
+                frame_rate: 29.97,
+                audio_channels: 2,
+                audio_sample_rate: 48000,
+                added: Utc::now(),
+                transcribed: true,
+                indexed: false,
+            },
+        ],
+        next_source_id: 3,
+        defaults: Defaults {
+            whisper_model: "base".into(),
+            thumbnail_interval_sec: 10,
+            render_codec: "h264".into(),
+            render_container: "mp4".into(),
+        },
+    }
+}
+
+fn setup_project_multi(dir: &std::path::Path) {
+    std::fs::create_dir_all(dir.join("transcripts")).unwrap();
+    std::fs::create_dir_all(dir.join("index")).unwrap();
+    std::fs::create_dir_all(dir.join("edits")).unwrap();
+    std::fs::create_dir_all(dir.join("annotations")).unwrap();
+
+    let t1 = make_transcript();
+    std::fs::write(
+        dir.join("transcripts/src-001.transcript.json"),
+        serde_json::to_string(&t1).unwrap(),
+    )
+    .unwrap();
+
+    let t2 = make_transcript_src002();
+    std::fs::write(
+        dir.join("transcripts/src-002.transcript.json"),
+        serde_json::to_string(&t2).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn import_annotated_transcript_three_segments_two_sources() {
+    let tmp = TempDir::new().unwrap();
+    setup_project_multi(tmp.path());
+
+    // Annotated markdown with 3 segments from 2 sources:
+    // - 2 from src-001 (opening + closing, skipping the middle segment)
+    // - 1 from src-002
+    let markdown = "\
+# Source: src-001 — interview.mp4
+
+<!-- ar-edit:src-001:w0-w7 -->
+Welcome to the demonstration video for the project
+<!-- /ar-edit:src-001 -->
+
+<!-- ar-edit:src-001:w16-w21 -->
+Thank you for watching this overview
+<!-- /ar-edit:src-001 -->
+
+---
+
+# Source: src-002 — economy.mp4
+
+<!-- ar-edit:src-002:w0-w7 -->
+The economy has shown strong growth this quarter
+<!-- /ar-edit:src-002 -->
+";
+
+    // Step 1: Import from annotated transcript
+    let doc = from_transcript_str(markdown, "multi-source-edit").unwrap();
+
+    // Step 2: Verify edit structure — 3 shots from 2 sources
+    assert_eq!(doc.name, "multi-source-edit");
+    assert_eq!(doc.snapshot.shots.len(), 3);
+
+    // Shot 1: src-001, words 0-7 (opening)
+    assert_eq!(doc.snapshot.shots[0].source, "src-001");
+    assert_eq!(
+        doc.snapshot.shots[0].range,
+        ShotRange::Words { from: 0, to: 7 }
+    );
+
+    // Shot 2: src-001, words 16-21 (closing)
+    assert_eq!(doc.snapshot.shots[1].source, "src-001");
+    assert_eq!(
+        doc.snapshot.shots[1].range,
+        ShotRange::Words { from: 16, to: 21 }
+    );
+
+    // Shot 3: src-002, words 0-7
+    assert_eq!(doc.snapshot.shots[2].source, "src-002");
+    assert_eq!(
+        doc.snapshot.shots[2].range,
+        ShotRange::Words { from: 0, to: 7 }
+    );
+
+    // Step 3: Verify sequential shot IDs
+    assert_eq!(doc.snapshot.shots[0].id, "shot-001");
+    assert_eq!(doc.snapshot.shots[1].id, "shot-002");
+    assert_eq!(doc.snapshot.shots[2].id, "shot-003");
+
+    // Step 4: Verify ops match
+    assert_eq!(doc.ops.len(), 3);
+    assert_eq!(doc.head, 2);
+
+    // Step 5: Resolve the edit (loads transcripts from disk)
+    let resolved = resolve_edit(&doc, tmp.path()).unwrap();
+    assert_eq!(resolved.len(), 3);
+
+    // Verify resolved shots have text previews and valid timestamp ranges
+    for r in &resolved {
+        assert!(r.text_preview.is_some());
+        assert!(r.start_ms < r.end_ms);
+        assert!(r.duration_ms > 0);
+    }
+
+    // Verify resolved shots reference correct sources
+    assert_eq!(resolved[0].source, "src-001");
+    assert_eq!(resolved[1].source, "src-001");
+    assert_eq!(resolved[2].source, "src-002");
+
+    // Step 6: Validate the edit against the project
+    let manifest = make_manifest_multi();
+    let validation = validate(&doc, &manifest, tmp.path());
+    assert!(validation.valid, "errors: {:?}", validation.errors);
 }

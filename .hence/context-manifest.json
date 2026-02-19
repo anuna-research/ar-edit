@@ -1,12 +1,12 @@
 {
-  "task_id": "g3-fuzzy",
+  "task_id": "g4-tests",
   "token_budget": 8000,
-  "tokens_used": 356,
+  "tokens_used": 340,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Handle split/merged annotation blocks via fuzzy text matching against source transcripts. When user splits a segment-level block mid-sentence, match text fragments against transcript words to find precise word boundaries.",
-      "token_cost": 55,
+      "content": "Write tests TEST-018 (edit from annotated transcript with 3 segments from 2 sources) and TEST-020 (export then reimport round-trip produces identical edit).",
+      "token_cost": 39,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T10:58:01Z"
+  "constructed_at": "2026-02-19T11:10:32Z"
 }
