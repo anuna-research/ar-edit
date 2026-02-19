@@ -1,12 +1,12 @@
 {
-  "task_id": "h1-skeleton",
+  "task_id": "b1-audio",
   "token_budget": 8000,
-  "tokens_used": 375,
+  "tokens_used": 362,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement ratatui app skeleton in ar-edit/src/tui/ per ADR-004: crossterm terminal setup/teardown, event loop, app state (current edit, selected shot, mode), panel layout (timeline left, transcript right, sources bottom-left, status bottom). Feature-gated behind --features tui. Implements REQ-038.",
-      "token_cost": 74,
+      "content": "Implement ffmpeg subprocess to extract WAV audio from video in ar-edit-core/src/transcript.rs. Command: ffmpeg -i <source> -vn -acodec pcm_s16le -ar 16000 -ac 1 <output.wav>. Per ADR-003 subprocess architecture. Handle missing audio stream error.",
+      "token_cost": 61,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T05:40:53Z"
+  "constructed_at": "2026-02-19T05:45:47Z"
 }
