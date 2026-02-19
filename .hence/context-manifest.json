@@ -1,12 +1,12 @@
 {
-  "task_id": "f1-extract",
+  "task_id": "b6-tests",
   "token_budget": 8000,
-  "tokens_used": 359,
+  "tokens_used": 368,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement ffmpeg segment extraction in ar-edit-core/src/render.rs per ADR-003: ffmpeg -i <source> -ss <start> -to <end> -c copy <segment.mp4> for each shot. Resolve ranges to timestamps first. Temp files in a render working directory.",
-      "token_cost": 58,
+      "content": "Write tests TEST-004 (valid JSON output), TEST-005 (sequential word indices), TEST-006 (model selection), TEST-007 (SRT/VTT import), TEST-008 (listing), TEST-009 (reading), TEST-010 (search). Create pre-generated transcript fixtures for CI (no whisper.cpp dependency).",
+      "token_cost": 67,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T08:38:59Z"
+  "constructed_at": "2026-02-19T08:45:11Z"
 }

@@ -1,0 +1,38 @@
+{
+  "source_id": "src-003",
+  "model": "base",
+  "language": "en",
+  "duration_ms": 10000,
+  "segments": [
+    {
+      "index": 0,
+      "start_ms": 0,
+      "end_ms": 5000,
+      "text": "Climate change affects communities worldwide.",
+      "words": [
+        { "index": 0, "text": "Climate", "start_ms": 100, "end_ms": 500, "confidence": 0.96 },
+        { "index": 1, "text": "change", "start_ms": 500, "end_ms": 900, "confidence": 0.95 },
+        { "index": 2, "text": "affects", "start_ms": 900, "end_ms": 1300, "confidence": 0.93 },
+        { "index": 3, "text": "communities", "start_ms": 1300, "end_ms": 1800, "confidence": 0.91 },
+        { "index": 4, "text": "worldwide.", "start_ms": 1800, "end_ms": 2300, "confidence": 0.94 }
+      ]
+    },
+    {
+      "index": 1,
+      "start_ms": 5000,
+      "end_ms": 10000,
+      "text": "We must act now to protect our future.",
+      "words": [
+        { "index": 5, "text": "We", "start_ms": 5100, "end_ms": 5300, "confidence": 0.98 },
+        { "index": 6, "text": "must", "start_ms": 5300, "end_ms": 5600, "confidence": 0.97 },
+        { "index": 7, "text": "act", "start_ms": 5600, "end_ms": 5800, "confidence": 0.96 },
+        { "index": 8, "text": "now", "start_ms": 5800, "end_ms": 6100, "confidence": 0.98 },
+        { "index": 9, "text": "to", "start_ms": 6100, "end_ms": 6300, "confidence": 0.99 },
+        { "index": 10, "text": "protect", "start_ms": 6300, "end_ms": 6700, "confidence": 0.95 },
+        { "index": 11, "text": "our", "start_ms": 6700, "end_ms": 6900, "confidence": 0.97 },
+        { "index": 12, "text": "future.", "start_ms": 6900, "end_ms": 7300, "confidence": 0.93 }
+      ]
+    }
+  ],
+  "word_count": 13
+}
