@@ -10,7 +10,7 @@ use ar_edit_core::playback;
 use clap::Parser;
 use cli::{
     exit_code, Cli, Commands, EditCommand, IndexCommand, PlayArgs, RangeArgs, SchemaCommand,
-    TranscriptsCommand,
+    SearchType, TranscriptsCommand,
 };
 
 use std::thread;
@@ -97,7 +97,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             }) => cmd_index_set_description(cli, source_id, *scene, text),
             None => cmd_index_run(cli, &args.run),
         },
-        Commands::Search(args) => todo!("search: {}", args.query),
+        Commands::Search(args) => cmd_search(cli, args),
         Commands::Mark(args) => cmd_mark(cli, args),
         Commands::Markers { source_id, label } => cmd_markers(cli, source_id.as_deref(), label.as_deref()),
         Commands::Schema { command } => match command {
@@ -796,6 +796,54 @@ fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyho
             }
         }
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: search (CON-008, REQ-034)
+// ---------------------------------------------------------------------------
+
+fn cmd_search(cli: &Cli, args: &cli::SearchArgs) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+
+    let type_filter = args.r#type.as_ref().map(|t| match t {
+        SearchType::Transcript => ar_edit_core::search::TypeFilter::Transcript,
+        SearchType::Scene => ar_edit_core::search::TypeFilter::Scene,
+        SearchType::Metadata => ar_edit_core::search::TypeFilter::Metadata,
+    });
+
+    let results = ar_edit_core::search::search(
+        &project_dir,
+        &args.query,
+        args.source.as_deref(),
+        type_filter.as_ref(),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        let output = serde_json::json!({ "results": results });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if results.is_empty() {
+        println!("No matches.");
+    } else {
+        for r in &results {
+            let type_label = match r.result_type {
+                ar_edit_core::search::ResultType::Transcript => "transcript",
+                ar_edit_core::search::ResultType::Scene => "scene",
+                ar_edit_core::search::ResultType::Metadata => "metadata",
+            };
+            println!(
+                "  [{}] {} {}-{}",
+                type_label,
+                r.source_id,
+                ar_edit_core::display::format_time(r.start_ms),
+                ar_edit_core::display::format_time(r.end_ms),
+            );
+            println!("    {}", r.context);
+            println!();
+        }
+    }
+
     Ok(())
 }
 

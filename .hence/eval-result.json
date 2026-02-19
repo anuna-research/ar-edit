@@ -3,24 +3,25 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 3,
-    "insertions": 575,
-    "deletions": 5,
+    "files_changed": 4,
+    "insertions": 894,
+    "deletions": 7,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit-core/tests/test_018_edit_from_transcript.rs",
-      "crates/ar-edit-core/tests/test_020_export_reimport_roundtrip.rs"
+      "crates/ar-edit-core/src/lib.rs",
+      "crates/ar-edit-core/src/search.rs",
+      "crates/ar-edit/src/main.rs"
     ],
-    "dirty_files": 777
+    "dirty_files": 9201
   },
   "learnings": [
     {
-      "key": "task-g4-tests-changes",
-      "content": "Modified 3 files (+575, -5): .hence/context-manifest.json, crates/ar-edit-core/tests/test_018_edit_from_transcript.rs, crates/ar-edit-core/tests/test_020_export_reimport_roundtrip.rs",
+      "key": "task-d5-search-changes",
+      "content": "Modified 4 files (+894, -7): .hence/context-manifest.json, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/search.rs, crates/ar-edit/src/main.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/g4-tests-v1",
-  "evaluated_at": "2026-02-19T11:18:24Z"
+  "branch_name": "hence/d5-search-v1",
+  "evaluated_at": "2026-02-19T11:54:10Z"
 }
