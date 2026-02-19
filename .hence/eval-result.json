@@ -3,25 +3,29 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 4,
-    "insertions": 1594,
-    "deletions": 2,
+    "files_changed": 8,
+    "insertions": 1258,
+    "deletions": 26,
     "file_list": [
-      "crates/ar-edit-core/tests/test_021_segment_preview.rs",
-      "crates/ar-edit-core/tests/test_022_full_edit_playback.rs",
-      "crates/ar-edit-core/tests/test_023_overlay.rs",
-      "crates/ar-edit-core/tests/test_024_source_playback.rs"
+      ".hence/context-manifest.json",
+      "Cargo.lock",
+      "Cargo.toml",
+      "crates/ar-edit-core/Cargo.toml",
+      "crates/ar-edit-core/src/lib.rs",
+      "crates/ar-edit-core/src/models/mod.rs",
+      "crates/ar-edit-core/src/schema.rs",
+      "crates/ar-edit/src/main.rs"
     ],
-    "dirty_files": 3636
+    "dirty_files": 5246
   },
   "learnings": [
     {
-      "key": "task-e6-tests-changes",
-      "content": "Modified 4 files (+1594, -2): crates/ar-edit-core/tests/test_021_segment_preview.rs, crates/ar-edit-core/tests/test_022_full_edit_playback.rs, crates/ar-edit-core/tests/test_023_overlay.rs, crates/ar-edit-core/tests/test_024_source_playback.rs",
+      "key": "task-i4-schema-changes",
+      "content": "Modified 8 files (+1258, -26): .hence/context-manifest.json, Cargo.lock, Cargo.toml, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/src/lib.rs and 3 more",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/e6-tests-v1",
-  "evaluated_at": "2026-02-19T08:14:56Z"
+  "branch_name": "hence/i4-schema-v1",
+  "evaluated_at": "2026-02-19T08:24:46Z"
 }
