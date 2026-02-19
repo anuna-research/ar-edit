@@ -3,6 +3,7 @@ pub mod edit;
 pub mod index;
 pub mod marker;
 pub mod models;
+pub mod overlay;
 pub mod playback;
 pub mod project;
 pub mod render;
