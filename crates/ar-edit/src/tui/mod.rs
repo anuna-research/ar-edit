@@ -11,7 +11,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, ListState, Paragraph};
+use ratatui::widgets::{ListState, Paragraph};
 
 use ar_edit_core::display::{self, ResolvedShot};
 use ar_edit_core::models::{EditDocument, ShotRange, Source};
@@ -71,6 +71,7 @@ pub struct App {
     pub prompt_buffer: String,
     pub prompt_action: Option<PromptAction>,
     pub pending_play: Option<playback::PlayRequest>,
+    pub transcript_scroll: panels::transcript::TranscriptScroll,
 }
 
 impl App {
@@ -97,6 +98,7 @@ impl App {
             prompt_buffer: String::new(),
             prompt_action: None,
             pending_play: None,
+            transcript_scroll: panels::transcript::TranscriptScroll::default(),
         }
     }
 
@@ -326,17 +328,35 @@ fn ui(f: &mut Frame, app: &mut App) {
         timeline_area,
     );
 
-    // --- Right panel: transcript or source detail ---
+    // --- Right panel: transcript or source detail (REQ-040) ---
+    //
+    // Extract the selected shot index first to avoid overlapping borrows
+    // between `resolved_shots` (immutable) and `transcript_scroll` (mutable).
+    let selected_idx = app.selected_shot.selected();
     match app.focus {
         Focus::Sources => {
             if let Some(source) = app.selected_source().cloned() {
                 panels::sources::draw_detail(f, &source, transcript_area);
             } else {
-                draw_transcript(f, app, transcript_area);
+                let shot = selected_idx.and_then(|i| app.resolved_shots.get(i));
+                panels::transcript::draw(
+                    f,
+                    shot,
+                    &app.project_dir,
+                    &mut app.transcript_scroll,
+                    transcript_area,
+                );
             }
         }
         Focus::Timeline => {
-            draw_transcript(f, app, transcript_area);
+            let shot = selected_idx.and_then(|i| app.resolved_shots.get(i));
+            panels::transcript::draw(
+                f,
+                shot,
+                &app.project_dir,
+                &mut app.transcript_scroll,
+                transcript_area,
+            );
         }
     }
 
@@ -355,41 +375,6 @@ fn ui(f: &mut Frame, app: &mut App) {
 // ---------------------------------------------------------------------------
 // Panel renderers
 // ---------------------------------------------------------------------------
-
-fn draw_transcript(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default()
-        .title(" Transcript ")
-        .borders(Borders::ALL);
-
-    let text = match app.selected_resolved_shot() {
-        Some(shot) => {
-            let mut lines = format!("Shot: {}\nSource: {}\n", shot.id, shot.source);
-            lines.push_str(&format!(
-                "Duration: {}\n",
-                display::format_time(shot.duration_ms)
-            ));
-            if let Some(ref preview) = shot.text_preview {
-                lines.push_str(&format!("\n{preview}"));
-            }
-            if let Some(ref preview) = shot.scene_preview {
-                lines.push_str(&format!("\n{preview}"));
-            }
-            if !shot.notes.is_empty() {
-                lines.push_str("\n\nNotes:");
-                for note in &shot.notes {
-                    lines.push_str(&format!("\n  - {}", note.text));
-                }
-            }
-            lines
-        }
-        None => String::from("Select a shot to view its transcript"),
-    };
-
-    let paragraph = Paragraph::new(text)
-        .block(block)
-        .wrap(ratatui::widgets::Wrap { trim: true });
-    f.render_widget(paragraph, area);
-}
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let mode_label = match app.mode {
