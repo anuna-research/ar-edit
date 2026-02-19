@@ -450,23 +450,29 @@ fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
         return cmd_play_full(cli, &project_dir, &args.target, &player, overlay_mode);
     }
 
+    // Capture shot/source context for feedback before building the request
+    let (shot_id, source_id) = if is_source {
+        (None, args.target.clone())
+    } else {
+        let shot_id_str = args.shot.as_deref().unwrap();
+        let path = edit_path(&args.target);
+        let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let shot = doc
+            .snapshot
+            .shots
+            .iter()
+            .find(|s| s.id == shot_id_str)
+            .ok_or_else(|| anyhow::anyhow!("shot not found: {shot_id_str}"))?;
+        (Some(shot_id_str.to_string()), shot.source.clone())
+    };
+
     let req = if is_source {
-        // Source playback: ar-edit play <source-id> [--at/--at-word/--at-scene]
         build_source_play_request(&project_dir, &args.target, args)?
     } else {
-        // Single-shot playback: ar-edit play <edit-name> --shot <shot-id>
         build_edit_play_request(&project_dir, &args.target, args.shot.as_deref().unwrap())?
     };
 
-    if cli.json {
-        let output = serde_json::json!({
-            "player": player.name,
-            "file": req.file.display().to_string(),
-            "start_ms": req.start_ms,
-            "end_ms": req.end_ms,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
+    if !cli.json {
         let end_info = match req.end_ms {
             Some(end) => format!(
                 " to {}",
@@ -485,6 +491,17 @@ fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
 
     let mut child = playback::launch_player(&player, &req).map_err(|e| anyhow::anyhow!("{e}"))?;
     child.wait()?;
+
+    // REQ-037: Output structured feedback after playback exits
+    if cli.json {
+        let feedback = ar_edit_core::feedback::build_feedback(
+            req.start_ms,
+            shot_id.as_deref(),
+            &source_id,
+            &project_dir,
+        );
+        println!("{}", serde_json::to_string_pretty(&feedback)?);
+    }
 
     Ok(())
 }
@@ -510,6 +527,10 @@ fn cmd_play_full(
         println!("Rendering full preview of \"{edit_name}\" ({shot_count} shots){overlay_label}...");
     }
 
+    // Resolve shots for feedback timings before rendering
+    let resolved = ar_edit_core::display::resolve_edit(&doc, project_dir)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
     let preview_path = ar_edit_core::render::render_preview(&doc, project_dir, overlay_mode)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -519,15 +540,7 @@ fn cmd_play_full(
         end_ms: None,
     };
 
-    if cli.json {
-        let output = serde_json::json!({
-            "player": player.name,
-            "file": preview_path.display().to_string(),
-            "edit": edit_name,
-            "shot_count": shot_count,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
+    if !cli.json {
         println!(
             "Playing full edit preview  [{}]",
             player.name,
@@ -536,6 +549,29 @@ fn cmd_play_full(
 
     let mut child = playback::launch_player(player, &req).map_err(|e| anyhow::anyhow!("{e}"))?;
     child.wait()?;
+
+    // REQ-037: Output structured feedback after playback exits
+    if cli.json {
+        // Build cumulative timeline offsets for each shot
+        let mut shot_timings = Vec::with_capacity(resolved.len());
+        let mut offset = 0u64;
+        for shot in &resolved {
+            shot_timings.push((
+                shot.id.clone(),
+                shot.source.clone(),
+                offset,
+                offset + shot.duration_ms,
+            ));
+            offset += shot.duration_ms;
+        }
+
+        let feedback = ar_edit_core::feedback::build_edit_feedback(
+            0, // start of preview
+            &shot_timings,
+            project_dir,
+        );
+        println!("{}", serde_json::to_string_pretty(&feedback)?);
+    }
 
     Ok(())
 }

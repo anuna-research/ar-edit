@@ -1,5 +1,6 @@
 pub mod display;
 pub mod edit;
+pub mod feedback;
 pub mod index;
 pub mod marker;
 pub mod models;
