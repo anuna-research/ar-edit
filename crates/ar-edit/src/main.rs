@@ -3,12 +3,14 @@ mod cli;
 use std::path::PathBuf;
 use std::process;
 
-use ar_edit_core::models::{EditDocument, EditOpKind, ShotRange};
+use ar_edit_core::models::{EditDocument, EditOpKind, ShotRange, Source};
 use clap::Parser;
 use cli::{
     exit_code, Cli, Commands, EditCommand, IndexCommand, RangeArgs, SchemaCommand,
     TranscriptsCommand,
 };
+
+use std::thread;
 
 fn main() {
     let cli = Cli::parse();
@@ -82,17 +84,13 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         Commands::Play(args) => todo!("play: target={}", args.target),
         Commands::Render(args) => todo!("render: edit={}, output={:?}", args.edit, args.output),
         Commands::Index(args) => match &args.command {
-            Some(IndexCommand::Show { source_id }) => todo!("index show: {source_id}"),
+            Some(IndexCommand::Show { source_id }) => cmd_index_show(cli, source_id),
             Some(IndexCommand::SetDescription {
                 source_id,
                 scene,
                 text,
-            }) => todo!("index set-description: {source_id}, scene={scene}, text={text}"),
-            None => todo!(
-                "index run: source_id={:?}, all={}",
-                args.run.source_id,
-                args.run.all
-            ),
+            }) => cmd_index_set_description(cli, source_id, *scene, text),
+            None => cmd_index_run(cli, &args.run),
         },
         Commands::Search(args) => todo!("search: {}", args.query),
         Commands::Mark(args) => cmd_mark(cli, args),
@@ -284,6 +282,184 @@ fn cmd_markers(cli: &Cli, source_id: &str) -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: index (CON-008, REQ-031)
+// ---------------------------------------------------------------------------
+
+fn cmd_index_run(cli: &Cli, args: &cli::IndexRunArgs) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+    let mut manifest = ar_edit_core::project::read_manifest(&project_dir)?;
+
+    let threshold = 0.3;
+    let interval_sec = args
+        .interval
+        .map(|i| i as u32)
+        .unwrap_or(manifest.defaults.thumbnail_interval_sec);
+
+    let sources: Vec<Source> = if args.all {
+        manifest
+            .sources
+            .iter()
+            .filter(|s| !s.indexed)
+            .cloned()
+            .collect()
+    } else if let Some(ref id) = args.source_id {
+        let source = manifest
+            .sources
+            .iter()
+            .find(|s| s.id == *id)
+            .ok_or_else(|| anyhow::anyhow!("source not found: {id}"))?;
+        vec![source.clone()]
+    } else {
+        anyhow::bail!("specify a source ID or --all");
+    };
+
+    if sources.is_empty() {
+        if cli.json {
+            println!("[]");
+        } else {
+            println!("No sources to index.");
+        }
+        return Ok(());
+    }
+
+    let parallel = args.parallel.unwrap_or(1).max(1);
+    let mut indexed = Vec::new();
+
+    if parallel > 1 && sources.len() > 1 {
+        for chunk in sources.chunks(parallel) {
+            let results: Vec<Result<_, _>> = thread::scope(|s| {
+                let handles: Vec<_> = chunk
+                    .iter()
+                    .map(|source| {
+                        s.spawn(|| {
+                            ar_edit_core::index::build_source_index(
+                                &project_dir,
+                                source,
+                                threshold,
+                                interval_sec,
+                            )
+                        })
+                    })
+                    .collect();
+
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap())
+                    .collect()
+            });
+
+            for result in results {
+                let index = result.map_err(|e| anyhow::anyhow!("{e}"))?;
+                if let Some(s) = manifest.sources.iter_mut().find(|s| s.id == index.source_id) {
+                    s.indexed = true;
+                }
+                if !cli.json {
+                    println!(
+                        "Indexed {} ({} scenes, {} thumbnails)",
+                        index.source_id, index.scene_count, index.thumbnails.len()
+                    );
+                }
+                indexed.push(index);
+            }
+        }
+    } else {
+        for source in &sources {
+            let index = ar_edit_core::index::build_source_index(
+                &project_dir,
+                source,
+                threshold,
+                interval_sec,
+            )
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+            if let Some(s) = manifest.sources.iter_mut().find(|s| s.id == source.id) {
+                s.indexed = true;
+            }
+            if !cli.json {
+                println!(
+                    "Indexed {} ({} scenes, {} thumbnails)",
+                    source.id, index.scene_count, index.thumbnails.len()
+                );
+            }
+            indexed.push(index);
+        }
+    }
+
+    ar_edit_core::project::write_manifest(&project_dir, &manifest)?;
+
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&indexed)?);
+    }
+
+    Ok(())
+}
+
+fn cmd_index_show(cli: &Cli, source_id: &str) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+    let index =
+        ar_edit_core::index::load_index(&project_dir, source_id).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&index)?);
+    } else {
+        println!("Source: {}", index.source_id);
+        println!(
+            "  Duration: {:.1}s  Resolution: {}x{}  Codec: {}  Size: {} bytes",
+            index.metadata.duration_ms as f64 / 1000.0,
+            index.metadata.resolution.0,
+            index.metadata.resolution.1,
+            index.metadata.codec,
+            index.metadata.file_size_bytes
+        );
+        println!("  Scenes: {}  Thumbnails: {}", index.scene_count, index.thumbnails.len());
+        println!();
+
+        for scene in &index.scenes {
+            let desc = scene
+                .description
+                .as_deref()
+                .unwrap_or("(no description)");
+            let duration = scene.end_ms - scene.start_ms;
+            println!(
+                "  Scene {}: {:.1}s - {:.1}s ({:.1}s)  {}",
+                scene.index,
+                scene.start_ms as f64 / 1000.0,
+                scene.end_ms as f64 / 1000.0,
+                duration as f64 / 1000.0,
+                desc
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_index_set_description(
+    cli: &Cli,
+    source_id: &str,
+    scene: u32,
+    text: &str,
+) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+    let index = ar_edit_core::index::set_scene_description(&project_dir, source_id, scene, text)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&index.scenes[scene as usize])?
+        );
+    } else {
+        println!(
+            "Set description for {} scene {}: {}",
+            source_id, scene, text
+        );
+    }
+
     Ok(())
 }
 

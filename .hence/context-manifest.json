@@ -1,12 +1,12 @@
 {
-  "task_id": "j3-notes",
+  "task_id": "d3-index",
   "token_budget": 8000,
-  "tokens_used": 362,
+  "tokens_used": 367,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement ar-edit edit note <edit> --shot <shot-id> --text <note>: append note to shot's notes array (append-only, never deleted). Notes visible in ar-edit edit show --json output. Per DATA-MODEL section 5 shot notes. Implements REQ-051, REQ-053.",
-      "token_cost": 61,
+      "content": "Create SourceIndex JSON per DATA-MODEL section 4: combine metadata, thumbnails, and scenes. Write to index/src-NNN.index.json. Update manifest (indexed: true). Wire CLI: ar-edit index <source-id>, ar-edit index --all [--parallel N]. Per CON-008. Implements REQ-031.",
+      "token_cost": 66,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T05:12:50Z"
+  "constructed_at": "2026-02-19T05:17:37Z"
 }
