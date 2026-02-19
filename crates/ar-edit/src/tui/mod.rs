@@ -12,11 +12,13 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::prelude::*;
-use ratatui::widgets::{ListState, Paragraph};
+use ratatui::widgets::ListState;
 
 use ar_edit_core::display::{self, ResolvedShot};
 use ar_edit_core::models::{EditDocument, ShotRange, Source};
 use ar_edit_core::playback;
+
+use panels::status::RenderProgress;
 
 // ---------------------------------------------------------------------------
 // App mode
@@ -72,6 +74,7 @@ pub struct App {
     pub prompt_buffer: String,
     pub prompt_action: Option<PromptAction>,
     pub pending_play: Option<playback::PlayRequest>,
+    pub render_progress: Option<RenderProgress>,
     pub transcript_scroll: panels::transcript::TranscriptScroll,
 }
 
@@ -99,6 +102,7 @@ impl App {
             prompt_buffer: String::new(),
             prompt_action: None,
             pending_play: None,
+            render_progress: None,
             transcript_scroll: panels::transcript::TranscriptScroll::default(),
         }
     }
@@ -407,40 +411,16 @@ fn ui(f: &mut Frame, app: &mut App) {
         sources_area,
     );
 
-    // --- Status bar ---
-    draw_status(f, app, status_area);
-}
-
-// ---------------------------------------------------------------------------
-// Panel renderers
-// ---------------------------------------------------------------------------
-
-fn draw_status(f: &mut Frame, app: &App, area: Rect) {
-    let mode_label = match app.mode {
-        Mode::Normal => "NORMAL",
-        Mode::Command => "COMMAND",
-        Mode::Prompt => "PROMPT",
-        Mode::Search => "SEARCH",
-    };
-
-    let edit_label = app
-        .edit
-        .as_ref()
-        .map(|e| e.name.as_str())
-        .unwrap_or("(none)");
-
-    let shot_info = match app.selected_shot.selected() {
-        Some(i) if !app.resolved_shots.is_empty() => {
-            format!("  shot {}/{}", i + 1, app.resolved_shots.len())
-        }
-        _ => String::new(),
-    };
-
-    let status = format!(
-        " [{mode_label}]  edit: {edit_label}{shot_info}  | {}",
-        app.status_message
+    // --- Status bar (REQ-044) ---
+    let edit_name = app.edit.as_ref().map(|e| e.name.as_str());
+    panels::status::draw(
+        f,
+        app.mode,
+        edit_name,
+        selected_idx,
+        &app.resolved_shots,
+        app.render_progress.as_ref(),
+        &app.status_message,
+        status_area,
     );
-
-    let bar = Paragraph::new(status).style(Style::default().bg(Color::DarkGray).fg(Color::White));
-    f.render_widget(bar, area);
 }

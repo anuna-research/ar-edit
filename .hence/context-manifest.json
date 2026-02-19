@@ -1,12 +1,12 @@
 {
-  "task_id": "b5-ops",
+  "task_id": "h5-status",
   "token_budget": 8000,
-  "tokens_used": 373,
+  "tokens_used": 352,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement transcript operations per CON-003: list (table of source_id/duration/word_count/path), read (full transcript as text or --json), search (regex across all transcripts returning source_id, word indices, timestamps, context). Wire CLI handlers. Implements REQ-008, REQ-009, REQ-010.",
-      "token_cost": 72,
+      "content": "Implement status bar in ar-edit/src/tui/panels/status.rs: playback position, render progress bar, current mode indicator (normal/search/add). Real-time updates during playback and render. Implements REQ-044.",
+      "token_cost": 51,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T06:58:59Z"
+  "constructed_at": "2026-02-19T07:05:55Z"
 }
