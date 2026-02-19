@@ -71,7 +71,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             EditCommand::TrimSegment(args) => {
                 todo!("edit trim-segment: edit={}, shot={}", args.edit, args.shot)
             }
-            EditCommand::Show { edit } => todo!("edit show: {edit}"),
+            EditCommand::Show { edit } => cmd_show(cli, edit),
             EditCommand::History { edit } => cmd_history(cli, edit),
             EditCommand::FromTranscript { file, output } => {
                 todo!("edit from-transcript: {file:?}, output={output:?}")
@@ -195,6 +195,68 @@ fn cmd_history(cli: &Cli, edit: &str) -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: show (REQ-016)
+// ---------------------------------------------------------------------------
+
+fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
+    let path = edit_path(edit);
+    let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let project_dir = PathBuf::from(".");
+
+    let resolved = ar_edit_core::display::resolve_edit(&doc, &project_dir)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        let output = serde_json::json!({
+            "name": doc.name,
+            "head": doc.head,
+            "shot_count": resolved.len(),
+            "shots": resolved,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!("Edit: {}  ({} shots, head: {})", doc.name, resolved.len(), doc.head);
+        println!();
+
+        if resolved.is_empty() {
+            println!("  (no shots)");
+        } else {
+            // Header
+            println!(
+                "  {:<12} {:<10} {:<12} {:<12} {:<10} {}",
+                "SHOT", "SOURCE", "START", "END", "DURATION", "PREVIEW"
+            );
+            println!("  {}", "-".repeat(78));
+
+            for shot in &resolved {
+                let fallback = range_summary(&shot.range);
+                let preview = shot
+                    .text_preview
+                    .as_deref()
+                    .or(shot.scene_preview.as_deref())
+                    .unwrap_or(&fallback);
+
+                println!(
+                    "  {:<12} {:<10} {:<12} {:<12} {:<10} {}",
+                    shot.id,
+                    shot.source,
+                    ar_edit_core::display::format_time(shot.start_ms),
+                    ar_edit_core::display::format_time(shot.end_ms),
+                    ar_edit_core::display::format_time(shot.duration_ms),
+                    preview,
+                );
+
+                for note in &shot.notes {
+                    println!("  {:>12} note: {}", "", note.text);
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 

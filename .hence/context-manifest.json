@@ -1,12 +1,12 @@
 {
-  "task_id": "d3-index",
+  "task_id": "c6-display",
   "token_budget": 8000,
-  "tokens_used": 367,
+  "tokens_used": 376,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Create SourceIndex JSON per DATA-MODEL section 4: combine metadata, thumbnails, and scenes. Write to index/src-NNN.index.json. Update manifest (indexed: true). Wire CLI: ar-edit index <source-id>, ar-edit index --all [--parallel N]. Per CON-008. Implements REQ-031.",
-      "token_cost": 66,
+      "content": "Implement ar-edit edit show: join snapshot against transcripts/indices to produce resolved view per DATA-MODEL section 3 (Resolved View). Each shot gets start_ms, end_ms, duration_ms, text_preview (from transcript) or scene_preview (from scene descriptions). Table output and --json. Implements REQ-016.",
+      "token_cost": 75,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T05:17:37Z"
+  "constructed_at": "2026-02-19T05:24:03Z"
 }
