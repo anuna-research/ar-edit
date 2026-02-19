@@ -1,0 +1,25 @@
+[package]
+name = "ar-edit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+tui = ["dep:ratatui", "dep:crossterm"]
+
+[dependencies]
+ar-edit-core.workspace = true
+clap.workspace = true
+ratatui = { workspace = true, optional = true }
+crossterm = { workspace = true, optional = true }
+notify.workspace = true
+indicatif.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+clap_complete.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+tempfile.workspace = true

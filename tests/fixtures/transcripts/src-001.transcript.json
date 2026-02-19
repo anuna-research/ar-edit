@@ -1,0 +1,35 @@
+{
+  "source_id": "src-001",
+  "model": "base",
+  "language": "en",
+  "duration_ms": 5000,
+  "segments": [
+    {
+      "index": 0,
+      "start_ms": 0,
+      "end_ms": 2500,
+      "text": "Welcome to the demonstration video.",
+      "words": [
+        { "index": 0, "text": "Welcome", "start_ms": 100, "end_ms": 500, "confidence": 0.95 },
+        { "index": 1, "text": "to", "start_ms": 500, "end_ms": 650, "confidence": 0.98 },
+        { "index": 2, "text": "the", "start_ms": 650, "end_ms": 800, "confidence": 0.97 },
+        { "index": 3, "text": "demonstration", "start_ms": 800, "end_ms": 1300, "confidence": 0.92 },
+        { "index": 4, "text": "video.", "start_ms": 1300, "end_ms": 1700, "confidence": 0.96 }
+      ]
+    },
+    {
+      "index": 1,
+      "start_ms": 2500,
+      "end_ms": 5000,
+      "text": "This is a sample transcript.",
+      "words": [
+        { "index": 5, "text": "This", "start_ms": 2600, "end_ms": 2800, "confidence": 0.96 },
+        { "index": 6, "text": "is", "start_ms": 2800, "end_ms": 2950, "confidence": 0.99 },
+        { "index": 7, "text": "a", "start_ms": 2950, "end_ms": 3050, "confidence": 0.98 },
+        { "index": 8, "text": "sample", "start_ms": 3050, "end_ms": 3400, "confidence": 0.94 },
+        { "index": 9, "text": "transcript.", "start_ms": 3400, "end_ms": 3900, "confidence": 0.91 }
+      ]
+    }
+  ],
+  "word_count": 10
+}

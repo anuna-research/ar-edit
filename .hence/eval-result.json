@@ -1,0 +1,28 @@
+{
+  "recommended_status": "completed",
+  "confidence": 1.0,
+  "exit_code": 0,
+  "diff_summary": {
+    "files_changed": 5,
+    "insertions": 320,
+    "deletions": 93,
+    "file_list": [
+      ".hence/context-manifest.json",
+      "crates/ar-edit-core/src/index.rs",
+      "crates/ar-edit-core/src/project.rs",
+      "crates/ar-edit-core/src/transcript.rs",
+      "crates/ar-edit/src/main.rs"
+    ],
+    "dirty_files": 13565
+  },
+  "learnings": [
+    {
+      "key": "task-i2-errors-changes",
+      "content": "Modified 5 files (+320, -93): .hence/context-manifest.json, crates/ar-edit-core/src/index.rs, crates/ar-edit-core/src/project.rs, crates/ar-edit-core/src/transcript.rs, crates/ar-edit/src/main.rs",
+      "memory_type": "episodic",
+      "confidence": 0.8
+    }
+  ],
+  "branch_name": "hence/i2-errors-v1",
+  "evaluated_at": "2026-02-19T14:27:04Z"
+}
