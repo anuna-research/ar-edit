@@ -933,15 +933,18 @@ fn cmd_index_set_description(
     text: &str,
 ) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
-    let index = ar_edit_core::index::set_scene_description(&project_dir, source_id, scene, text)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let (index, old_description) =
+        ar_edit_core::index::set_scene_description(&project_dir, source_id, scene, text)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if cli.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&index.scenes[scene as usize])?
-        );
+        let mut output = serde_json::to_value(&index.scenes[scene as usize])?;
+        output["old_description"] = serde_json::json!(old_description);
+        println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
+        if let Some(ref old) = old_description {
+            eprintln!("Replaced description for {} scene {}: {}", source_id, scene, old);
+        }
         println!(
             "Set description for {} scene {}: {}",
             source_id, scene, text
