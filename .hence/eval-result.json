@@ -3,25 +3,24 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 4,
-    "insertions": 354,
-    "deletions": 56,
+    "files_changed": 3,
+    "insertions": 766,
+    "deletions": 47,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit/src/tui/mod.rs",
-      "crates/ar-edit/src/tui/panels/mod.rs",
-      "crates/ar-edit/src/tui/panels/timeline.rs"
+      "crates/ar-edit/src/tui/input.rs",
+      "crates/ar-edit/src/tui/mod.rs"
     ],
-    "dirty_files": 2105
+    "dirty_files": 2688
   },
   "learnings": [
     {
-      "key": "task-h2-timeline-changes",
-      "content": "Modified 4 files (+354, -56): .hence/context-manifest.json, crates/ar-edit/src/tui/mod.rs, crates/ar-edit/src/tui/panels/mod.rs, crates/ar-edit/src/tui/panels/timeline.rs",
+      "key": "task-h6-keys-changes",
+      "content": "Modified 3 files (+766, -47): .hence/context-manifest.json, crates/ar-edit/src/tui/input.rs, crates/ar-edit/src/tui/mod.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/h2-timeline-v1",
-  "evaluated_at": "2026-02-19T05:54:46Z"
+  "branch_name": "hence/h6-keys-v1",
+  "evaluated_at": "2026-02-19T06:07:44Z"
 }
