@@ -3,27 +3,25 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 6,
-    "insertions": 791,
-    "deletions": 13,
+    "files_changed": 4,
+    "insertions": 1551,
+    "deletions": 0,
     "file_list": [
-      ".hence/context-manifest.json",
-      "crates/ar-edit-core/src/lib.rs",
-      "crates/ar-edit-core/src/render.rs",
-      "crates/ar-edit-core/src/subtitles.rs",
-      "crates/ar-edit-core/tests/test_059_render_codec.rs",
-      "crates/ar-edit/src/main.rs"
+      "crates/ar-edit-core/tests/test_025_basic_render.rs",
+      "crates/ar-edit-core/tests/test_026_codec_options.rs",
+      "crates/ar-edit-core/tests/test_027_progress_json.rs",
+      "crates/ar-edit-core/tests/test_042_subtitle_embedding.rs"
     ],
-    "dirty_files": 11857
+    "dirty_files": 930
   },
   "learnings": [
     {
-      "key": "task-f5-subtitles-changes",
-      "content": "Modified 6 files (+791, -13): .hence/context-manifest.json, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/render.rs, crates/ar-edit-core/src/subtitles.rs, crates/ar-edit-core/tests/test_059_render_codec.rs and 1 more",
+      "key": "task-f6-tests-changes",
+      "content": "Modified 4 files (+1551, -0): crates/ar-edit-core/tests/test_025_basic_render.rs, crates/ar-edit-core/tests/test_026_codec_options.rs, crates/ar-edit-core/tests/test_027_progress_json.rs, crates/ar-edit-core/tests/test_042_subtitle_embedding.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/f5-subtitles-v1",
-  "evaluated_at": "2026-02-19T13:42:09Z"
+  "branch_name": "hence/f6-tests-v1",
+  "evaluated_at": "2026-02-19T13:52:12Z"
 }
