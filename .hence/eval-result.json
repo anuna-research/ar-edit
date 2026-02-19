@@ -3,24 +3,25 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 3,
-    "insertions": 30,
-    "deletions": 15,
+    "files_changed": 4,
+    "insertions": 1594,
+    "deletions": 2,
     "file_list": [
-      ".hence/context-manifest.json",
-      "crates/ar-edit-core/src/index.rs",
-      "crates/ar-edit/src/main.rs"
+      "crates/ar-edit-core/tests/test_021_segment_preview.rs",
+      "crates/ar-edit-core/tests/test_022_full_edit_playback.rs",
+      "crates/ar-edit-core/tests/test_023_overlay.rs",
+      "crates/ar-edit-core/tests/test_024_source_playback.rs"
     ],
-    "dirty_files": 4102
+    "dirty_files": 3636
   },
   "learnings": [
     {
-      "key": "task-d4-describe-changes",
-      "content": "Modified 3 files (+30, -15): .hence/context-manifest.json, crates/ar-edit-core/src/index.rs, crates/ar-edit/src/main.rs",
+      "key": "task-e6-tests-changes",
+      "content": "Modified 4 files (+1594, -2): crates/ar-edit-core/tests/test_021_segment_preview.rs, crates/ar-edit-core/tests/test_022_full_edit_playback.rs, crates/ar-edit-core/tests/test_023_overlay.rs, crates/ar-edit-core/tests/test_024_source_playback.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/d4-describe-v1",
-  "evaluated_at": "2026-02-19T08:02:52Z"
+  "branch_name": "hence/e6-tests-v1",
+  "evaluated_at": "2026-02-19T08:14:56Z"
 }

@@ -1,12 +1,12 @@
 {
-  "task_id": "d4-describe",
+  "task_id": "e6-tests",
   "token_budget": 8000,
-  "tokens_used": 368,
+  "tokens_used": 341,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Generate description:null placeholders for all scenes. Implement ar-edit index set-description <source-id> --scene <N> --text '<desc>' to populate them (append-only, old value logged). Implement ar-edit index show <source-id>. Per CON-008. Implements REQ-033, REQ-035.",
-      "token_cost": 67,
+      "content": "Write integration tests TEST-021 (segment preview), TEST-022 (full edit playback), TEST-023 (overlay present via ffprobe), TEST-024 (source playback at timestamp).",
+      "token_cost": 40,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T07:59:21Z"
+  "constructed_at": "2026-02-19T08:03:44Z"
 }
