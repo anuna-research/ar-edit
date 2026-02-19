@@ -1,12 +1,12 @@
 {
-  "task_id": "h9-tests",
+  "task_id": "f2-concat",
   "token_budget": 8000,
-  "tokens_used": 362,
+  "tokens_used": 349,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Manual testing checklist TEST-043 (launch), TEST-044 (timeline panel), TEST-045 (transcript highlighting), TEST-046 (source list), TEST-047 (playback integration), TEST-048 (keyboard operations), TEST-049 (render progress), TEST-050 (search mode).",
-      "token_cost": 61,
+      "content": "Implement ffmpeg concat demuxer: generate filelist.txt with all segments in order, run ffmpeg -f concat -safe 0 -i filelist.txt -c copy <output>. Handle segment ordering matching edit snapshot.",
+      "token_cost": 48,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T12:06:04Z"
+  "constructed_at": "2026-02-19T12:22:38Z"
 }

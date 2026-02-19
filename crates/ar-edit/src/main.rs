@@ -87,7 +87,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         Commands::Redo { edit } => cmd_redo(cli, edit),
         Commands::Validate { edit } => todo!("validate: {edit}"),
         Commands::Play(args) => cmd_play(cli, args),
-        Commands::Render(args) => todo!("render: edit={}, output={:?}", args.edit, args.output),
+        Commands::Render(args) => cmd_render(cli, args),
         Commands::Index(args) => match &args.command {
             Some(IndexCommand::Show { source_id }) => cmd_index_show(cli, source_id),
             Some(IndexCommand::SetDescription {
@@ -597,6 +597,58 @@ fn cmd_play_full(
             project_dir,
         );
         println!("{}", serde_json::to_string_pretty(&feedback)?);
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: render (CON-007, REQ-022)
+// ---------------------------------------------------------------------------
+
+fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+    let path = edit_path(&args.edit);
+    let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let shot_count = doc.snapshot.shots.len();
+    if shot_count == 0 {
+        anyhow::bail!("edit '{}' has no shots", args.edit);
+    }
+
+    let overlay_mode = if args.burn_overlay {
+        ar_edit_core::overlay::OverlayMode::Full
+    } else {
+        ar_edit_core::overlay::OverlayMode::Clean
+    };
+
+    if !cli.json {
+        let overlay_label = if args.burn_overlay { " [overlay: full]" } else { "" };
+        eprintln!(
+            "Rendering '{}' ({} shots) to {}{}...",
+            args.edit, shot_count, args.output.display(), overlay_label
+        );
+    }
+
+    // Ensure parent directory exists for the output file
+    if let Some(parent) = args.output.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+
+    ar_edit_core::render::render_to_file(&doc, &project_dir, &args.output, overlay_mode)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        let output = serde_json::json!({
+            "edit": args.edit,
+            "output": args.output.display().to_string(),
+            "shot_count": shot_count,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        eprintln!("Done. Output: {}", args.output.display());
     }
 
     Ok(())
