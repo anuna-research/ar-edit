@@ -3,25 +3,24 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 4,
-    "insertions": 1222,
-    "deletions": 7,
+    "files_changed": 3,
+    "insertions": 575,
+    "deletions": 5,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit-core/src/fuzzy.rs",
-      "crates/ar-edit-core/src/import.rs",
-      "crates/ar-edit-core/src/lib.rs"
+      "crates/ar-edit-core/tests/test_018_edit_from_transcript.rs",
+      "crates/ar-edit-core/tests/test_020_export_reimport_roundtrip.rs"
     ],
-    "dirty_files": 4502
+    "dirty_files": 777
   },
   "learnings": [
     {
-      "key": "task-g3-fuzzy-changes",
-      "content": "Modified 4 files (+1222, -7): .hence/context-manifest.json, crates/ar-edit-core/src/fuzzy.rs, crates/ar-edit-core/src/import.rs, crates/ar-edit-core/src/lib.rs",
+      "key": "task-g4-tests-changes",
+      "content": "Modified 3 files (+575, -5): .hence/context-manifest.json, crates/ar-edit-core/tests/test_018_edit_from_transcript.rs, crates/ar-edit-core/tests/test_020_export_reimport_roundtrip.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/g3-fuzzy-v1",
-  "evaluated_at": "2026-02-19T11:09:13Z"
+  "branch_name": "hence/g4-tests-v1",
+  "evaluated_at": "2026-02-19T11:18:24Z"
 }
