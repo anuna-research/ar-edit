@@ -842,6 +842,48 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_render_minimal() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "render",
+            "rough-cut",
+            "-o",
+            "output.mp4",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Render(ref args) => {
+                assert_eq!(args.edit, "rough-cut");
+                assert_eq!(args.output, PathBuf::from("output.mp4"));
+                assert!(!args.subtitles);
+                assert!(!args.burn_overlay);
+                assert!(args.codec.is_none());
+                assert!(args.resolution.is_none());
+            }
+            _ => panic!("expected Render"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_render_burn_overlay() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "render",
+            "rough-cut",
+            "-o",
+            "output.mp4",
+            "--burn-overlay",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Render(ref args) => {
+                assert!(args.burn_overlay);
+            }
+            _ => panic!("expected Render"),
+        }
+    }
+
+    #[test]
     fn cli_parses_index_source() {
         let cli = Cli::try_parse_from([
             "ar-edit",

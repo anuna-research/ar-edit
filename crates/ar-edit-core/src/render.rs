@@ -48,21 +48,69 @@ pub fn render_preview(
     project_dir: &Path,
     overlay_mode: OverlayMode,
 ) -> Result<PathBuf, RenderError> {
+    let preview_dir = std::env::temp_dir().join(format!("ar-edit-preview-{}", doc.name));
+    std::fs::create_dir_all(&preview_dir)?;
+
+    let output_path = preview_dir.join("preview.mp4");
+    render_to_file(doc, project_dir, &output_path, overlay_mode)?;
+
+    Ok(output_path)
+}
+
+/// Render an edit document to a specific output file using the ffmpeg concat demuxer.
+///
+/// This is the core concat pipeline:
+///   1. Resolve all shots to absolute timestamps via `display::resolve_edit`
+///   2. Extract each shot segment from its source video (stream copy or with overlay)
+///   3. Generate a `filelist.txt` listing all segments in edit-snapshot order
+///   4. Run `ffmpeg -f concat -safe 0 -i filelist.txt -c copy <output>`
+///
+/// Segment ordering matches the edit snapshot exactly — shots appear in the
+/// concat file in the same order as `doc.snapshot.shots`.
+pub fn render_to_file(
+    doc: &EditDocument,
+    project_dir: &Path,
+    output: &Path,
+    overlay_mode: OverlayMode,
+) -> Result<(), RenderError> {
     let resolved = display::resolve_edit(doc, project_dir)?;
     if resolved.is_empty() {
         return Err(RenderError::EmptyEdit);
     }
 
-    let preview_dir = std::env::temp_dir().join(format!("ar-edit-preview-{}", doc.name));
-    std::fs::create_dir_all(&preview_dir)?;
+    // Use a work directory next to the output file for intermediate segments
+    let work_dir = output
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(format!(
+            ".ar-edit-render-{}",
+            output.file_stem().and_then(|s| s.to_str()).unwrap_or("out")
+        ));
+    std::fs::create_dir_all(&work_dir)?;
 
-    // Extract each shot as a segment
+    let result = render_segments_and_concat(&resolved, doc, project_dir, &work_dir, output, overlay_mode);
+
+    // Clean up work directory regardless of success/failure
+    let _ = std::fs::remove_dir_all(&work_dir);
+
+    result
+}
+
+/// Internal: extract segments, write filelist.txt, and concatenate.
+fn render_segments_and_concat(
+    resolved: &[ResolvedShot],
+    _doc: &EditDocument,
+    project_dir: &Path,
+    work_dir: &Path,
+    output: &Path,
+    overlay_mode: OverlayMode,
+) -> Result<(), RenderError> {
     let mut segment_paths = Vec::with_capacity(resolved.len());
     let mut timeline_offset_ms: u64 = 0;
 
     for (i, shot) in resolved.iter().enumerate() {
         let (source_path, _) = playback::resolve_source_path(&shot.source, project_dir)?;
-        let segment_path = preview_dir.join(format!("segment_{i:04}.mp4"));
+        let segment_path = work_dir.join(format!("segment_{i:04}.mp4"));
 
         let filter = overlay::build_drawtext_filter(
             overlay_mode,
@@ -89,15 +137,14 @@ pub fn render_preview(
         timeline_offset_ms += shot.duration_ms;
     }
 
-    // Write concat demuxer file
-    let concat_list_path = preview_dir.join("concat.txt");
+    // Write concat demuxer filelist
+    let concat_list_path = work_dir.join("filelist.txt");
     write_concat_list(&segment_paths, &concat_list_path)?;
 
-    // Concatenate segments
-    let output_path = preview_dir.join("preview.mp4");
-    concat_segments(&concat_list_path, &output_path)?;
+    // Concatenate segments into final output
+    concat_segments(&concat_list_path, output)?;
 
-    Ok(output_path)
+    Ok(())
 }
 
 /// Build a human-readable summary of what will be rendered, without executing ffmpeg.
@@ -309,5 +356,70 @@ mod tests {
     fn ffmpeg_failed_error_message() {
         let err = RenderError::FfmpegFailed("exit code 1".into());
         assert!(err.to_string().contains("exit code 1"));
+    }
+
+    // -- render_to_file -------------------------------------------------------
+
+    #[test]
+    fn render_to_file_empty_edit_returns_error() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("transcripts")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("index")).unwrap();
+
+        let doc = EditDocument::create("test");
+        let output = tmp.path().join("output.mp4");
+        let result = render_to_file(&doc, tmp.path(), &output, OverlayMode::Clean);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("no shots"));
+    }
+
+    // -- write_concat_list ordering -------------------------------------------
+
+    #[test]
+    fn write_concat_list_preserves_segment_order() {
+        let tmp = TempDir::new().unwrap();
+        let segments = vec![
+            PathBuf::from("/tmp/segment_0002.mp4"),
+            PathBuf::from("/tmp/segment_0000.mp4"),
+            PathBuf::from("/tmp/segment_0001.mp4"),
+        ];
+        let list_path = tmp.path().join("filelist.txt");
+        write_concat_list(&segments, &list_path).unwrap();
+
+        let content = std::fs::read_to_string(&list_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 3);
+        // Order must match the input order, not sorted
+        assert_eq!(lines[0], "file '/tmp/segment_0002.mp4'");
+        assert_eq!(lines[1], "file '/tmp/segment_0000.mp4'");
+        assert_eq!(lines[2], "file '/tmp/segment_0001.mp4'");
+    }
+
+    #[test]
+    fn write_concat_list_handles_paths_with_spaces() {
+        let tmp = TempDir::new().unwrap();
+        let segments = vec![
+            PathBuf::from("/my videos/segment 001.mp4"),
+        ];
+        let list_path = tmp.path().join("filelist.txt");
+        write_concat_list(&segments, &list_path).unwrap();
+
+        let content = std::fs::read_to_string(&list_path).unwrap();
+        assert_eq!(content.trim(), "file '/my videos/segment 001.mp4'");
+    }
+
+    // -- extract_segment (error path) -----------------------------------------
+
+    #[test]
+    fn extract_segment_nonexistent_source() {
+        let tmp = TempDir::new().unwrap();
+        let output = tmp.path().join("out.mp4");
+        let result = extract_segment(
+            &PathBuf::from("/nonexistent/video.mp4"),
+            0,
+            5000,
+            &output,
+        );
+        assert!(result.is_err());
     }
 }
