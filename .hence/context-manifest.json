@@ -1,12 +1,12 @@
 {
-  "task_id": "b3-ingest",
+  "task_id": "h7-watcher",
   "token_budget": 8000,
-  "tokens_used": 370,
+  "tokens_used": 355,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Parse whisper.cpp JSON into internal Transcript format per DATA-MODEL section 2. Filter word tokens (strip [BLANK], [SOT] etc.), assign sequential global word indices across segments, convert timestamps to integer milliseconds, preserve segment boundaries. Implements REQ-005.",
-      "token_cost": 69,
+      "content": "Implement filesystem watcher using notify crate in ar-edit/src/tui/events.rs: detect external changes to edit document JSON (from agent CLI commands or manual edits). Reload app state on change. Per ADR-004 consequence.",
+      "token_cost": 54,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T06:47:22Z"
+  "constructed_at": "2026-02-19T06:54:31Z"
 }
