@@ -3,28 +3,23 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 7,
-    "insertions": 1514,
-    "deletions": 0,
+    "files_changed": 2,
+    "insertions": 632,
+    "deletions": 5,
     "file_list": [
-      "Cargo.lock",
-      "Cargo.toml",
-      "crates/ar-edit-core/Cargo.toml",
-      "crates/ar-edit-core/src/lib.rs",
-      "crates/ar-edit-core/src/models/mod.rs",
-      "crates/ar-edit/Cargo.toml",
-      "crates/ar-edit/src/main.rs"
+      ".hence/context-manifest.json",
+      "crates/ar-edit-core/src/models/mod.rs"
     ],
-    "dirty_files": 2
+    "dirty_files": 310
   },
   "learnings": [
     {
-      "key": "task-a1-workspace-changes",
-      "content": "Modified 7 files (+1514, -0): Cargo.lock, Cargo.toml, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/models/mod.rs and 2 more",
+      "key": "task-a2-models-changes",
+      "content": "Modified 2 files (+632, -5): .hence/context-manifest.json, crates/ar-edit-core/src/models/mod.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/a1-workspace-v1",
-  "evaluated_at": "2026-02-19T04:04:31Z"
+  "branch_name": "hence/a2-models-v1",
+  "evaluated_at": "2026-02-19T04:09:51Z"
 }
