@@ -4,11 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+tui = ["dep:ratatui", "dep:crossterm"]
+
 [dependencies]
 ar-edit-core.workspace = true
 clap.workspace = true
-ratatui.workspace = true
-crossterm.workspace = true
+ratatui = { workspace = true, optional = true }
+crossterm = { workspace = true, optional = true }
 notify.workspace = true
 indicatif.workspace = true
 tokio.workspace = true
