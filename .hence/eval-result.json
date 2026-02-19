@@ -3,23 +3,29 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 2,
-    "insertions": 471,
-    "deletions": 5,
+    "files_changed": 8,
+    "insertions": 1537,
+    "deletions": 0,
     "file_list": [
-      ".hence/context-manifest.json",
-      "tests/e2e/test_full_pipeline.sh"
+      "crates/ar-edit-core/tests/fixtures/indexes/src-001.index.json",
+      "crates/ar-edit-core/tests/fixtures/indexes/src-002.index.json",
+      "crates/ar-edit-core/tests/fixtures/indexes/src-003-no-descriptions.index.json",
+      "crates/ar-edit-core/tests/test_037_source_indexing.rs",
+      "crates/ar-edit-core/tests/test_038_thumbnail_extraction.rs",
+      "crates/ar-edit-core/tests/test_039_scene_description_scaffolding.rs",
+      "crates/ar-edit-core/tests/test_040_cross_index_search.rs",
+      "crates/ar-edit-core/tests/test_041_index_summary.rs"
     ],
-    "dirty_files": 857
+    "dirty_files": 852
   },
   "learnings": [
     {
-      "key": "task-i1-e2e-changes",
-      "content": "Modified 2 files (+471, -5): .hence/context-manifest.json, tests/e2e/test_full_pipeline.sh",
+      "key": "task-d6-tests-changes",
+      "content": "Modified 8 files (+1537, -0): crates/ar-edit-core/tests/fixtures/indexes/src-001.index.json, crates/ar-edit-core/tests/fixtures/indexes/src-002.index.json, crates/ar-edit-core/tests/fixtures/indexes/src-003-no-descriptions.index.json, crates/ar-edit-core/tests/test_037_source_indexing.rs, crates/ar-edit-core/tests/test_038_thumbnail_extraction.rs and 3 more",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/i1-e2e-v1",
-  "evaluated_at": "2026-02-19T14:03:31Z"
+  "branch_name": "hence/d6-tests-v1",
+  "evaluated_at": "2026-02-19T14:11:18Z"
 }

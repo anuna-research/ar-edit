@@ -1,0 +1,47 @@
+{
+  "source_id": "src-002",
+  "indexed_at": "2026-02-19T12:10:00Z",
+  "metadata": {
+    "duration_ms": 90000,
+    "resolution": [1280, 720],
+    "codec": "h265",
+    "file_size_bytes": 31457280
+  },
+  "thumbnails": [
+    { "path": "thumbnails/src-002_00m00s.jpg", "timestamp_ms": 0, "description": null },
+    { "path": "thumbnails/src-002_00m10s.jpg", "timestamp_ms": 10000, "description": null },
+    { "path": "thumbnails/src-002_00m20s.jpg", "timestamp_ms": 20000, "description": null },
+    { "path": "thumbnails/src-002_00m25s.jpg", "timestamp_ms": 25000, "description": "B-roll transition" },
+    { "path": "thumbnails/src-002_00m30s.jpg", "timestamp_ms": 30000, "description": null },
+    { "path": "thumbnails/src-002_00m40s.jpg", "timestamp_ms": 40000, "description": null },
+    { "path": "thumbnails/src-002_00m50s.jpg", "timestamp_ms": 50000, "description": null },
+    { "path": "thumbnails/src-002_01m00s.jpg", "timestamp_ms": 60000, "description": null },
+    { "path": "thumbnails/src-002_01m05s.jpg", "timestamp_ms": 65000, "description": null },
+    { "path": "thumbnails/src-002_01m10s.jpg", "timestamp_ms": 70000, "description": null },
+    { "path": "thumbnails/src-002_01m20s.jpg", "timestamp_ms": 80000, "description": null }
+  ],
+  "scene_count": 3,
+  "scenes": [
+    {
+      "index": 0,
+      "start_ms": 0,
+      "end_ms": 25000,
+      "thumbnail": "thumbnails/src-002_00m00s.jpg",
+      "description": "Presenter at desk"
+    },
+    {
+      "index": 1,
+      "start_ms": 25000,
+      "end_ms": 65000,
+      "thumbnail": "thumbnails/src-002_00m25s.jpg",
+      "description": "B-roll city skyline"
+    },
+    {
+      "index": 2,
+      "start_ms": 65000,
+      "end_ms": 90000,
+      "thumbnail": "thumbnails/src-002_01m05s.jpg",
+      "description": "Interview close-up"
+    }
+  ]
+}
