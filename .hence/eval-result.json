@@ -4,24 +4,24 @@
   "exit_code": 0,
   "diff_summary": {
     "files_changed": 4,
-    "insertions": 381,
-    "deletions": 8,
+    "insertions": 262,
+    "deletions": 5,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit/Cargo.toml",
-      "crates/ar-edit/src/main.rs",
-      "crates/ar-edit/src/tui/mod.rs"
+      "crates/ar-edit-core/src/lib.rs",
+      "crates/ar-edit-core/src/transcript.rs",
+      "crates/ar-edit-core/tests/test_004_audio_extraction.rs"
     ],
-    "dirty_files": 2801
+    "dirty_files": 1462
   },
   "learnings": [
     {
-      "key": "task-h1-skeleton-changes",
-      "content": "Modified 4 files (+381, -8): .hence/context-manifest.json, crates/ar-edit/Cargo.toml, crates/ar-edit/src/main.rs, crates/ar-edit/src/tui/mod.rs",
+      "key": "task-b1-audio-changes",
+      "content": "Modified 4 files (+262, -5): .hence/context-manifest.json, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/transcript.rs, crates/ar-edit-core/tests/test_004_audio_extraction.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/h1-skeleton-v1",
-  "evaluated_at": "2026-02-19T05:45:15Z"
+  "branch_name": "hence/b1-audio-v1",
+  "evaluated_at": "2026-02-19T05:48:17Z"
 }
