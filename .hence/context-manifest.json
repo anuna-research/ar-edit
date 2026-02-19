@@ -1,12 +1,12 @@
 {
-  "task_id": "h6-keys",
+  "task_id": "h4-sources",
   "token_budget": 8000,
-  "tokens_used": 400,
+  "tokens_used": 354,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement keyboard handlers in ar-edit/src/tui/input.rs: a (add shot with source/range prompt), d (delete selected shot), J/K (move shot down/up), t (trim selection in transcript panel), p/Enter (play selected shot or full edit), ctrl-z (undo), ctrl-y (redo), / (enter search mode), m (add marker), n (add shot note), q (quit). All mutating ops write to edit JSON immediately. Implements REQ-043.",
-      "token_cost": 99,
+      "content": "Implement source list panel in ar-edit/src/tui/panels/sources.rs: all registered sources with status (transcribed yes/no, indexed yes/no, duration). Select source to view its transcript or index. Implements REQ-041.",
+      "token_cost": 53,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T05:55:14Z"
+  "constructed_at": "2026-02-19T06:08:16Z"
 }

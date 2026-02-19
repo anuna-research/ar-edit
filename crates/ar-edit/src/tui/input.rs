@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ar_edit_core::models::ShotRange;
 use ar_edit_core::playback;
 
-use super::{App, Mode, PromptAction};
+use super::{App, Focus, Mode, PromptAction};
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -40,6 +40,23 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
         return;
     }
 
+    // Tab toggles focus between panels
+    if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
+        app.focus = match app.focus {
+            Focus::Timeline => Focus::Sources,
+            Focus::Sources => Focus::Timeline,
+        };
+        return;
+    }
+
+    match app.focus {
+        Focus::Timeline => handle_normal_timeline(app, key),
+        Focus::Sources => handle_normal_sources(app, key),
+    }
+}
+
+/// Normal-mode keys when the timeline panel is focused.
+fn handle_normal_timeline(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Char('j') | KeyCode::Down => app.select_next(),
@@ -64,6 +81,25 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             start_prompt(app, "marker source ID:", PromptAction::MarkerSource);
         }
         KeyCode::Char('p') | KeyCode::Enter => do_play(app),
+        KeyCode::Char('/') => {
+            app.mode = Mode::Search;
+            app.prompt_buffer.clear();
+            app.status_message = String::from("/");
+        }
+        KeyCode::Char(':') => {
+            app.mode = Mode::Command;
+            app.status_message = String::from(":");
+        }
+        _ => {}
+    }
+}
+
+/// Normal-mode keys when the sources panel is focused.
+fn handle_normal_sources(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('q') => app.should_quit = true,
+        KeyCode::Char('j') | KeyCode::Down => app.select_next_source(),
+        KeyCode::Char('k') | KeyCode::Up => app.select_previous_source(),
         KeyCode::Char('/') => {
             app.mode = Mode::Search;
             app.prompt_buffer.clear();

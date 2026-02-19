@@ -11,7 +11,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, ListState, Paragraph};
 
 use ar_edit_core::display::{self, ResolvedShot};
 use ar_edit_core::models::{EditDocument, ShotRange, Source};
@@ -27,6 +27,13 @@ pub enum Mode {
     Command,
     Prompt,
     Search,
+}
+
+/// Which panel currently has keyboard focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    Timeline,
+    Sources,
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +60,8 @@ pub struct App {
     pub sources: Vec<Source>,
     pub resolved_shots: Vec<ResolvedShot>,
     pub selected_shot: ListState,
+    pub selected_source: ListState,
+    pub focus: Focus,
     pub mode: Mode,
     pub project_dir: PathBuf,
     pub status_message: String,
@@ -69,11 +78,16 @@ impl App {
         let mut selected_shot = ListState::default();
         selected_shot.select(Some(0));
 
+        let mut selected_source = ListState::default();
+        selected_source.select(Some(0));
+
         Self {
             edit: None,
             sources: Vec::new(),
             resolved_shots: Vec::new(),
             selected_shot,
+            selected_source,
+            focus: Focus::Timeline,
             mode: Mode::Normal,
             project_dir,
             status_message: input::default_status(),
@@ -156,6 +170,25 @@ impl App {
     pub(crate) fn selected_shot_id(&self) -> Option<String> {
         let idx = self.selected_shot.selected()?;
         self.resolved_shots.get(idx).map(|s| s.id.clone())
+    }
+
+    pub(crate) fn select_next_source(&mut self) {
+        let count = self.sources.len();
+        if count == 0 {
+            return;
+        }
+        let i = self.selected_source.selected().unwrap_or(0);
+        self.selected_source.select(Some((i + 1).min(count - 1)));
+    }
+
+    pub(crate) fn select_previous_source(&mut self) {
+        let i = self.selected_source.selected().unwrap_or(0);
+        self.selected_source.select(Some(i.saturating_sub(1)));
+    }
+
+    pub(crate) fn selected_source(&self) -> Option<&Source> {
+        let idx = self.selected_source.selected()?;
+        self.sources.get(idx)
     }
 }
 
@@ -293,11 +326,27 @@ fn ui(f: &mut Frame, app: &mut App) {
         timeline_area,
     );
 
-    // --- Transcript panel (REQ-040) ---
-    draw_transcript(f, app, transcript_area);
+    // --- Right panel: transcript or source detail ---
+    match app.focus {
+        Focus::Sources => {
+            if let Some(source) = app.selected_source().cloned() {
+                panels::sources::draw_detail(f, &source, transcript_area);
+            } else {
+                draw_transcript(f, app, transcript_area);
+            }
+        }
+        Focus::Timeline => {
+            draw_transcript(f, app, transcript_area);
+        }
+    }
 
     // --- Sources panel (REQ-041) ---
-    draw_sources(f, app, sources_area);
+    panels::sources::draw(
+        f,
+        &app.sources,
+        &mut app.selected_source,
+        sources_area,
+    );
 
     // --- Status bar ---
     draw_status(f, app, status_area);
@@ -340,29 +389,6 @@ fn draw_transcript(f: &mut Frame, app: &App, area: Rect) {
         .block(block)
         .wrap(ratatui::widgets::Wrap { trim: true });
     f.render_widget(paragraph, area);
-}
-
-fn draw_sources(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default()
-        .title(" Sources ")
-        .borders(Borders::ALL);
-
-    let items: Vec<ListItem> = if app.sources.is_empty() {
-        vec![ListItem::new("(no sources)")]
-    } else {
-        app.sources
-            .iter()
-            .map(|s| {
-                ListItem::new(format!(
-                    "{} {} ({}x{})",
-                    s.id, s.original_filename, s.resolution.0, s.resolution.1
-                ))
-            })
-            .collect()
-    };
-
-    let list = List::new(items).block(block);
-    f.render_widget(list, area);
 }
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
