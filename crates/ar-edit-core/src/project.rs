@@ -22,7 +22,7 @@ pub enum ProjectError {
     NotAVideo { path: PathBuf, reason: String },
     #[error("ffprobe failed: {0}")]
     FfprobeFailed(String),
-    #[error("not a project directory (missing manifest.json)")]
+    #[error("not an ar-edit project directory (missing manifest.json)")]
     NotAProject,
     #[error(transparent)]
     Io(#[from] std::io::Error),

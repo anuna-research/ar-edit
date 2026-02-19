@@ -24,7 +24,7 @@ pub enum TranscriptError {
     WhisperFailed(String),
     #[error("invalid whisper model '{0}': expected one of tiny, base, small, medium, large")]
     InvalidModel(String),
-    #[error("whisper model not found: searched {searched:?} for ggml-{model}.bin")]
+    #[error("whisper model 'ggml-{model}.bin' not found in: {}", searched.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "))]
     ModelNotFound {
         model: String,
         searched: Vec<PathBuf>,
