@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -8,6 +9,7 @@ use crate::display::{self, ResolvedShot};
 use crate::models::EditDocument;
 use crate::overlay::{self, OverlayInfo, OverlayMode};
 use crate::playback;
+use crate::project;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -19,12 +21,35 @@ pub enum RenderError {
     FfmpegFailed(String),
     #[error("edit has no shots")]
     EmptyEdit,
+    #[error("invalid resolution format: {0} (expected WxH, e.g. 1920x1080)")]
+    InvalidResolution(String),
     #[error(transparent)]
     Display(#[from] display::DisplayError),
     #[error(transparent)]
     Playback(#[from] playback::PlaybackError),
     #[error(transparent)]
+    Project(#[from] project::ProjectError),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+// ---------------------------------------------------------------------------
+// Render options (REQ-026)
+// ---------------------------------------------------------------------------
+
+/// Options controlling the output format of a render.
+///
+/// When `video_codec` or `resolution` is `None`, the render pipeline uses
+/// stream copy when possible (all sources match) or defaults to H.264/AAC
+/// when re-encoding is needed.
+#[derive(Debug, Clone, Default)]
+pub struct RenderOptions {
+    /// Target video codec (e.g. "h264", "h265"). `None` means "match sources
+    /// or default to h264".
+    pub video_codec: Option<String>,
+    /// Target output resolution `(width, height)`. `None` means "use highest
+    /// input resolution".
+    pub resolution: Option<(u32, u32)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -52,18 +77,19 @@ pub fn render_preview(
     std::fs::create_dir_all(&preview_dir)?;
 
     let output_path = preview_dir.join("preview.mp4");
-    render_to_file(doc, project_dir, &output_path, overlay_mode)?;
+    render_to_file(doc, project_dir, &output_path, overlay_mode, &RenderOptions::default())?;
 
     Ok(output_path)
 }
 
 /// Render an edit document to a specific output file using the ffmpeg concat demuxer.
 ///
-/// This is the core concat pipeline:
+/// This is the core concat pipeline (REQ-025, REQ-026):
 ///   1. Resolve all shots to absolute timestamps via `display::resolve_edit`
-///   2. Extract each shot segment from its source video (stream copy or with overlay)
-///   3. Generate a `filelist.txt` listing all segments in edit-snapshot order
-///   4. Run `ffmpeg -f concat -safe 0 -i filelist.txt -c copy <output>`
+///   2. For each shot, decide stream copy vs re-encode based on codec/resolution match
+///   3. Extract each segment (stream copy or re-encoded to target codec/resolution)
+///   4. Generate a `filelist.txt` listing all segments in edit-snapshot order
+///   5. Run `ffmpeg -f concat -safe 0 -i filelist.txt -c copy <output>`
 ///
 /// Segment ordering matches the edit snapshot exactly — shots appear in the
 /// concat file in the same order as `doc.snapshot.shots`.
@@ -72,6 +98,7 @@ pub fn render_to_file(
     project_dir: &Path,
     output: &Path,
     overlay_mode: OverlayMode,
+    options: &RenderOptions,
 ) -> Result<(), RenderError> {
     let resolved = display::resolve_edit(doc, project_dir)?;
     if resolved.is_empty() {
@@ -88,7 +115,9 @@ pub fn render_to_file(
         ));
     std::fs::create_dir_all(&work_dir)?;
 
-    let result = render_segments_and_concat(&resolved, doc, project_dir, &work_dir, output, overlay_mode);
+    let result = render_segments_and_concat(
+        &resolved, doc, project_dir, &work_dir, output, overlay_mode, options,
+    );
 
     // Clean up work directory regardless of success/failure
     let _ = std::fs::remove_dir_all(&work_dir);
@@ -104,7 +133,11 @@ fn render_segments_and_concat(
     work_dir: &Path,
     output: &Path,
     overlay_mode: OverlayMode,
+    options: &RenderOptions,
 ) -> Result<(), RenderError> {
+    // Resolve the target encoding parameters from options and source metadata
+    let encode_params = resolve_encode_params(resolved, project_dir, options)?;
+
     let mut segment_paths = Vec::with_capacity(resolved.len());
     let mut timeline_offset_ms: u64 = 0;
 
@@ -112,7 +145,7 @@ fn render_segments_and_concat(
         let (source_path, _) = playback::resolve_source_path(&shot.source, project_dir)?;
         let segment_path = work_dir.join(format!("segment_{i:04}.mp4"));
 
-        let filter = overlay::build_drawtext_filter(
+        let overlay_filter = overlay::build_drawtext_filter(
             overlay_mode,
             &OverlayInfo {
                 shot_id: shot.id.clone(),
@@ -122,15 +155,70 @@ fn render_segments_and_concat(
             },
         );
 
-        match filter {
-            Some(ref vf) => extract_segment_with_filter(
+        // Determine per-segment encoding strategy
+        let source_info = encode_params
+            .source_info
+            .iter()
+            .find(|s| s.id == shot.source);
+
+        let needs_video_reencode = match source_info {
+            Some(info) => {
+                let codec_mismatch = encode_params.target_codec.is_some()
+                    && normalize_codec(&info.video_codec)
+                        != normalize_codec(encode_params.target_codec.as_deref().unwrap());
+                let res_mismatch = encode_params.target_resolution.is_some()
+                    && info.resolution != encode_params.target_resolution.unwrap();
+                codec_mismatch || res_mismatch
+            }
+            // No manifest info available — only re-encode if overlay or explicit options
+            None => options.video_codec.is_some() || options.resolution.is_some(),
+        };
+
+        let has_overlay = overlay_filter.is_some();
+
+        if has_overlay || needs_video_reencode {
+            // Build combined video filter chain
+            let mut filters: Vec<String> = Vec::new();
+
+            // Scale filter first (before overlay)
+            if let Some((w, h)) = encode_params.target_resolution {
+                let needs_scale = match source_info {
+                    Some(info) => info.resolution != (w, h),
+                    None => true,
+                };
+                if needs_scale {
+                    filters.push(format!("scale={w}:{h}"));
+                }
+            }
+
+            // Overlay filter
+            if let Some(ref vf) = overlay_filter {
+                filters.push(vf.clone());
+            }
+
+            let combined_filter = if filters.is_empty() {
+                None
+            } else {
+                Some(filters.join(","))
+            };
+
+            let encoder = encode_params
+                .target_codec
+                .as_deref()
+                .map(ffmpeg_video_encoder)
+                .unwrap_or("libx264");
+
+            extract_segment_encoded(
                 &source_path,
                 shot.start_ms,
                 shot.end_ms,
                 &segment_path,
-                vf,
-            )?,
-            None => extract_segment(&source_path, shot.start_ms, shot.end_ms, &segment_path)?,
+                combined_filter.as_deref(),
+                encoder,
+            )?;
+        } else {
+            // Stream copy — codecs and resolution match, no overlay
+            extract_segment(&source_path, shot.start_ms, shot.end_ms, &segment_path)?;
         }
 
         segment_paths.push(segment_path);
@@ -159,6 +247,147 @@ pub fn resolve_preview(
         return Err(RenderError::EmptyEdit);
     }
     Ok(resolved)
+}
+
+/// Parse a resolution string like "1920x1080" into `(width, height)`.
+pub fn parse_resolution(s: &str) -> Result<(u32, u32), RenderError> {
+    let parts: Vec<&str> = s.split('x').collect();
+    if parts.len() != 2 {
+        return Err(RenderError::InvalidResolution(s.to_string()));
+    }
+    let w: u32 = parts[0]
+        .parse()
+        .map_err(|_| RenderError::InvalidResolution(s.to_string()))?;
+    let h: u32 = parts[1]
+        .parse()
+        .map_err(|_| RenderError::InvalidResolution(s.to_string()))?;
+    if w == 0 || h == 0 {
+        return Err(RenderError::InvalidResolution(s.to_string()));
+    }
+    Ok((w, h))
+}
+
+// ---------------------------------------------------------------------------
+// Codec helpers
+// ---------------------------------------------------------------------------
+
+/// Minimal source info needed for per-segment encode decisions.
+#[derive(Debug, Clone)]
+struct SourceInfo {
+    id: String,
+    video_codec: String,
+    resolution: (u32, u32),
+}
+
+/// Resolved encoding parameters for the entire render.
+#[derive(Debug)]
+struct EncodeParams {
+    /// The target video codec name (normalised, e.g. "h264").
+    /// `None` means no explicit target — use stream copy when possible.
+    target_codec: Option<String>,
+    /// The target resolution. `None` means no scaling requested and sources
+    /// all share the same resolution.
+    target_resolution: Option<(u32, u32)>,
+    /// Per-source codec/resolution info from manifest.
+    source_info: Vec<SourceInfo>,
+}
+
+/// Determine encoding parameters by inspecting the manifest and render options.
+fn resolve_encode_params(
+    resolved: &[ResolvedShot],
+    project_dir: &Path,
+    options: &RenderOptions,
+) -> Result<EncodeParams, RenderError> {
+    // Collect unique source IDs referenced by this edit
+    let source_ids: HashSet<&str> = resolved.iter().map(|s| s.source.as_str()).collect();
+
+    // Try to load manifest for source metadata
+    let manifest = project::read_manifest(project_dir).ok();
+
+    let source_info: Vec<SourceInfo> = match &manifest {
+        Some(m) => m
+            .sources
+            .iter()
+            .filter(|s| source_ids.contains(s.id.as_str()))
+            .map(|s| SourceInfo {
+                id: s.id.clone(),
+                video_codec: s.video_codec.clone(),
+                resolution: s.resolution,
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+
+    // Determine target codec
+    let target_codec = if let Some(ref c) = options.video_codec {
+        // Explicit codec requested
+        Some(normalize_codec(c).to_string())
+    } else if !source_info.is_empty() {
+        // Check if all sources share the same codec — if so, no re-encode needed
+        let first = normalize_codec(&source_info[0].video_codec);
+        let all_same = source_info.iter().all(|s| normalize_codec(&s.video_codec) == first);
+        if all_same {
+            None // all match, stream copy
+        } else {
+            // Mixed codecs — default to h264
+            Some("h264".to_string())
+        }
+    } else {
+        None
+    };
+
+    // Determine target resolution
+    let target_resolution = if let Some(res) = options.resolution {
+        Some(res)
+    } else if !source_info.is_empty() {
+        // Find highest resolution across sources
+        let max_res = source_info
+            .iter()
+            .max_by_key(|s| (s.resolution.0 as u64) * (s.resolution.1 as u64))
+            .map(|s| s.resolution)
+            .unwrap();
+
+        // Only set target if sources differ in resolution
+        let all_same = source_info.iter().all(|s| s.resolution == max_res);
+        if all_same {
+            None // no scaling needed
+        } else {
+            Some(max_res)
+        }
+    } else {
+        None
+    };
+
+    Ok(EncodeParams {
+        target_codec,
+        target_resolution,
+        source_info,
+    })
+}
+
+/// Normalise codec names for comparison.
+///
+/// Maps common aliases to a canonical form so that e.g. "h264", "avc", and
+/// "libx264" are all treated as the same codec.
+pub fn normalize_codec(codec: &str) -> &str {
+    match codec {
+        "avc" | "libx264" | "h264" => "h264",
+        "hevc" | "libx265" | "h265" => "h265",
+        "libvpx-vp9" | "vp9" => "vp9",
+        "libaom-av1" | "libsvtav1" | "av1" => "av1",
+        other => other,
+    }
+}
+
+/// Map a normalised codec name to the ffmpeg encoder name.
+pub fn ffmpeg_video_encoder(codec: &str) -> &str {
+    match normalize_codec(codec) {
+        "h264" => "libx264",
+        "h265" => "libx265",
+        "vp9" => "libvpx-vp9",
+        "av1" => "libsvtav1",
+        _ => codec,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,34 +425,42 @@ fn extract_segment(
     Ok(())
 }
 
-/// Extract a segment from a source video with a video filter applied.
+/// Extract a segment with explicit video encoder and optional filter.
 ///
-/// Re-encodes the video (cannot use stream copy with filters) while copying
-/// audio unchanged. Used for overlay modes that require drawtext filters.
-fn extract_segment_with_filter(
+/// Used when re-encoding is required due to codec mismatch, resolution change,
+/// or overlay filters. Audio is always copied unchanged.
+fn extract_segment_encoded(
     source: &Path,
     start_ms: u64,
     end_ms: u64,
     output: &Path,
-    video_filter: &str,
+    video_filter: Option<&str>,
+    video_encoder: &str,
 ) -> Result<(), RenderError> {
     let start_secs = start_ms as f64 / 1000.0;
     let duration_secs = end_ms.saturating_sub(start_ms) as f64 / 1000.0;
 
-    let result = Command::new("ffmpeg")
-        .args(["-y", "-ss", &format!("{start_secs:.3}"), "-i"])
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(["-y", "-ss", &format!("{start_secs:.3}"), "-i"])
         .arg(source)
-        .args(["-t", &format!("{duration_secs:.3}")])
-        .args(["-vf", video_filter])
-        .args(["-c:a", "copy"])
-        .arg(output)
+        .args(["-t", &format!("{duration_secs:.3}")]);
+
+    if let Some(vf) = video_filter {
+        cmd.args(["-vf", vf]);
+    }
+
+    cmd.args(["-c:v", video_encoder])
+        .args(["-c:a", "aac"])
+        .arg(output);
+
+    let result = cmd
         .output()
         .map_err(|e| RenderError::FfmpegFailed(format!("failed to run ffmpeg: {e}")))?;
 
     if !result.status.success() {
         let stderr = String::from_utf8_lossy(&result.stderr);
         return Err(RenderError::FfmpegFailed(format!(
-            "segment extraction with overlay failed: {}",
+            "segment encoding failed: {}",
             stderr.lines().last().unwrap_or("unknown error")
         )));
     }
@@ -271,6 +508,111 @@ fn concat_segments(concat_list: &Path, output: &Path) -> Result<(), RenderError>
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    // -- parse_resolution -----------------------------------------------------
+
+    #[test]
+    fn parse_resolution_valid() {
+        assert_eq!(parse_resolution("1920x1080").unwrap(), (1920, 1080));
+        assert_eq!(parse_resolution("3840x2160").unwrap(), (3840, 2160));
+        assert_eq!(parse_resolution("1280x720").unwrap(), (1280, 720));
+    }
+
+    #[test]
+    fn parse_resolution_invalid_format() {
+        assert!(parse_resolution("1920:1080").is_err());
+        assert!(parse_resolution("1920").is_err());
+        assert!(parse_resolution("widexhigh").is_err());
+        assert!(parse_resolution("").is_err());
+        assert!(parse_resolution("0x1080").is_err());
+        assert!(parse_resolution("1920x0").is_err());
+    }
+
+    // -- normalize_codec ------------------------------------------------------
+
+    #[test]
+    fn normalize_codec_aliases() {
+        assert_eq!(normalize_codec("h264"), "h264");
+        assert_eq!(normalize_codec("avc"), "h264");
+        assert_eq!(normalize_codec("libx264"), "h264");
+        assert_eq!(normalize_codec("h265"), "h265");
+        assert_eq!(normalize_codec("hevc"), "h265");
+        assert_eq!(normalize_codec("libx265"), "h265");
+        assert_eq!(normalize_codec("vp9"), "vp9");
+        assert_eq!(normalize_codec("libvpx-vp9"), "vp9");
+        assert_eq!(normalize_codec("av1"), "av1");
+        assert_eq!(normalize_codec("libaom-av1"), "av1");
+        assert_eq!(normalize_codec("libsvtav1"), "av1");
+    }
+
+    #[test]
+    fn normalize_codec_passthrough() {
+        assert_eq!(normalize_codec("prores"), "prores");
+        assert_eq!(normalize_codec("mjpeg"), "mjpeg");
+    }
+
+    // -- ffmpeg_video_encoder -------------------------------------------------
+
+    #[test]
+    fn ffmpeg_video_encoder_mapping() {
+        assert_eq!(ffmpeg_video_encoder("h264"), "libx264");
+        assert_eq!(ffmpeg_video_encoder("avc"), "libx264");
+        assert_eq!(ffmpeg_video_encoder("h265"), "libx265");
+        assert_eq!(ffmpeg_video_encoder("hevc"), "libx265");
+        assert_eq!(ffmpeg_video_encoder("vp9"), "libvpx-vp9");
+        assert_eq!(ffmpeg_video_encoder("av1"), "libsvtav1");
+    }
+
+    #[test]
+    fn ffmpeg_video_encoder_passthrough() {
+        assert_eq!(ffmpeg_video_encoder("prores"), "prores");
+    }
+
+    // -- resolve_encode_params ------------------------------------------------
+
+    #[test]
+    fn encode_params_no_manifest_no_options() {
+        let resolved = vec![fake_resolved_shot("shot-001", "src-001")];
+        let tmp = TempDir::new().unwrap();
+        let options = RenderOptions::default();
+        let params = resolve_encode_params(&resolved, tmp.path(), &options).unwrap();
+        assert!(params.target_codec.is_none());
+        assert!(params.target_resolution.is_none());
+        assert!(params.source_info.is_empty());
+    }
+
+    #[test]
+    fn encode_params_explicit_codec() {
+        let resolved = vec![fake_resolved_shot("shot-001", "src-001")];
+        let tmp = TempDir::new().unwrap();
+        let options = RenderOptions {
+            video_codec: Some("h265".into()),
+            resolution: None,
+        };
+        let params = resolve_encode_params(&resolved, tmp.path(), &options).unwrap();
+        assert_eq!(params.target_codec.as_deref(), Some("h265"));
+    }
+
+    #[test]
+    fn encode_params_explicit_resolution() {
+        let resolved = vec![fake_resolved_shot("shot-001", "src-001")];
+        let tmp = TempDir::new().unwrap();
+        let options = RenderOptions {
+            video_codec: None,
+            resolution: Some((1280, 720)),
+        };
+        let params = resolve_encode_params(&resolved, tmp.path(), &options).unwrap();
+        assert_eq!(params.target_resolution, Some((1280, 720)));
+    }
+
+    // -- render_options_default -----------------------------------------------
+
+    #[test]
+    fn render_options_default() {
+        let opts = RenderOptions::default();
+        assert!(opts.video_codec.is_none());
+        assert!(opts.resolution.is_none());
+    }
 
     // -- write_concat_list ----------------------------------------------------
 
@@ -328,18 +670,19 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("no shots"));
     }
 
-    // -- extract_segment_with_filter ------------------------------------------
+    // -- extract_segment_encoded (overlay filter) ------------------------------
 
     #[test]
-    fn extract_segment_with_filter_nonexistent_source() {
+    fn extract_segment_encoded_with_overlay_nonexistent_source() {
         let tmp = TempDir::new().unwrap();
         let output = tmp.path().join("out.mp4");
-        let result = extract_segment_with_filter(
+        let result = extract_segment_encoded(
             &PathBuf::from("/nonexistent/video.mp4"),
             0,
             5000,
             &output,
-            "drawtext=text='test':fontsize=16:fontcolor=white:x=10:y=10",
+            Some("drawtext=text='test':fontsize=16:fontcolor=white:x=10:y=10"),
+            "libx264",
         );
         assert!(result.is_err());
     }
@@ -358,6 +701,13 @@ mod tests {
         assert!(err.to_string().contains("exit code 1"));
     }
 
+    #[test]
+    fn invalid_resolution_error_message() {
+        let err = RenderError::InvalidResolution("bad".into());
+        assert!(err.to_string().contains("bad"));
+        assert!(err.to_string().contains("WxH"));
+    }
+
     // -- render_to_file -------------------------------------------------------
 
     #[test]
@@ -368,7 +718,9 @@ mod tests {
 
         let doc = EditDocument::create("test");
         let output = tmp.path().join("output.mp4");
-        let result = render_to_file(&doc, tmp.path(), &output, OverlayMode::Clean);
+        let result = render_to_file(
+            &doc, tmp.path(), &output, OverlayMode::Clean, &RenderOptions::default(),
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("no shots"));
     }
@@ -421,5 +773,56 @@ mod tests {
             &output,
         );
         assert!(result.is_err());
+    }
+
+    // -- extract_segment_encoded (error path) ---------------------------------
+
+    #[test]
+    fn extract_segment_encoded_nonexistent_source() {
+        let tmp = TempDir::new().unwrap();
+        let output = tmp.path().join("out.mp4");
+        let result = extract_segment_encoded(
+            &PathBuf::from("/nonexistent/video.mp4"),
+            0,
+            5000,
+            &output,
+            None,
+            "libx264",
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_segment_encoded_with_filter_nonexistent_source() {
+        let tmp = TempDir::new().unwrap();
+        let output = tmp.path().join("out.mp4");
+        let result = extract_segment_encoded(
+            &PathBuf::from("/nonexistent/video.mp4"),
+            0,
+            5000,
+            &output,
+            Some("scale=1280:720"),
+            "libx265",
+        );
+        assert!(result.is_err());
+    }
+
+    // -- test helpers ---------------------------------------------------------
+
+    fn fake_resolved_shot(id: &str, source: &str) -> ResolvedShot {
+        ResolvedShot {
+            id: id.to_string(),
+            source: source.to_string(),
+            range: crate::models::ShotRange::Time {
+                from_ms: 0,
+                to_ms: 5000,
+            },
+            start_ms: 0,
+            end_ms: 5000,
+            duration_ms: 5000,
+            text_preview: None,
+            scene_preview: None,
+            notes: vec![],
+        }
     }
 }

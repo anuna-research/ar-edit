@@ -622,11 +622,26 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
         ar_edit_core::overlay::OverlayMode::Clean
     };
 
+    // Parse render format options (REQ-026)
+    let resolution = args
+        .resolution
+        .as_deref()
+        .map(ar_edit_core::render::parse_resolution)
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let render_options = ar_edit_core::render::RenderOptions {
+        video_codec: args.codec.clone(),
+        resolution,
+    };
+
     if !cli.json {
         let overlay_label = if args.burn_overlay { " [overlay: full]" } else { "" };
+        let codec_label = args.codec.as_deref().map(|c| format!(" [codec: {c}]")).unwrap_or_default();
+        let res_label = args.resolution.as_deref().map(|r| format!(" [resolution: {r}]")).unwrap_or_default();
         eprintln!(
-            "Rendering '{}' ({} shots) to {}{}...",
-            args.edit, shot_count, args.output.display(), overlay_label
+            "Rendering '{}' ({} shots) to {}{}{}{}...",
+            args.edit, shot_count, args.output.display(), overlay_label, codec_label, res_label
         );
     }
 
@@ -637,8 +652,10 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
         }
     }
 
-    ar_edit_core::render::render_to_file(&doc, &project_dir, &args.output, overlay_mode)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    ar_edit_core::render::render_to_file(
+        &doc, &project_dir, &args.output, overlay_mode, &render_options,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if cli.json {
         let output = serde_json::json!({
