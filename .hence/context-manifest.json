@@ -1,12 +1,12 @@
 {
-  "task_id": "e1-detect",
+  "task_id": "j3-notes",
   "token_budget": 8000,
-  "tokens_used": 352,
+  "tokens_used": 362,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement video player detection in ar-edit-core/src/playback.rs: VLC (cvlc/vlc) preferred, ffplay fallback, per ADR-003 subprocess architecture. Use which crate. Report structured error if neither found.",
-      "token_cost": 51,
+      "content": "Implement ar-edit edit note <edit> --shot <shot-id> --text <note>: append note to shot's notes array (append-only, never deleted). Notes visible in ar-edit edit show --json output. Per DATA-MODEL section 5 shot notes. Implements REQ-051, REQ-053.",
+      "token_cost": 61,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T05:09:17Z"
+  "constructed_at": "2026-02-19T05:12:50Z"
 }

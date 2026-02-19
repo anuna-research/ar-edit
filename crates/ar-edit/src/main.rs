@@ -74,9 +74,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             EditCommand::FromTranscript { file, output } => {
                 todo!("edit from-transcript: {file:?}, output={output:?}")
             }
-            EditCommand::Note { edit, shot, text } => {
-                todo!("edit note: {edit}, shot={shot}, text={text}")
-            }
+            EditCommand::Note { edit, shot, text } => cmd_note(cli, edit, shot, text),
         },
         Commands::Undo { edit } => cmd_undo(cli, edit),
         Commands::Redo { edit } => cmd_redo(cli, edit),
@@ -127,6 +125,7 @@ fn op_summary(kind: &EditOpKind) -> (&str, &str) {
         EditOpKind::MoveShot { shot_id, .. } => ("move_shot", shot_id),
         EditOpKind::TrimShot { shot_id, .. } => ("trim_shot", shot_id),
         EditOpKind::ReplaceRangeType { shot_id, .. } => ("replace_range_type", shot_id),
+        EditOpKind::AddNote { shot_id, .. } => ("add_note", shot_id),
     }
 }
 
@@ -197,6 +196,25 @@ fn cmd_history(cli: &Cli, edit: &str) -> anyhow::Result<()> {
                     id = op.id);
             }
         }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: note (REQ-051, REQ-053)
+// ---------------------------------------------------------------------------
+
+fn cmd_note(cli: &Cli, edit: &str, shot: &str, text: &str) -> anyhow::Result<()> {
+    let path = edit_path(edit);
+    let mut doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let note = doc.add_note(shot, text).map_err(|e| anyhow::anyhow!("{e}"))?.clone();
+    doc.save(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&note)?);
+    } else {
+        println!("Added note to {shot}: {text}");
     }
     Ok(())
 }
