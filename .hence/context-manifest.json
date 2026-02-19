@@ -1,12 +1,12 @@
 {
-  "task_id": "d5-search",
+  "task_id": "h8-search",
   "token_budget": 8000,
-  "tokens_used": 375,
+  "tokens_used": 367,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement unified search in ar-edit-core/src/search.rs spanning transcripts AND scene descriptions. Results typed as transcript/scene/metadata with source_id, timestamps, context. Wire CLI: ar-edit search <query> [--source <id>] [--type transcript|scene|metadata]. Per CON-008. Implements REQ-034.",
-      "token_cost": 74,
+      "content": "Implement inline search mode (/ key): search across all transcripts and scene descriptions using search.rs. Display filterable results with source ID, timestamp, context snippet. Allow jumping to result in transcript panel or adding as new shot. Implements REQ-045.",
+      "token_cost": 66,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T11:46:58Z"
+  "constructed_at": "2026-02-19T11:55:39Z"
 }

@@ -2,6 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use ar_edit_core::models::ShotRange;
 use ar_edit_core::playback;
+use ar_edit_core::search::{self, TypeFilter};
 
 use super::{App, Focus, Mode, PromptAction};
 
@@ -22,6 +23,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         Mode::Command => handle_command(app, key),
         Mode::Prompt => handle_prompt(app, key),
         Mode::Search => handle_search(app, key),
+        Mode::SearchResults => handle_search_results(app, key),
     }
 }
 
@@ -536,37 +538,154 @@ fn do_search(app: &mut App, query: &str) {
         return;
     }
 
-    let query_lower = query.to_lowercase();
-    let found = app.resolved_shots.iter().position(|shot| {
-        shot.id.to_lowercase().contains(&query_lower)
-            || shot.source.to_lowercase().contains(&query_lower)
-            || shot
-                .text_preview
-                .as_deref()
-                .unwrap_or("")
-                .to_lowercase()
-                .contains(&query_lower)
-            || shot
-                .scene_preview
-                .as_deref()
-                .unwrap_or("")
-                .to_lowercase()
-                .contains(&query_lower)
-            || shot
-                .notes
-                .iter()
-                .any(|n| n.text.to_lowercase().contains(&query_lower))
-    });
-
-    match found {
-        Some(idx) => {
-            app.selected_shot.select(Some(idx));
-            app.status_message = format!("Found match at shot {}", idx + 1);
+    match search::search(&app.project_dir, query, None, app.search_type_filter.as_ref()) {
+        Ok(results) => {
+            let count = results.len();
+            app.search_query = query.to_string();
+            app.search_results = results;
+            app.search_selected = ratatui::widgets::ListState::default();
+            if count > 0 {
+                app.search_selected.select(Some(0));
+            }
+            app.mode = Mode::SearchResults;
+            app.status_message = format!(
+                "{count} result{} \u{2014} j/k:nav Enter:jump a:add-shot Tab:filter Esc:close",
+                if count == 1 { "" } else { "s" },
+            );
         }
-        None => {
-            app.status_message = format!("No match for \"{query}\"");
+        Err(e) => {
+            app.mode = Mode::Normal;
+            app.status_message = format!("Search error: {e}");
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Search results mode (REQ-045)
+// ---------------------------------------------------------------------------
+
+fn handle_search_results(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.mode = Mode::Normal;
+            app.search_results.clear();
+            app.status_message = default_status();
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            let count = app.search_results.len();
+            if count > 0 {
+                let i = app.search_selected.selected().unwrap_or(0);
+                app.search_selected.select(Some((i + 1).min(count - 1)));
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            let i = app.search_selected.selected().unwrap_or(0);
+            app.search_selected.select(Some(i.saturating_sub(1)));
+        }
+        KeyCode::Tab => {
+            // Cycle type filter: all -> transcript -> scene -> metadata -> all
+            app.search_type_filter = match app.search_type_filter {
+                None => Some(TypeFilter::Transcript),
+                Some(TypeFilter::Transcript) => Some(TypeFilter::Scene),
+                Some(TypeFilter::Scene) => Some(TypeFilter::Metadata),
+                Some(TypeFilter::Metadata) => None,
+            };
+            // Re-run search with new filter
+            let query = app.search_query.clone();
+            do_search(app, &query);
+        }
+        KeyCode::Enter => {
+            do_jump_to_result(app);
+        }
+        KeyCode::Char('a') => {
+            do_add_result_as_shot(app);
+        }
+        KeyCode::Char('/') => {
+            // Start a new search
+            app.mode = Mode::Search;
+            app.prompt_buffer.clear();
+            app.status_message = String::from("/");
+        }
+        _ => {}
+    }
+}
+
+/// Jump to the selected search result: find the matching shot in the timeline
+/// or scroll to the source's transcript.
+fn do_jump_to_result(app: &mut App) {
+    let result = match selected_search_result(app) {
+        Some(r) => r.clone(),
+        None => return,
+    };
+
+    // Try to find a shot in the timeline that covers this result's time range
+    // and matches the source.
+    let matching_shot = app.resolved_shots.iter().position(|shot| {
+        shot.source == result.source_id
+            && shot.start_ms <= result.start_ms
+            && shot.end_ms >= result.end_ms
+    });
+
+    if let Some(idx) = matching_shot {
+        app.selected_shot.select(Some(idx));
+        app.mode = Mode::Normal;
+        app.focus = Focus::Timeline;
+        app.search_results.clear();
+        app.status_message = format!(
+            "Jumped to {} ({})",
+            app.resolved_shots[idx].id,
+            result.source_id,
+        );
+    } else {
+        // No matching shot — stay in results but show info about the result.
+        app.mode = Mode::Normal;
+        app.search_results.clear();
+        app.status_message = format!(
+            "{} @ {} in {} \u{2014} press 'a' to add as shot",
+            result.matched_text,
+            ar_edit_core::display::format_time(result.start_ms),
+            result.source_id,
+        );
+    }
+}
+
+/// Add the selected search result as a new shot in the edit timeline.
+fn do_add_result_as_shot(app: &mut App) {
+    let result = match selected_search_result(app) {
+        Some(r) => r.clone(),
+        None => return,
+    };
+
+    let range = ShotRange::Time {
+        from_ms: result.start_ms,
+        to_ms: result.end_ms,
+    };
+
+    let id = {
+        let Some(doc) = app.edit.as_mut() else {
+            app.status_message = "No edit loaded".into();
+            return;
+        };
+        let shot = doc.add_shot(&result.source_id, range);
+        shot.id.clone()
+    };
+
+    if !save_and_refresh(app) {
+        return;
+    }
+
+    let count = app.shot_count();
+    if count > 0 {
+        app.selected_shot.select(Some(count - 1));
+    }
+    app.mode = Mode::Normal;
+    app.search_results.clear();
+    app.status_message = format!("Added {} from {} search result", id, result.source_id);
+}
+
+fn selected_search_result(app: &App) -> Option<&search::SearchResult> {
+    let idx = app.search_selected.selected()?;
+    app.search_results.get(idx)
 }
 
 // ---------------------------------------------------------------------------

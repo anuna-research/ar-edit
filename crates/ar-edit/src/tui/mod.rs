@@ -17,6 +17,7 @@ use ratatui::widgets::ListState;
 use ar_edit_core::display::{self, ResolvedShot};
 use ar_edit_core::models::{EditDocument, ShotRange, Source};
 use ar_edit_core::playback;
+use ar_edit_core::search::{SearchResult, TypeFilter};
 
 use panels::status::RenderProgress;
 
@@ -30,6 +31,7 @@ pub enum Mode {
     Command,
     Prompt,
     Search,
+    SearchResults,
 }
 
 /// Which panel currently has keyboard focus.
@@ -76,6 +78,10 @@ pub struct App {
     pub pending_play: Option<playback::PlayRequest>,
     pub render_progress: Option<RenderProgress>,
     pub transcript_scroll: panels::transcript::TranscriptScroll,
+    pub search_results: Vec<SearchResult>,
+    pub search_selected: ListState,
+    pub search_query: String,
+    pub search_type_filter: Option<TypeFilter>,
 }
 
 impl App {
@@ -104,6 +110,10 @@ impl App {
             pending_play: None,
             render_progress: None,
             transcript_scroll: panels::transcript::TranscriptScroll::default(),
+            search_results: Vec::new(),
+            search_selected: ListState::default(),
+            search_query: String::new(),
+            search_type_filter: None,
         }
     }
 
@@ -371,16 +381,38 @@ fn ui(f: &mut Frame, app: &mut App) {
         timeline_area,
     );
 
-    // --- Right panel: transcript or source detail (REQ-040) ---
+    // --- Right panel: search results, transcript, or source detail ---
     //
     // Extract the selected shot index first to avoid overlapping borrows
     // between `resolved_shots` (immutable) and `transcript_scroll` (mutable).
     let selected_idx = app.selected_shot.selected();
-    match app.focus {
-        Focus::Sources => {
-            if let Some(source) = app.selected_source().cloned() {
-                panels::sources::draw_detail(f, &source, transcript_area);
-            } else {
+    if app.mode == Mode::SearchResults {
+        // REQ-045: show search results in the right panel
+        panels::search_results::draw(
+            f,
+            &app.search_results,
+            &mut app.search_selected,
+            &app.search_query,
+            app.search_type_filter.as_ref(),
+            transcript_area,
+        );
+    } else {
+        match app.focus {
+            Focus::Sources => {
+                if let Some(source) = app.selected_source().cloned() {
+                    panels::sources::draw_detail(f, &source, transcript_area);
+                } else {
+                    let shot = selected_idx.and_then(|i| app.resolved_shots.get(i));
+                    panels::transcript::draw(
+                        f,
+                        shot,
+                        &app.project_dir,
+                        &mut app.transcript_scroll,
+                        transcript_area,
+                    );
+                }
+            }
+            Focus::Timeline => {
                 let shot = selected_idx.and_then(|i| app.resolved_shots.get(i));
                 panels::transcript::draw(
                     f,
@@ -390,16 +422,6 @@ fn ui(f: &mut Frame, app: &mut App) {
                     transcript_area,
                 );
             }
-        }
-        Focus::Timeline => {
-            let shot = selected_idx.and_then(|i| app.resolved_shots.get(i));
-            panels::transcript::draw(
-                f,
-                shot,
-                &app.project_dir,
-                &mut app.transcript_scroll,
-                transcript_area,
-            );
         }
     }
 
