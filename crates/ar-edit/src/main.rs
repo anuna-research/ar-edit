@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use std::process;
 
 use ar_edit_core::models::{EditDocument, EditOpKind, ShotRange, Source};
+use ar_edit_core::playback;
 use clap::Parser;
 use cli::{
-    exit_code, Cli, Commands, EditCommand, IndexCommand, RangeArgs, SchemaCommand,
+    exit_code, Cli, Commands, EditCommand, IndexCommand, PlayArgs, RangeArgs, SchemaCommand,
     TranscriptsCommand,
 };
 
@@ -81,7 +82,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         Commands::Undo { edit } => cmd_undo(cli, edit),
         Commands::Redo { edit } => cmd_redo(cli, edit),
         Commands::Validate { edit } => todo!("validate: {edit}"),
-        Commands::Play(args) => todo!("play: target={}", args.target),
+        Commands::Play(args) => cmd_play(cli, args),
         Commands::Render(args) => todo!("render: edit={}, output={:?}", args.edit, args.output),
         Commands::Index(args) => match &args.command {
             Some(IndexCommand::Show { source_id }) => cmd_index_show(cli, source_id),
@@ -277,6 +278,143 @@ fn cmd_note(cli: &Cli, edit: &str, shot: &str, text: &str) -> anyhow::Result<()>
         println!("Added note to {shot}: {text}");
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: play (REQ-021, REQ-024)
+// ---------------------------------------------------------------------------
+
+fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+
+    let player = playback::detect_player().map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let is_source = args.target.starts_with("src-");
+
+    let req = if is_source {
+        // Source playback: ar-edit play <source-id> [--at/--at-word/--at-scene]
+        build_source_play_request(&project_dir, &args.target, args)?
+    } else {
+        // Edit playback: ar-edit play <edit-name> --shot <shot-id>
+        let shot_id = args.shot.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("--shot is required when playing an edit")
+        })?;
+        build_edit_play_request(&project_dir, &args.target, shot_id)?
+    };
+
+    if cli.json {
+        let output = serde_json::json!({
+            "player": player.name,
+            "file": req.file.display().to_string(),
+            "start_ms": req.start_ms,
+            "end_ms": req.end_ms,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        let end_info = match req.end_ms {
+            Some(end) => format!(
+                " to {}",
+                ar_edit_core::display::format_time(end)
+            ),
+            None => String::new(),
+        };
+        println!(
+            "Playing {} from {}{}  [{}]",
+            req.file.display(),
+            ar_edit_core::display::format_time(req.start_ms),
+            end_info,
+            player.name,
+        );
+    }
+
+    let mut child = playback::launch_player(&player, &req).map_err(|e| anyhow::anyhow!("{e}"))?;
+    child.wait()?;
+
+    Ok(())
+}
+
+fn build_source_play_request(
+    project_dir: &PathBuf,
+    source_id: &str,
+    args: &PlayArgs,
+) -> anyhow::Result<playback::PlayRequest> {
+    let (file, _source) =
+        playback::resolve_source_path(source_id, project_dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let start_ms = if let Some(ref tc) = args.at {
+        playback::parse_timecode(tc).map_err(|e| anyhow::anyhow!("{e}"))?
+    } else if let Some(word_idx) = args.at_word {
+        let range = ShotRange::Words {
+            from: word_idx,
+            to: word_idx,
+        };
+        let transcripts_dir = project_dir.join("transcripts");
+        let (start, _end) = ar_edit_core::resolve::resolve_range_from_dir(
+            &range,
+            source_id,
+            &transcripts_dir,
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        start
+    } else if let Some(scene_idx) = args.at_scene {
+        let range = ShotRange::Scenes {
+            from: scene_idx,
+            to: scene_idx,
+        };
+        let index_dir = project_dir.join("index");
+        let (start, _end) = ar_edit_core::resolve::resolve_range_from_dir(
+            &range,
+            source_id,
+            &index_dir,
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        start
+    } else {
+        0
+    };
+
+    Ok(playback::PlayRequest {
+        file,
+        start_ms,
+        end_ms: None,
+    })
+}
+
+fn build_edit_play_request(
+    project_dir: &PathBuf,
+    edit_name: &str,
+    shot_id: &str,
+) -> anyhow::Result<playback::PlayRequest> {
+    let path = edit_path(edit_name);
+    let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let shot = doc
+        .snapshot
+        .shots
+        .iter()
+        .find(|s| s.id == shot_id)
+        .ok_or_else(|| anyhow::anyhow!("shot not found: {shot_id}"))?;
+
+    let source_id = &shot.source;
+    let (file, _source) =
+        playback::resolve_source_path(source_id, project_dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    // Resolve shot range to timestamps
+    let range = &shot.range;
+    let dir = match range {
+        ShotRange::Words { .. } => project_dir.join("transcripts"),
+        ShotRange::Scenes { .. } => project_dir.join("index"),
+        ShotRange::Time { .. } => project_dir.to_path_buf(),
+    };
+    let (start_ms, end_ms) =
+        ar_edit_core::resolve::resolve_range_from_dir(range, source_id, &dir)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    Ok(playback::PlayRequest {
+        file,
+        start_ms,
+        end_ms: Some(end_ms),
+    })
 }
 
 // ---------------------------------------------------------------------------
