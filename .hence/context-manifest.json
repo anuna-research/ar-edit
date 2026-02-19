@@ -1,12 +1,12 @@
 {
-  "task_id": "h8-search",
+  "task_id": "h9-tests",
   "token_budget": 8000,
-  "tokens_used": 367,
+  "tokens_used": 362,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement inline search mode (/ key): search across all transcripts and scene descriptions using search.rs. Display filterable results with source ID, timestamp, context snippet. Allow jumping to result in transcript panel or adding as new shot. Implements REQ-045.",
-      "token_cost": 66,
+      "content": "Manual testing checklist TEST-043 (launch), TEST-044 (timeline panel), TEST-045 (transcript highlighting), TEST-046 (source list), TEST-047 (playback integration), TEST-048 (keyboard operations), TEST-049 (render progress), TEST-050 (search mode).",
+      "token_cost": 61,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T11:55:39Z"
+  "constructed_at": "2026-02-19T12:06:04Z"
 }
