@@ -4,24 +4,24 @@
   "exit_code": 0,
   "diff_summary": {
     "files_changed": 4,
-    "insertions": 262,
-    "deletions": 5,
+    "insertions": 354,
+    "deletions": 56,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit-core/src/lib.rs",
-      "crates/ar-edit-core/src/transcript.rs",
-      "crates/ar-edit-core/tests/test_004_audio_extraction.rs"
+      "crates/ar-edit/src/tui/mod.rs",
+      "crates/ar-edit/src/tui/panels/mod.rs",
+      "crates/ar-edit/src/tui/panels/timeline.rs"
     ],
-    "dirty_files": 1462
+    "dirty_files": 2105
   },
   "learnings": [
     {
-      "key": "task-b1-audio-changes",
-      "content": "Modified 4 files (+262, -5): .hence/context-manifest.json, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/transcript.rs, crates/ar-edit-core/tests/test_004_audio_extraction.rs",
+      "key": "task-h2-timeline-changes",
+      "content": "Modified 4 files (+354, -56): .hence/context-manifest.json, crates/ar-edit/src/tui/mod.rs, crates/ar-edit/src/tui/panels/mod.rs, crates/ar-edit/src/tui/panels/timeline.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/b1-audio-v1",
-  "evaluated_at": "2026-02-19T05:48:17Z"
+  "branch_name": "hence/h2-timeline-v1",
+  "evaluated_at": "2026-02-19T05:54:46Z"
 }
