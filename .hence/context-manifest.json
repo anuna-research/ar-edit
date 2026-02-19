@@ -1,12 +1,12 @@
 {
-  "task_id": "e5-feedback",
+  "task_id": "j5-tests",
   "token_budget": 8000,
-  "tokens_used": 356,
+  "tokens_used": 353,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "On playback exit/interruption, output structured JSON per CON-006: last_position_ms, shot_id, source_id, word_index, scene_index. Designed for LLM agent to receive as context for editing instructions. Implements REQ-037.",
-      "token_cost": 55,
+      "content": "Write tests TEST-054 (marker creation), TEST-055 (marker listing with filters), TEST-056 (shot notes append-only), TEST-057 (agent reads markers in transcript), TEST-058 (agent reads shot notes in edit show).",
+      "token_cost": 52,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T07:44:03Z"
+  "constructed_at": "2026-02-19T07:52:01Z"
 }
