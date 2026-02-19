@@ -1,12 +1,12 @@
 {
-  "task_id": "e4-overlay",
+  "task_id": "e5-feedback",
   "token_budget": 8000,
-  "tokens_used": 379,
+  "tokens_used": 356,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement ffmpeg drawtext filter overlay per REQ-023: timecode HH:MM:SS.mmm, shot ID, source ID, transcript/scene snippet. Semi-transparent background, top-left corner, monospace font. Three modes: clean (no flag), full (--overlay), minimal (--overlay minimal). Not present in final renders unless --burn-overlay.",
-      "token_cost": 78,
+      "content": "On playback exit/interruption, output structured JSON per CON-006: last_position_ms, shot_id, source_id, word_index, scene_index. Designed for LLM agent to receive as context for editing instructions. Implements REQ-037.",
+      "token_cost": 55,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T07:31:49Z"
+  "constructed_at": "2026-02-19T07:44:03Z"
 }
