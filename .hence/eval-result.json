@@ -3,26 +3,22 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 5,
-    "insertions": 509,
-    "deletions": 7,
+    "files_changed": 1,
+    "insertions": 5,
+    "deletions": 5,
     "file_list": [
-      ".hence/context-manifest.json",
-      "crates/ar-edit-core/src/export.rs",
-      "crates/ar-edit-core/src/lib.rs",
-      "crates/ar-edit/src/cli/mod.rs",
-      "crates/ar-edit/src/main.rs"
+      ".hence/context-manifest.json"
     ],
-    "dirty_files": 4536
+    "dirty_files": 8272
   },
   "learnings": [
     {
-      "key": "task-g1-export-changes",
-      "content": "Modified 5 files (+509, -7): .hence/context-manifest.json, crates/ar-edit-core/src/export.rs, crates/ar-edit-core/src/lib.rs, crates/ar-edit/src/cli/mod.rs, crates/ar-edit/src/main.rs",
+      "key": "task-f1-extract-changes",
+      "content": "Modified 1 files (+5, -5): .hence/context-manifest.json",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/g1-export-v1",
-  "evaluated_at": "2026-02-19T08:37:34Z"
+  "branch_name": "hence/f1-extract-v1",
+  "evaluated_at": "2026-02-19T08:43:29Z"
 }
