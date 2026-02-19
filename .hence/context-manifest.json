@@ -1,12 +1,12 @@
 {
-  "task_id": "f6-tests",
+  "task_id": "i1-e2e",
   "token_budget": 8000,
-  "tokens_used": 343,
+  "tokens_used": 365,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Write tests TEST-025 (basic render, correct duration), TEST-026 (codec options), TEST-027 (progress reporting --json), TEST-042 (subtitle embedding verified by ffprobe).",
-      "token_cost": 42,
+      "content": "Write E2E test script tests/e2e/test_full_pipeline.sh: init -> add (fixture videos) -> transcribe -> edit create -> add-segment -> move-segment -> trim-segment -> validate -> play -> render -o out.mp4 -> verify output duration/codec. Uses real fixture videos.",
+      "token_cost": 64,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T13:44:00Z"
+  "constructed_at": "2026-02-19T13:53:37Z"
 }
