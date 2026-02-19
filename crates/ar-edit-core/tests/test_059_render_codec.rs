@@ -168,7 +168,7 @@ fn render_options_default_is_none() {
 fn render_options_with_codec() {
     let opts = RenderOptions {
         video_codec: Some("h265".into()),
-        resolution: None,
+        ..Default::default()
     };
     assert_eq!(opts.video_codec.as_deref(), Some("h265"));
     assert!(opts.resolution.is_none());
@@ -177,8 +177,8 @@ fn render_options_with_codec() {
 #[test]
 fn render_options_with_resolution() {
     let opts = RenderOptions {
-        video_codec: None,
         resolution: Some((1280, 720)),
+        ..Default::default()
     };
     assert!(opts.video_codec.is_none());
     assert_eq!(opts.resolution, Some((1280, 720)));
@@ -189,6 +189,7 @@ fn render_options_with_both() {
     let opts = RenderOptions {
         video_codec: Some("h264".into()),
         resolution: Some((1920, 1080)),
+        ..Default::default()
     };
     assert_eq!(opts.video_codec.as_deref(), Some("h264"));
     assert_eq!(opts.resolution, Some((1920, 1080)));
@@ -264,6 +265,7 @@ fn render_to_file_with_codec_option_empty_edit() {
     let opts = RenderOptions {
         video_codec: Some("h265".into()),
         resolution: Some((1280, 720)),
+        ..Default::default()
     };
     let result = render::render_to_file(&doc, tmp.path(), &output, OverlayMode::Clean, &opts);
     assert!(result.is_err());

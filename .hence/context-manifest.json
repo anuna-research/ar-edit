@@ -1,12 +1,12 @@
 {
-  "task_id": "f4-progress",
+  "task_id": "f5-subtitles",
   "token_budget": 8000,
-  "tokens_used": 353,
+  "tokens_used": 359,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Parse ffmpeg stderr for render progress: frame count, time, speed. Report as percentage, current shot, ETA. Human mode: indicatif progress bar. --json mode: streaming JSON lines. Per CON-007. Implements REQ-027.",
-      "token_cost": 52,
+      "content": "Generate SRT subtitle file from transcript word timestamps for the edit's shots. Embed via ffmpeg -i <video> -i <srt> -c copy -c:s mov_text <output>. Activated by --subtitles flag. Timing matches word boundaries. Implements REQ-036.",
+      "token_cost": 58,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T12:44:28Z"
+  "constructed_at": "2026-02-19T13:32:05Z"
 }
