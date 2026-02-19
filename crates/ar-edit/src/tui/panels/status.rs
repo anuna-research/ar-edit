@@ -116,6 +116,13 @@ fn mode_badge(mode: Mode) -> (&'static str, Style) {
                 .bg(Color::Green)
                 .add_modifier(Modifier::BOLD),
         ),
+        Mode::SearchResults => (
+            "RESULTS",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
     }
 }
 

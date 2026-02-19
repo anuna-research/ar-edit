@@ -3,25 +3,27 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 4,
-    "insertions": 894,
-    "deletions": 7,
+    "files_changed": 6,
+    "insertions": 402,
+    "deletions": 48,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit-core/src/lib.rs",
-      "crates/ar-edit-core/src/search.rs",
-      "crates/ar-edit/src/main.rs"
+      "crates/ar-edit/src/tui/input.rs",
+      "crates/ar-edit/src/tui/mod.rs",
+      "crates/ar-edit/src/tui/panels/mod.rs",
+      "crates/ar-edit/src/tui/panels/search_results.rs",
+      "crates/ar-edit/src/tui/panels/status.rs"
     ],
-    "dirty_files": 9201
+    "dirty_files": 10103
   },
   "learnings": [
     {
-      "key": "task-d5-search-changes",
-      "content": "Modified 4 files (+894, -7): .hence/context-manifest.json, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/search.rs, crates/ar-edit/src/main.rs",
+      "key": "task-h8-search-changes",
+      "content": "Modified 6 files (+402, -48): .hence/context-manifest.json, crates/ar-edit/src/tui/input.rs, crates/ar-edit/src/tui/mod.rs, crates/ar-edit/src/tui/panels/mod.rs, crates/ar-edit/src/tui/panels/search_results.rs and 1 more",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/d5-search-v1",
-  "evaluated_at": "2026-02-19T11:54:10Z"
+  "branch_name": "hence/h8-search-v1",
+  "evaluated_at": "2026-02-19T12:04:32Z"
 }
