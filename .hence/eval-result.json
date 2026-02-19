@@ -3,22 +3,29 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 1,
-    "insertions": 5,
+    "files_changed": 8,
+    "insertions": 1725,
     "deletions": 5,
     "file_list": [
-      ".hence/context-manifest.json"
+      ".hence/context-manifest.json",
+      "crates/ar-edit-core/tests/test_006_transcript_json.rs",
+      "crates/ar-edit-core/tests/test_007_model_selection.rs",
+      "crates/ar-edit-core/tests/test_008_srt_vtt_import.rs",
+      "crates/ar-edit-core/tests/test_009_transcript_listing.rs",
+      "crates/ar-edit-core/tests/test_010_transcript_read_search.rs",
+      "tests/fixtures/transcripts/src-002.transcript.json",
+      "tests/fixtures/transcripts/src-003.transcript.json"
     ],
-    "dirty_files": 8272
+    "dirty_files": 3686
   },
   "learnings": [
     {
-      "key": "task-f1-extract-changes",
-      "content": "Modified 1 files (+5, -5): .hence/context-manifest.json",
+      "key": "task-b6-tests-changes",
+      "content": "Modified 8 files (+1725, -5): .hence/context-manifest.json, crates/ar-edit-core/tests/test_006_transcript_json.rs, crates/ar-edit-core/tests/test_007_model_selection.rs, crates/ar-edit-core/tests/test_008_srt_vtt_import.rs, crates/ar-edit-core/tests/test_009_transcript_listing.rs and 3 more",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/f1-extract-v1",
-  "evaluated_at": "2026-02-19T08:43:29Z"
+  "branch_name": "hence/b6-tests-v1",
+  "evaluated_at": "2026-02-19T08:54:17Z"
 }
