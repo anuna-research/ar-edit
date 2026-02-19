@@ -1,12 +1,12 @@
 {
-  "task_id": "h7-watcher",
+  "task_id": "b5-ops",
   "token_budget": 8000,
-  "tokens_used": 355,
+  "tokens_used": 373,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement filesystem watcher using notify crate in ar-edit/src/tui/events.rs: detect external changes to edit document JSON (from agent CLI commands or manual edits). Reload app state on change. Per ADR-004 consequence.",
-      "token_cost": 54,
+      "content": "Implement transcript operations per CON-003: list (table of source_id/duration/word_count/path), read (full transcript as text or --json), search (regex across all transcripts returning source_id, word indices, timestamps, context). Wire CLI handlers. Implements REQ-008, REQ-009, REQ-010.",
+      "token_cost": 72,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T06:54:31Z"
+  "constructed_at": "2026-02-19T06:58:59Z"
 }

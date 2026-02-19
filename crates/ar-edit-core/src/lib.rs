@@ -7,4 +7,5 @@ pub mod playback;
 pub mod project;
 pub mod resolve;
 pub mod transcript;
+pub mod transcript_ops;
 pub mod validate;

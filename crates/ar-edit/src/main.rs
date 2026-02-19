@@ -49,10 +49,10 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             todo!("transcribe: source_id={:?}, all={}", args.source_id, args.all)
         }
         Commands::Transcripts { command } => match command {
-            TranscriptsCommand::List => todo!("transcripts list"),
-            TranscriptsCommand::Read { source_id } => todo!("transcripts read: {source_id}"),
+            TranscriptsCommand::List => cmd_transcripts_list(cli),
+            TranscriptsCommand::Read { source_id } => cmd_transcripts_read(cli, source_id),
             TranscriptsCommand::Search { query, source } => {
-                todo!("transcripts search: {query}, source={source:?}")
+                cmd_transcripts_search(cli, query, source.as_deref())
             }
             TranscriptsCommand::Export { format, output } => {
                 todo!("transcripts export: format={format}, output={output:?}")
@@ -209,6 +209,101 @@ fn cmd_history(cli: &Cli, edit: &str) -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: transcripts (CON-003, REQ-008, REQ-009, REQ-010)
+// ---------------------------------------------------------------------------
+
+fn cmd_transcripts_list(cli: &Cli) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+    let transcripts = ar_edit_core::transcript_ops::list(&project_dir)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        let output = serde_json::json!({ "transcripts": transcripts });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        if transcripts.is_empty() {
+            println!("No transcripts.");
+        } else {
+            println!(
+                "  {:<12} {:<12} {:<12} {}",
+                "SOURCE", "DURATION", "WORDS", "PATH"
+            );
+            println!("  {}", "-".repeat(60));
+            for t in &transcripts {
+                println!(
+                    "  {:<12} {:<12} {:<12} {}",
+                    t.source_id,
+                    ar_edit_core::display::format_time(t.duration_ms),
+                    t.word_count,
+                    t.path,
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_transcripts_read(cli: &Cli, source_id: &str) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+    let transcript = ar_edit_core::transcript_ops::read(&project_dir, source_id)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&transcript)?);
+    } else {
+        for seg in &transcript.segments {
+            println!("{}", seg.text);
+            println!();
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_transcripts_search(
+    cli: &Cli,
+    query: &str,
+    source: Option<&str>,
+) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+    let results = ar_edit_core::transcript_ops::search(&project_dir, query, source)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        let output = serde_json::json!({ "results": results });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        if results.is_empty() {
+            println!("No matches.");
+        } else {
+            for r in &results {
+                println!(
+                    "  {} [words {}..{}] {}-{}",
+                    r.source_id,
+                    r.from_word,
+                    r.to_word,
+                    ar_edit_core::display::format_time(r.start_ms),
+                    ar_edit_core::display::format_time(r.end_ms),
+                );
+                let mut line = String::new();
+                if !r.context_before.is_empty() {
+                    line.push_str(&format!("...{} ", r.context_before));
+                }
+                line.push_str(&format!("[{}]", r.text));
+                if !r.context_after.is_empty() {
+                    line.push_str(&format!(" {}...", r.context_after));
+                }
+                println!("    {line}");
+                println!();
+            }
+        }
+    }
+
     Ok(())
 }
 
