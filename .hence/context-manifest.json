@@ -1,12 +1,12 @@
 {
-  "task_id": "d2-thumbs",
+  "task_id": "c2-snapshot",
   "token_budget": 8000,
-  "tokens_used": 313,
+  "tokens_used": 342,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Extract representative JPEG frames at scene changes AND fixed intervals (default 10s, configurable via --interval). 640px wide. Filenames: src-NNN_MMmSSs.jpg in thumbnails/ directory. Per REQ-032.",
-      "token_cost": 49,
+      "content": "Implement snapshot recomputation per ADR-001: replay ops[0..=head] to produce EditSnapshot. Handle all EditOpKind variants: AddShot inserts at end, RemoveShot removes by id, MoveShot reorders, TrimShot updates range. Cache snapshot in edit JSON on disk.",
+      "token_cost": 63,
       "priority": "PlanMeta"
     },
     {
@@ -56,8 +56,14 @@
       "content": "Modified 12 files (+819, -6): .hence/context-manifest.json, Cargo.lock, Cargo.toml, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/tests/test_001_project_init.rs and 7 more",
       "token_cost": 44,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-d2-thumbs-changes",
+      "content": "Modified 1 files (+167, -2): crates/ar-edit-core/src/index.rs",
+      "token_cost": 15,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:44:01Z"
+  "constructed_at": "2026-02-19T04:48:27Z"
 }

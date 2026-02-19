@@ -1,3 +1,6 @@
+use std::fs;
+use std::path::Path;
+
 use chrono::Utc;
 use thiserror::Error;
 
@@ -9,6 +12,14 @@ pub enum EditError {
     ShotNotFound(String),
     #[error("position out of bounds: {position} (max: {max})")]
     PositionOutOfBounds { position: usize, max: usize },
+    #[error("nothing to undo")]
+    NothingToUndo,
+    #[error("nothing to redo")]
+    NothingToRedo,
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("failed to parse edit document: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 impl EditDocument {
@@ -95,6 +106,102 @@ impl EditDocument {
 
         self.snapshot.shots[idx].range = new_range;
         Ok(())
+    }
+
+    // -- undo / redo ----------------------------------------------------------
+
+    /// Undo the last operation: decrement head and recompute the snapshot.
+    ///
+    /// Returns the undone op for reporting. Errors if head is already at -1.
+    pub fn undo(&mut self) -> Result<&EditOp, EditError> {
+        if self.head < 0 {
+            return Err(EditError::NothingToUndo);
+        }
+        self.head -= 1;
+        self.snapshot = Self::recompute_snapshot(&self.ops, self.head);
+        Ok(&self.ops[(self.head + 1) as usize])
+    }
+
+    /// Redo the next operation: increment head and recompute the snapshot.
+    ///
+    /// Returns the redone op for reporting. Errors if head is already at the end.
+    pub fn redo(&mut self) -> Result<&EditOp, EditError> {
+        let max = self.ops.len() as i32 - 1;
+        if self.head >= max {
+            return Err(EditError::NothingToRedo);
+        }
+        self.head += 1;
+        self.snapshot = Self::recompute_snapshot(&self.ops, self.head);
+        Ok(&self.ops[self.head as usize])
+    }
+
+    // -- snapshot recomputation -----------------------------------------------
+
+    /// Replay `ops[0..=head]` from an empty state to produce an `EditSnapshot`.
+    ///
+    /// This is a pure function: given the same ops and head, it always produces
+    /// the same snapshot. If head is negative, returns an empty snapshot.
+    pub fn recompute_snapshot(ops: &[EditOp], head: i32) -> EditSnapshot {
+        let mut snapshot = EditSnapshot { shots: vec![] };
+        if head < 0 {
+            return snapshot;
+        }
+
+        let end = (head as usize) + 1;
+        for op in &ops[..end] {
+            match &op.op {
+                EditOpKind::AddShot { shot } => {
+                    snapshot.shots.push(shot.clone());
+                }
+                EditOpKind::RemoveShot { shot_id, .. } => {
+                    if let Some(idx) = snapshot.shots.iter().position(|s| s.id == *shot_id) {
+                        snapshot.shots.remove(idx);
+                    }
+                }
+                EditOpKind::MoveShot {
+                    shot_id,
+                    to_position,
+                    ..
+                } => {
+                    if let Some(idx) = snapshot.shots.iter().position(|s| s.id == *shot_id) {
+                        let shot = snapshot.shots.remove(idx);
+                        snapshot.shots.insert(*to_position as usize, shot);
+                    }
+                }
+                EditOpKind::TrimShot {
+                    shot_id, new_range, ..
+                } => {
+                    if let Some(shot) = snapshot.shots.iter_mut().find(|s| s.id == *shot_id) {
+                        shot.range = new_range.clone();
+                    }
+                }
+                EditOpKind::ReplaceRangeType {
+                    shot_id, new_range, ..
+                } => {
+                    if let Some(shot) = snapshot.shots.iter_mut().find(|s| s.id == *shot_id) {
+                        shot.range = new_range.clone();
+                    }
+                }
+            }
+        }
+
+        snapshot
+    }
+
+    // -- persistence ----------------------------------------------------------
+
+    /// Save the edit document to disk as pretty-printed JSON.
+    pub fn save(&self, path: &Path) -> Result<(), EditError> {
+        let json = serde_json::to_string_pretty(self)?;
+        fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load an edit document from disk.
+    pub fn load(path: &Path) -> Result<Self, EditError> {
+        let content = fs::read_to_string(path)?;
+        let doc: EditDocument = serde_json::from_str(&content)?;
+        Ok(doc)
     }
 
     // -- helpers --------------------------------------------------------------
@@ -401,5 +508,385 @@ mod tests {
         assert_eq!(doc.ops.len(), 5);
         assert_eq!(doc.head, 4);
         assert_eq!(doc.snapshot.shots.len(), 3);
+    }
+
+    // -- recompute_snapshot ---------------------------------------------------
+
+    #[test]
+    fn recompute_empty_ops() {
+        let snapshot = EditDocument::recompute_snapshot(&[], -1);
+        assert!(snapshot.shots.is_empty());
+    }
+
+    #[test]
+    fn recompute_negative_head_returns_empty() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 10 });
+
+        let snapshot = EditDocument::recompute_snapshot(&doc.ops, -1);
+        assert!(snapshot.shots.is_empty());
+    }
+
+    #[test]
+    fn recompute_matches_inline_snapshot() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 });
+        doc.move_shot("shot-003", 0).unwrap();
+        doc.trim_shot("shot-001", ShotRange::Words { from: 5, to: 45 }).unwrap();
+
+        let recomputed = EditDocument::recompute_snapshot(&doc.ops, doc.head);
+        assert_eq!(recomputed, doc.snapshot);
+    }
+
+    #[test]
+    fn recompute_partial_head() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 });
+
+        // Recompute at head=1 should only have first two shots
+        let snapshot = EditDocument::recompute_snapshot(&doc.ops, 1);
+        assert_eq!(snapshot.shots.len(), 2);
+        assert_eq!(snapshot.shots[0].id, "shot-001");
+        assert_eq!(snapshot.shots[1].id, "shot-002");
+    }
+
+    #[test]
+    fn recompute_handles_add_shot() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+
+        let snapshot = EditDocument::recompute_snapshot(&doc.ops, 0);
+        assert_eq!(snapshot.shots.len(), 1);
+        assert_eq!(snapshot.shots[0].id, "shot-001");
+        assert_eq!(snapshot.shots[0].source, "src-001");
+        assert_eq!(snapshot.shots[0].range, ShotRange::Words { from: 0, to: 52 });
+    }
+
+    #[test]
+    fn recompute_handles_remove_shot() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.remove_shot("shot-001").unwrap();
+
+        let snapshot = EditDocument::recompute_snapshot(&doc.ops, doc.head);
+        assert_eq!(snapshot.shots.len(), 1);
+        assert_eq!(snapshot.shots[0].id, "shot-002");
+    }
+
+    #[test]
+    fn recompute_handles_move_shot() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 });
+        doc.move_shot("shot-003", 0).unwrap();
+
+        let snapshot = EditDocument::recompute_snapshot(&doc.ops, doc.head);
+        assert_eq!(snapshot.shots[0].id, "shot-003");
+        assert_eq!(snapshot.shots[1].id, "shot-001");
+        assert_eq!(snapshot.shots[2].id, "shot-002");
+    }
+
+    #[test]
+    fn recompute_handles_trim_shot() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 });
+        doc.trim_shot("shot-001", ShotRange::Words { from: 10, to: 90 }).unwrap();
+
+        let snapshot = EditDocument::recompute_snapshot(&doc.ops, doc.head);
+        assert_eq!(snapshot.shots[0].range, ShotRange::Words { from: 10, to: 90 });
+    }
+
+    #[test]
+    fn recompute_handles_replace_range_type() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+
+        // Manually push a ReplaceRangeType op
+        let new_range = ShotRange::Time { from_ms: 0, to_ms: 12400 };
+        doc.push_op(EditOpKind::ReplaceRangeType {
+            shot_id: "shot-001".into(),
+            old_range: ShotRange::Words { from: 0, to: 52 },
+            new_range: new_range.clone(),
+        });
+        doc.snapshot.shots[0].range = new_range.clone();
+
+        let snapshot = EditDocument::recompute_snapshot(&doc.ops, doc.head);
+        assert_eq!(snapshot.shots[0].range, ShotRange::Time { from_ms: 0, to_ms: 12400 });
+    }
+
+    #[test]
+    fn recompute_all_op_types_combined() {
+        let mut doc = EditDocument::create("test");
+        // Add 3 shots
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.add_shot("src-003", ShotRange::Time { from_ms: 5000, to_ms: 10000 });
+        // Move shot-003 to front
+        doc.move_shot("shot-003", 0).unwrap();
+        // Trim shot-001
+        doc.trim_shot("shot-001", ShotRange::Words { from: 5, to: 40 }).unwrap();
+        // Remove shot-002
+        doc.remove_shot("shot-002").unwrap();
+
+        let recomputed = EditDocument::recompute_snapshot(&doc.ops, doc.head);
+        assert_eq!(recomputed, doc.snapshot);
+        assert_eq!(recomputed.shots.len(), 2);
+        assert_eq!(recomputed.shots[0].id, "shot-003");
+        assert_eq!(recomputed.shots[1].id, "shot-001");
+        assert_eq!(recomputed.shots[1].range, ShotRange::Words { from: 5, to: 40 });
+    }
+
+    // -- undo / redo ----------------------------------------------------------
+
+    #[test]
+    fn undo_single_op() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+
+        let undone = doc.undo().unwrap();
+        assert!(matches!(&undone.op, EditOpKind::AddShot { .. }));
+        assert_eq!(doc.head, -1);
+        assert!(doc.snapshot.shots.is_empty());
+        // ops remain in log for redo
+        assert_eq!(doc.ops.len(), 1);
+    }
+
+    #[test]
+    fn undo_multiple_ops() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 });
+
+        doc.undo().unwrap();
+        assert_eq!(doc.head, 1);
+        assert_eq!(doc.snapshot.shots.len(), 2);
+        assert_eq!(doc.snapshot.shots[0].id, "shot-001");
+        assert_eq!(doc.snapshot.shots[1].id, "shot-002");
+
+        doc.undo().unwrap();
+        assert_eq!(doc.head, 0);
+        assert_eq!(doc.snapshot.shots.len(), 1);
+        assert_eq!(doc.snapshot.shots[0].id, "shot-001");
+
+        doc.undo().unwrap();
+        assert_eq!(doc.head, -1);
+        assert!(doc.snapshot.shots.is_empty());
+    }
+
+    #[test]
+    fn undo_nothing_to_undo() {
+        let mut doc = EditDocument::create("test");
+        let err = doc.undo().unwrap_err();
+        assert!(matches!(err, EditError::NothingToUndo));
+    }
+
+    #[test]
+    fn redo_single_op() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.undo().unwrap();
+
+        let redone = doc.redo().unwrap();
+        assert!(matches!(&redone.op, EditOpKind::AddShot { .. }));
+        assert_eq!(doc.head, 0);
+        assert_eq!(doc.snapshot.shots.len(), 1);
+        assert_eq!(doc.snapshot.shots[0].id, "shot-001");
+    }
+
+    #[test]
+    fn redo_nothing_to_redo() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+
+        let err = doc.redo().unwrap_err();
+        assert!(matches!(err, EditError::NothingToRedo));
+    }
+
+    #[test]
+    fn redo_nothing_to_redo_empty() {
+        let mut doc = EditDocument::create("test");
+        let err = doc.redo().unwrap_err();
+        assert!(matches!(err, EditError::NothingToRedo));
+    }
+
+    #[test]
+    fn undo_redo_roundtrip() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+
+        let original_snapshot = doc.snapshot.clone();
+
+        doc.undo().unwrap();
+        assert_eq!(doc.snapshot.shots.len(), 1);
+
+        doc.redo().unwrap();
+        assert_eq!(doc.snapshot, original_snapshot);
+    }
+
+    #[test]
+    fn undo_then_new_op_truncates_redo() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 });
+
+        // Undo two ops
+        doc.undo().unwrap();
+        doc.undo().unwrap();
+        assert_eq!(doc.head, 0);
+        assert_eq!(doc.snapshot.shots.len(), 1);
+
+        // New op should discard the undone ops
+        doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 });
+
+        assert_eq!(doc.ops.len(), 2);
+        assert_eq!(doc.head, 1);
+        assert_eq!(doc.snapshot.shots.len(), 2);
+        assert_eq!(doc.snapshot.shots[0].id, "shot-001");
+        assert_eq!(doc.snapshot.shots[1].id, "shot-004");
+
+        // Redo should fail since the redo history was discarded
+        let err = doc.redo().unwrap_err();
+        assert!(matches!(err, EditError::NothingToRedo));
+    }
+
+    #[test]
+    fn undo_complex_operations() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 });
+        doc.move_shot("shot-003", 0).unwrap();
+        doc.trim_shot("shot-001", ShotRange::Words { from: 5, to: 45 }).unwrap();
+
+        // Undo trim — shot-001 should go back to original range
+        doc.undo().unwrap();
+        assert_eq!(doc.snapshot.shots.len(), 3);
+        let shot_001 = doc.snapshot.shots.iter().find(|s| s.id == "shot-001").unwrap();
+        assert_eq!(shot_001.range, ShotRange::Words { from: 0, to: 52 });
+
+        // Undo move — shot-003 should be back at the end
+        doc.undo().unwrap();
+        assert_eq!(doc.snapshot.shots[0].id, "shot-001");
+        assert_eq!(doc.snapshot.shots[1].id, "shot-002");
+        assert_eq!(doc.snapshot.shots[2].id, "shot-003");
+    }
+
+    #[test]
+    fn undo_redo_all_ops() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.move_shot("shot-002", 0).unwrap();
+        doc.trim_shot("shot-001", ShotRange::Words { from: 5, to: 45 }).unwrap();
+        doc.remove_shot("shot-002").unwrap();
+
+        let final_snapshot = doc.snapshot.clone();
+
+        // Undo all
+        for _ in 0..5 {
+            doc.undo().unwrap();
+        }
+        assert_eq!(doc.head, -1);
+        assert!(doc.snapshot.shots.is_empty());
+
+        // Redo all
+        for _ in 0..5 {
+            doc.redo().unwrap();
+        }
+        assert_eq!(doc.head, 4);
+        assert_eq!(doc.snapshot, final_snapshot);
+    }
+
+    // -- persistence ----------------------------------------------------------
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("test.edit.json");
+
+        let mut doc = EditDocument::create("rough-cut");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.move_shot("shot-002", 0).unwrap();
+
+        doc.save(&path).unwrap();
+        let loaded = EditDocument::load(&path).unwrap();
+
+        assert_eq!(loaded.name, doc.name);
+        assert_eq!(loaded.head, doc.head);
+        assert_eq!(loaded.ops.len(), doc.ops.len());
+        assert_eq!(loaded.snapshot, doc.snapshot);
+        assert_eq!(loaded.next_shot_id, doc.next_shot_id);
+    }
+
+    #[test]
+    fn save_includes_cached_snapshot() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("test.edit.json");
+
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.save(&path).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // Verify snapshot is present in the JSON
+        assert!(json.get("snapshot").is_some());
+        let shots = json["snapshot"]["shots"].as_array().unwrap();
+        assert_eq!(shots.len(), 1);
+        assert_eq!(shots[0]["id"], "shot-001");
+    }
+
+    #[test]
+    fn load_and_recompute_matches() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("test.edit.json");
+
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.move_shot("shot-002", 0).unwrap();
+        doc.trim_shot("shot-001", ShotRange::Words { from: 5, to: 45 }).unwrap();
+
+        doc.save(&path).unwrap();
+        let loaded = EditDocument::load(&path).unwrap();
+
+        // Recomputed snapshot should match the cached one
+        let recomputed = EditDocument::recompute_snapshot(&loaded.ops, loaded.head);
+        assert_eq!(recomputed, loaded.snapshot);
+    }
+
+    #[test]
+    fn save_after_undo_preserves_full_ops() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("test.edit.json");
+
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.undo().unwrap();
+
+        doc.save(&path).unwrap();
+        let loaded = EditDocument::load(&path).unwrap();
+
+        assert_eq!(loaded.head, 0);
+        assert_eq!(loaded.ops.len(), 2);
+        assert_eq!(loaded.snapshot.shots.len(), 1);
+    }
+
+    #[test]
+    fn load_nonexistent_file_errors() {
+        let err = EditDocument::load(Path::new("/nonexistent/file.json")).unwrap_err();
+        assert!(matches!(err, EditError::Io(_)));
     }
 }
