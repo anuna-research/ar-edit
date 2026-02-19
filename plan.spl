@@ -1,0 +1,593 @@
+;; =============================================================================
+;; IMPL-001: ar-edit — Transcript-Driven Video Editor
+;; Implementation plan derived from SPEC-001, DATA-MODEL, ADR-001..004, contracts
+;; =============================================================================
+
+(meta plan
+  (id "IMPL-001")
+  (title "ar-edit: Transcript-Driven Video Editor")
+  (version "1.0.0")
+  (status "active")
+  (created "2026-02-19")
+  (author "agent:architect")
+  (spec "SPEC-001")
+  (description "Rust CLI video editor: transcript-based editing via whisper.cpp, ffmpeg rendering, ratatui TUI. 10 phases (A-J), 48 tasks, from workspace setup through E2E polish."))
+
+;; =============================================================================
+;; Agent
+;; =============================================================================
+
+(given agent-claude-available)
+
+;; =============================================================================
+;; PHASE A: Foundation (data models + project management)
+;; Delivers: ar-edit init, ar-edit add, ar-edit doctor
+;; =============================================================================
+
+(given task-a1-workspace)
+(given task-a2-models)
+(given task-a3-project)
+(given task-a4-cli)
+(given task-a5-tests)
+(given no-deps-a1-workspace)
+
+(meta task-a1-workspace
+  (phase "A")
+  (description "Set up Cargo workspace with ar-edit-core (library) and ar-edit (binary) crates. Configure workspace Cargo.toml. Core deps: serde, serde_json, chrono, thiserror, which, regex. Binary deps: clap (derive), ratatui, crossterm, notify, indicatif, tokio, anyhow.")
+  (acceptance "cargo build succeeds for both crates; workspace structure matches IMPL-001 crate layout"))
+
+(meta task-a2-models
+  (phase "A")
+  (description "Implement all serde structs in ar-edit-core/src/models/: Manifest, Source, Defaults, Transcript, TranscriptSegment, Word, EditDocument, EditSnapshot, Shot, ShotNote, ShotRange (tagged union enum per ADR-002), EditOp, EditOpKind, SourceIndex, SourceMetadata, Thumbnail, Scene, SourceMarkers, Marker. All derive Serialize/Deserialize. ShotRange uses serde adjacently-tagged enum: words{from,to}, scenes{from,to}, time{from_ms,to_ms}.")
+  (acceptance "All types compile; round-trip JSON serde tests pass; ShotRange serializes as tagged union matching DATA-MODEL examples"))
+
+(meta task-a3-project
+  (phase "A")
+  (description "Implement project operations in ar-edit-core/src/project.rs: init (create dir structure + manifest.json per CON-001), add (symlink/copy source, extract metadata via ffprobe subprocess per ADR-003, assign src-NNN ID, update manifest per CON-001), doctor (detect ffmpeg/whisper.cpp/VLC via which crate). Reject non-video files per REQ-003.")
+  (acceptance "init creates valid project with all subdirs; add extracts ffprobe metadata and updates manifest; doctor reports dependency status; non-video files rejected with structured error"))
+
+(meta task-a4-cli
+  (phase "A")
+  (description "Implement clap derive subcommand structure in ar-edit/src/cli/mod.rs covering all commands from contracts: init, add, doctor, transcribe, transcripts (list/read/search/export), edit (create/add-segment/move-segment/remove-segment/trim-segment/show/history/from-transcript/note), undo, redo, validate, play, render, index (show/set-description), search, mark, markers, schema, tui. Global --json flag. Exit codes per CON-009.")
+  (acceptance "All subcommands parse; --json flag available globally; help text generated; exit codes 0/1/2/3 wired correctly"))
+
+(meta task-a5-tests
+  (phase "A")
+  (description "Write unit tests TEST-001 (project init structure), TEST-002 (source registration + metadata), TEST-003 (non-video rejection), TEST-030 (exit codes). Create tests/fixtures/ directory with placeholder structure for future test videos and pre-generated transcripts.")
+  (acceptance "All 4 tests pass; fixture directory structure created"))
+
+;; Phase A readiness
+(normally r-ready-a1-workspace (and task-a1-workspace no-deps-a1-workspace) ready-a1-workspace)
+(normally r-ready-a2-models (and task-a2-models completed-a1-workspace) ready-a2-models)
+(normally r-ready-a3-project (and task-a3-project completed-a2-models) ready-a3-project)
+(normally r-ready-a4-cli (and task-a4-cli completed-a1-workspace) ready-a4-cli)
+(normally r-ready-a5-tests (and task-a5-tests completed-a3-project completed-a4-cli) ready-a5-tests)
+
+;; =============================================================================
+;; PHASE B: Transcription Pipeline
+;; Delivers: ar-edit transcribe, ar-edit transcripts list/read/search
+;; =============================================================================
+
+(given task-b1-audio)
+(given task-b2-whisper)
+(given task-b3-ingest)
+(given task-b4-import)
+(given task-b5-ops)
+(given task-b6-tests)
+
+(meta task-b1-audio
+  (phase "B")
+  (description "Implement ffmpeg subprocess to extract WAV audio from video in ar-edit-core/src/transcript.rs. Command: ffmpeg -i <source> -vn -acodec pcm_s16le -ar 16000 -ac 1 <output.wav>. Per ADR-003 subprocess architecture. Handle missing audio stream error.")
+  (acceptance "WAV file produced from video source; error returned for video without audio; command logged for debugging"))
+
+(meta task-b2-whisper
+  (phase "B")
+  (description "Implement whisper.cpp subprocess invocation per ADR-003: whisper-cli -m <model-path> -f <audio.wav> --output-json --print-progress. Support model selection (tiny/base/small/medium/large), default base per REQ-006. Parse progress from stderr.")
+  (acceptance "Transcription produces JSON output; model flag works; progress events parsed from stderr"))
+
+(meta task-b3-ingest
+  (phase "B")
+  (description "Parse whisper.cpp JSON into internal Transcript format per DATA-MODEL section 2. Filter word tokens (strip [BLANK], [SOT] etc.), assign sequential global word indices across segments, convert timestamps to integer milliseconds, preserve segment boundaries. Implements REQ-005.")
+  (acceptance "Word indices globally sequential (0..word_count-1) with no gaps; timestamps in ms; segments preserved; confidence scores retained"))
+
+(meta task-b4-import
+  (phase "B")
+  (description "Implement SRT and VTT parsers in ar-edit-core/src/transcript.rs. Convert to internal Transcript JSON format. Also accept raw whisper.cpp JSON passthrough. Preserve word-level timestamps where available, fall back to segment-level. Implements REQ-007.")
+  (acceptance "SRT parsed with correct timestamps; VTT parsed correctly; whisper JSON passthrough works; word counts accurate"))
+
+(meta task-b5-ops
+  (phase "B")
+  (description "Implement transcript operations per CON-003: list (table of source_id/duration/word_count/path), read (full transcript as text or --json), search (regex across all transcripts returning source_id, word indices, timestamps, context). Wire CLI handlers. Implements REQ-008, REQ-009, REQ-010.")
+  (acceptance "List shows all transcribed sources; read outputs full transcript; search returns matches with word index ranges and context"))
+
+(meta task-b6-tests
+  (phase "B")
+  (description "Write tests TEST-004 (valid JSON output), TEST-005 (sequential word indices), TEST-006 (model selection), TEST-007 (SRT/VTT import), TEST-008 (listing), TEST-009 (reading), TEST-010 (search). Create pre-generated transcript fixtures for CI (no whisper.cpp dependency).")
+  (acceptance "All 7 tests pass; fixtures committed to tests/fixtures/; tests work without whisper.cpp"))
+
+;; Phase B readiness
+(normally r-ready-b1-audio (and task-b1-audio completed-a3-project) ready-b1-audio)
+(normally r-ready-b2-whisper (and task-b2-whisper completed-b1-audio) ready-b2-whisper)
+(normally r-ready-b3-ingest (and task-b3-ingest completed-b2-whisper) ready-b3-ingest)
+(normally r-ready-b4-import (and task-b4-import completed-b3-ingest) ready-b4-import)
+(normally r-ready-b5-ops (and task-b5-ops completed-b3-ingest) ready-b5-ops)
+(normally r-ready-b6-tests (and task-b6-tests completed-b5-ops completed-b4-import) ready-b6-tests)
+
+;; =============================================================================
+;; PHASE C: Edit Document + Undo/Redo
+;; Delivers: ar-edit edit create/add-segment/move-segment/remove-segment/
+;;           trim-segment/show/history, ar-edit validate, ar-edit undo/redo
+;; =============================================================================
+
+(given task-c1-ops)
+(given task-c2-snapshot)
+(given task-c3-undo)
+(given task-c4-resolve)
+(given task-c5-validate)
+(given task-c6-display)
+(given task-c7-tests)
+
+(meta task-c1-ops
+  (phase "C")
+  (description "Implement edit document operations in ar-edit-core/src/edit.rs per ADR-001 event-sourced design: create (empty edit with ops:[], head:-1), add_shot (append AddShot op), move_shot (append MoveShot op with from/to positions), remove_shot (append RemoveShot op preserving full shot data for undo), trim_shot (append TrimShot op with old/new range). All ops append to log and update snapshot. Implements REQ-011 through REQ-015.")
+  (acceptance "All 5 operations append correct ops; snapshot updated; shot IDs stable and never reused; next_shot_id incremented correctly"))
+
+(meta task-c2-snapshot
+  (phase "C")
+  (description "Implement snapshot recomputation per ADR-001: replay ops[0..=head] to produce EditSnapshot. Handle all EditOpKind variants: AddShot inserts at end, RemoveShot removes by id, MoveShot reorders, TrimShot updates range. Cache snapshot in edit JSON on disk.")
+  (acceptance "Snapshot correctly reflects any sequence of operations; recomputed snapshot matches incremental updates"))
+
+(meta task-c3-undo
+  (phase "C")
+  (description "Implement undo/redo per ADR-001: undo decrements head and recomputes snapshot; redo increments head (if ops exist beyond). New mutation after undo truncates ops beyond head (fork behavior). Wire CLI commands: ar-edit undo <edit>, ar-edit redo <edit>, ar-edit edit history <edit>. Implements REQ-046, REQ-047, REQ-048.")
+  (acceptance "Undo reverts correctly; redo re-applies; fork behavior discards future ops; history shows all ops with head marker"))
+
+(meta task-c4-resolve
+  (phase "C")
+  (description "Implement range resolution in ar-edit-core/src/resolve.rs: resolve ShotRange to (start_ms, end_ms). Words variant: transcript.word[from].start_ms .. word[to].end_ms. Scenes variant: index.scene[from].start_ms .. scene[to].end_ms. Time variant: direct passthrough. Loads transcript/index JSON as needed.")
+  (acceptance "Word ranges resolve to correct ms; scene ranges resolve correctly; time ranges pass through; errors on missing transcript/index"))
+
+(meta task-c5-validate
+  (phase "C")
+  (description "Implement all validation checks from CON-005: source exists in project, transcript exists (for word range), index exists (for scene range), word index in bounds, scene index in bounds, time in bounds, from <= to, non-zero duration. Return structured errors with patterns matching CON-005. Implements REQ-017.")
+  (acceptance "All 8 validation checks produce correct error messages matching CON-005 patterns; valid documents pass"))
+
+(meta task-c6-display
+  (phase "C")
+  (description "Implement ar-edit edit show: join snapshot against transcripts/indices to produce resolved view per DATA-MODEL section 3 (Resolved View). Each shot gets start_ms, end_ms, duration_ms, text_preview (from transcript) or scene_preview (from scene descriptions). Table output and --json. Implements REQ-016.")
+  (acceptance "Resolved view matches DATA-MODEL example; --json output correct; human table readable"))
+
+(meta task-c7-tests
+  (phase "C")
+  (description "Write tests TEST-011 (edit creation), TEST-012 (segment addition for all 3 range types), TEST-013 (reordering), TEST-014 (removal), TEST-015 (trimming), TEST-016 (display resolves ranges), TEST-017 (validation catches all error types), TEST-018 (edit from annotated transcript), TEST-019 (direct JSON authoring), TEST-051 (undo), TEST-052 (redo), TEST-053 (fork behavior), TEST-053b (history display).")
+  (acceptance "All 13 tests pass; all range types covered; all validation error cases tested"))
+
+;; Phase C readiness (can start after A2, in parallel with B)
+(normally r-ready-c1-ops (and task-c1-ops completed-a2-models) ready-c1-ops)
+(normally r-ready-c2-snapshot (and task-c2-snapshot completed-c1-ops) ready-c2-snapshot)
+(normally r-ready-c3-undo (and task-c3-undo completed-c2-snapshot) ready-c3-undo)
+(normally r-ready-c4-resolve (and task-c4-resolve completed-a2-models) ready-c4-resolve)
+(normally r-ready-c5-validate (and task-c5-validate completed-c1-ops completed-c4-resolve) ready-c5-validate)
+(normally r-ready-c6-display (and task-c6-display completed-c2-snapshot completed-c4-resolve) ready-c6-display)
+(normally r-ready-c7-tests (and task-c7-tests completed-c3-undo completed-c5-validate completed-c6-display) ready-c7-tests)
+
+;; =============================================================================
+;; PHASE D: Index + Search
+;; Delivers: ar-edit index, ar-edit index show, ar-edit index set-description,
+;;           ar-edit search
+;; =============================================================================
+
+(given task-d1-scenes)
+(given task-d2-thumbs)
+(given task-d3-index)
+(given task-d4-describe)
+(given task-d5-search)
+(given task-d6-tests)
+
+(meta task-d1-scenes
+  (phase "D")
+  (description "Implement ffmpeg scene detection subprocess in ar-edit-core/src/index.rs per ADR-003. Command: ffmpeg -i <source> -vf \"select='gt(scene,0.3)'\" -vsync vfr ... Parse output to extract scene change timestamps. Create Scene structs with sequential indices and start_ms/end_ms.")
+  (acceptance "Scene changes detected at correct timestamps; sequential scene indices assigned; handles videos with no scene changes"))
+
+(meta task-d2-thumbs
+  (phase "D")
+  (description "Extract representative JPEG frames at scene changes AND fixed intervals (default 10s, configurable via --interval). 640px wide. Filenames: src-NNN_MMmSSs.jpg in thumbnails/ directory. Per REQ-032.")
+  (acceptance "Thumbnails at correct timestamps; JPEG format; 640px wide; filenames match src-NNN_MMmSSs.jpg pattern"))
+
+(meta task-d3-index
+  (phase "D")
+  (description "Create SourceIndex JSON per DATA-MODEL section 4: combine metadata, thumbnails, and scenes. Write to index/src-NNN.index.json. Update manifest (indexed: true). Wire CLI: ar-edit index <source-id>, ar-edit index --all [--parallel N]. Per CON-008. Implements REQ-031.")
+  (acceptance "Index JSON matches DATA-MODEL structure; manifest updated; --all indexes unindexed sources"))
+
+(meta task-d4-describe
+  (phase "D")
+  (description "Generate description:null placeholders for all scenes. Implement ar-edit index set-description <source-id> --scene <N> --text '<desc>' to populate them (append-only, old value logged). Implement ar-edit index show <source-id>. Per CON-008. Implements REQ-033, REQ-035.")
+  (acceptance "Scaffolding produces null descriptions; set-description updates index; index show displays full JSON"))
+
+(meta task-d5-search
+  (phase "D")
+  (description "Implement unified search in ar-edit-core/src/search.rs spanning transcripts AND scene descriptions. Results typed as transcript/scene/metadata with source_id, timestamps, context. Wire CLI: ar-edit search <query> [--source <id>] [--type transcript|scene|metadata]. Per CON-008. Implements REQ-034.")
+  (acceptance "Finds transcript matches and scene description matches; results include match_type; source and type filters work"))
+
+(meta task-d6-tests
+  (phase "D")
+  (description "Write tests TEST-037 (source indexing), TEST-038 (thumbnail extraction), TEST-039 (scene description scaffolding), TEST-040 (cross-index search), TEST-041 (index summary). Create pre-generated index fixtures.")
+  (acceptance "All 5 tests pass; fixtures include pre-generated index with scenes and thumbnails"))
+
+;; Phase D readiness (depends on B for cross-search)
+(normally r-ready-d1-scenes (and task-d1-scenes completed-a3-project) ready-d1-scenes)
+(normally r-ready-d2-thumbs (and task-d2-thumbs completed-d1-scenes) ready-d2-thumbs)
+(normally r-ready-d3-index (and task-d3-index completed-d2-thumbs) ready-d3-index)
+(normally r-ready-d4-describe (and task-d4-describe completed-d3-index) ready-d4-describe)
+(normally r-ready-d5-search (and task-d5-search completed-d4-describe completed-b5-ops) ready-d5-search)
+(normally r-ready-d6-tests (and task-d6-tests completed-d5-search) ready-d6-tests)
+
+;; =============================================================================
+;; PHASE E: Playback + Preview
+;; Delivers: ar-edit play, preview with overlay
+;; =============================================================================
+
+(given task-e1-detect)
+(given task-e2-segment)
+(given task-e3-full)
+(given task-e4-overlay)
+(given task-e5-feedback)
+(given task-e6-tests)
+
+(meta task-e1-detect
+  (phase "E")
+  (description "Implement video player detection in ar-edit-core/src/playback.rs: VLC (cvlc/vlc) preferred, ffplay fallback, per ADR-003 subprocess architecture. Use which crate. Report structured error if neither found.")
+  (acceptance "Detects VLC when installed; falls back to ffplay; clear error when neither available"))
+
+(meta task-e2-segment
+  (phase "E")
+  (description "Launch player at start/end timestamps for a single shot. Resolve shot range to timestamps via resolve.rs, then launch player subprocess with seek arguments. Also support source playback: ar-edit play <source-id> --at <timecode> / --at-word <N> / --at-scene <N>. Per CON-006. Implements REQ-021, REQ-024.")
+  (acceptance "Player opens at correct start time and stops at end time; source playback at word/scene/timecode works"))
+
+(meta task-e3-full
+  (phase "E")
+  (description "Render lightweight preview of full edit by concatenating all shots via ffmpeg, then launch player. This is the primary review mode. Per CON-006. Implements REQ-022.")
+  (acceptance "Preview renders all shots in sequence; player opens and plays continuously"))
+
+(meta task-e4-overlay
+  (phase "E")
+  (description "Implement ffmpeg drawtext filter overlay per REQ-023: timecode HH:MM:SS.mmm, shot ID, source ID, transcript/scene snippet. Semi-transparent background, top-left corner, monospace font. Three modes: clean (no flag), full (--overlay), minimal (--overlay minimal). Not present in final renders unless --burn-overlay.")
+  (acceptance "Full overlay shows all 4 elements; minimal shows timecode only; clean has no overlay"))
+
+(meta task-e5-feedback
+  (phase "E")
+  (description "On playback exit/interruption, output structured JSON per CON-006: last_position_ms, shot_id, source_id, word_index, scene_index. Designed for LLM agent to receive as context for editing instructions. Implements REQ-037.")
+  (acceptance "Exit output contains all position fields; --json produces parseable JSON; agent can act on pause data"))
+
+(meta task-e6-tests
+  (phase "E")
+  (description "Write integration tests TEST-021 (segment preview), TEST-022 (full edit playback), TEST-023 (overlay present via ffprobe), TEST-024 (source playback at timestamp).")
+  (acceptance "All 4 tests pass; overlay verified in rendered preview"))
+
+;; Phase E readiness (depends on C for edit documents, D for indices)
+(normally r-ready-e1-detect (and task-e1-detect completed-a3-project) ready-e1-detect)
+(normally r-ready-e2-segment (and task-e2-segment completed-e1-detect completed-c6-display) ready-e2-segment)
+(normally r-ready-e3-full (and task-e3-full completed-e2-segment) ready-e3-full)
+(normally r-ready-e4-overlay (and task-e4-overlay completed-e3-full) ready-e4-overlay)
+(normally r-ready-e5-feedback (and task-e5-feedback completed-e3-full) ready-e5-feedback)
+(normally r-ready-e6-tests (and task-e6-tests completed-e4-overlay completed-e5-feedback) ready-e6-tests)
+
+;; =============================================================================
+;; PHASE F: Render Pipeline
+;; Delivers: ar-edit render, subtitle embedding
+;; =============================================================================
+
+(given task-f1-extract)
+(given task-f2-concat)
+(given task-f3-codec)
+(given task-f4-progress)
+(given task-f5-subtitles)
+(given task-f6-tests)
+
+(meta task-f1-extract
+  (phase "F")
+  (description "Implement ffmpeg segment extraction in ar-edit-core/src/render.rs per ADR-003: ffmpeg -i <source> -ss <start> -to <end> -c copy <segment.mp4> for each shot. Resolve ranges to timestamps first. Temp files in a render working directory.")
+  (acceptance "Each shot extracted as individual segment file at correct timestamps; temp dir managed"))
+
+(meta task-f2-concat
+  (phase "F")
+  (description "Implement ffmpeg concat demuxer: generate filelist.txt with all segments in order, run ffmpeg -f concat -safe 0 -i filelist.txt -c copy <output>. Handle segment ordering matching edit snapshot.")
+  (acceptance "Output file contains all segments in correct order; duration matches sum of segments"))
+
+(meta task-f3-codec
+  (phase "F")
+  (description "Implement render format options per CON-007: --codec, --resolution flags. Default H.264/AAC in MP4 matching highest input resolution. Stream copy when codecs match, re-encode when needed. Support --burn-overlay for overlay in final render. Implements REQ-026.")
+  (acceptance "Default codec produces valid output; custom codec works; resolution scaling works; stream copy used when possible"))
+
+(meta task-f4-progress
+  (phase "F")
+  (description "Parse ffmpeg stderr for render progress: frame count, time, speed. Report as percentage, current shot, ETA. Human mode: indicatif progress bar. --json mode: streaming JSON lines. Per CON-007. Implements REQ-027.")
+  (acceptance "Progress bar displays during render; --json outputs streaming progress events with percentage and ETA"))
+
+(meta task-f5-subtitles
+  (phase "F")
+  (description "Generate SRT subtitle file from transcript word timestamps for the edit's shots. Embed via ffmpeg -i <video> -i <srt> -c copy -c:s mov_text <output>. Activated by --subtitles flag. Timing matches word boundaries. Implements REQ-036.")
+  (acceptance "SRT generated with correct word-level timing; embedded in output MP4; ffprobe confirms subtitle stream"))
+
+(meta task-f6-tests
+  (phase "F")
+  (description "Write tests TEST-025 (basic render, correct duration), TEST-026 (codec options), TEST-027 (progress reporting --json), TEST-042 (subtitle embedding verified by ffprobe).")
+  (acceptance "All 4 tests pass; output files valid; subtitle stream confirmed"))
+
+;; Phase F readiness (depends on E for ffmpeg pipeline)
+(normally r-ready-f1-extract (and task-f1-extract completed-e3-full) ready-f1-extract)
+(normally r-ready-f2-concat (and task-f2-concat completed-f1-extract) ready-f2-concat)
+(normally r-ready-f3-codec (and task-f3-codec completed-f2-concat) ready-f3-codec)
+(normally r-ready-f4-progress (and task-f4-progress completed-f2-concat) ready-f4-progress)
+(normally r-ready-f5-subtitles (and task-f5-subtitles completed-f2-concat completed-b3-ingest) ready-f5-subtitles)
+(normally r-ready-f6-tests (and task-f6-tests completed-f3-codec completed-f4-progress completed-f5-subtitles) ready-f6-tests)
+
+;; =============================================================================
+;; PHASE G: Annotated Transcript Round-Trip
+;; Delivers: ar-edit transcripts export --format editable,
+;;           ar-edit edit from-transcript
+;; =============================================================================
+
+(given task-g1-export)
+(given task-g2-import)
+(given task-g3-fuzzy)
+(given task-g4-tests)
+
+(meta task-g1-export
+  (phase "G")
+  (description "Implement ar-edit transcripts export --format editable per DATA-MODEL section 6: generate annotated markdown with segment-level HTML comment annotations <!-- ar-edit:src-NNN:wX-wY -->. Default to compact segment-level format. Per CON-003. Implements REQ-020.")
+  (acceptance "Exported markdown contains correct annotations for all sources; segment boundaries accurate; format matches DATA-MODEL examples"))
+
+(meta task-g2-import
+  (phase "G")
+  (description "Implement ar-edit edit from-transcript per CON-004: parse edited annotated markdown, resolve HTML comment annotations to source/word-index pairs, produce edit document with one shot per surviving annotation block. Report errors with line numbers for unresolvable text. Implements REQ-018.")
+  (acceptance "Unmodified export re-imports correctly; deleted blocks produce fewer shots; reordered blocks reorder shots"))
+
+(meta task-g3-fuzzy
+  (phase "G")
+  (description "Handle split/merged annotation blocks via fuzzy text matching against source transcripts. When user splits a segment-level block mid-sentence, match text fragments against transcript words to find precise word boundaries.")
+  (acceptance "Split blocks resolve to correct word ranges; merged blocks handled; unresolvable text produces errors with line numbers"))
+
+(meta task-g4-tests
+  (phase "G")
+  (description "Write tests TEST-018 (edit from annotated transcript with 3 segments from 2 sources) and TEST-020 (export then reimport round-trip produces identical edit).")
+  (acceptance "Round-trip preserves all segments in order; edited markdown import works correctly"))
+
+;; Phase G readiness (depends on B + C)
+(normally r-ready-g1-export (and task-g1-export completed-b5-ops) ready-g1-export)
+(normally r-ready-g2-import (and task-g2-import completed-g1-export completed-c1-ops) ready-g2-import)
+(normally r-ready-g3-fuzzy (and task-g3-fuzzy completed-g2-import) ready-g3-fuzzy)
+(normally r-ready-g4-tests (and task-g4-tests completed-g3-fuzzy) ready-g4-tests)
+
+;; =============================================================================
+;; PHASE H: TUI (ratatui)
+;; Delivers: ar-edit tui
+;; =============================================================================
+
+(given task-h1-skeleton)
+(given task-h2-timeline)
+(given task-h3-transcript)
+(given task-h4-sources)
+(given task-h5-status)
+(given task-h6-keys)
+(given task-h7-watcher)
+(given task-h8-search)
+(given task-h9-tests)
+
+(meta task-h1-skeleton
+  (phase "H")
+  (description "Implement ratatui app skeleton in ar-edit/src/tui/ per ADR-004: crossterm terminal setup/teardown, event loop, app state (current edit, selected shot, mode), panel layout (timeline left, transcript right, sources bottom-left, status bottom). Feature-gated behind --features tui. Implements REQ-038.")
+  (acceptance "TUI launches on valid project without panic; terminal restored on exit (even on panic); panels rendered in correct layout"))
+
+(meta task-h2-timeline
+  (phase "H")
+  (description "Implement edit timeline panel in ar-edit/src/tui/panels/timeline.rs: vertical shot list showing shot ID, source ID, duration, text preview. Highlighted selection, j/k or arrow key navigation, scrolling for long edits. Implements REQ-039.")
+  (acceptance "All shots displayed with correct fields; selection highlighted; j/k navigation works; scrolling works"))
+
+(meta task-h3-transcript
+  (phase "H")
+  (description "Implement transcript/description panel in ar-edit/src/tui/panels/transcript.rs: full transcript for selected source, word/scene range of selected shot highlighted. Scrollable, auto-scrolls to selected range. Implements REQ-040.")
+  (acceptance "Transcript displayed for selected source; shot range highlighted with distinct style; auto-scroll to selection"))
+
+(meta task-h4-sources
+  (phase "H")
+  (description "Implement source list panel in ar-edit/src/tui/panels/sources.rs: all registered sources with status (transcribed yes/no, indexed yes/no, duration). Select source to view its transcript or index. Implements REQ-041.")
+  (acceptance "All sources listed with correct status; source selection updates transcript panel"))
+
+(meta task-h5-status
+  (phase "H")
+  (description "Implement status bar in ar-edit/src/tui/panels/status.rs: playback position, render progress bar, current mode indicator (normal/search/add). Real-time updates during playback and render. Implements REQ-044.")
+  (acceptance "Status bar shows current state; updates during playback; render progress visible without blocking UI"))
+
+(meta task-h6-keys
+  (phase "H")
+  (description "Implement keyboard handlers in ar-edit/src/tui/input.rs: a (add shot with source/range prompt), d (delete selected shot), J/K (move shot down/up), t (trim selection in transcript panel), p/Enter (play selected shot or full edit), ctrl-z (undo), ctrl-y (redo), / (enter search mode), m (add marker), n (add shot note), q (quit). All mutating ops write to edit JSON immediately. Implements REQ-043.")
+  (acceptance "All keyboard shortcuts produce correct operations; changes persisted to disk; no data loss on crash"))
+
+(meta task-h7-watcher
+  (phase "H")
+  (description "Implement filesystem watcher using notify crate in ar-edit/src/tui/events.rs: detect external changes to edit document JSON (from agent CLI commands or manual edits). Reload app state on change. Per ADR-004 consequence.")
+  (acceptance "External edits detected within 1s; TUI state refreshed; no race conditions; debounce rapid changes"))
+
+(meta task-h8-search
+  (phase "H")
+  (description "Implement inline search mode (/ key): search across all transcripts and scene descriptions using search.rs. Display filterable results with source ID, timestamp, context snippet. Allow jumping to result in transcript panel or adding as new shot. Implements REQ-045.")
+  (acceptance "Search activated by /; results displayed inline; can add result as shot; can jump to result in transcript"))
+
+(meta task-h9-tests
+  (phase "H")
+  (description "Manual testing checklist TEST-043 (launch), TEST-044 (timeline panel), TEST-045 (transcript highlighting), TEST-046 (source list), TEST-047 (playback integration), TEST-048 (keyboard operations), TEST-049 (render progress), TEST-050 (search mode).")
+  (acceptance "All 8 TUI test scenarios pass manual verification"))
+
+;; Phase H readiness (depends on C for edit ops, D for search, E for playback)
+(normally r-ready-h1-skeleton (and task-h1-skeleton completed-c3-undo) ready-h1-skeleton)
+(normally r-ready-h2-timeline (and task-h2-timeline completed-h1-skeleton) ready-h2-timeline)
+(normally r-ready-h3-transcript (and task-h3-transcript completed-h2-timeline) ready-h3-transcript)
+(normally r-ready-h4-sources (and task-h4-sources completed-h2-timeline) ready-h4-sources)
+(normally r-ready-h5-status (and task-h5-status completed-h2-timeline) ready-h5-status)
+(normally r-ready-h6-keys (and task-h6-keys completed-h2-timeline) ready-h6-keys)
+(normally r-ready-h7-watcher (and task-h7-watcher completed-h1-skeleton) ready-h7-watcher)
+(normally r-ready-h8-search (and task-h8-search completed-h2-timeline completed-d5-search) ready-h8-search)
+(normally r-ready-h9-tests (and task-h9-tests completed-h3-transcript completed-h4-sources completed-h5-status completed-h6-keys completed-h7-watcher completed-h8-search) ready-h9-tests)
+
+;; =============================================================================
+;; PHASE I: E2E Testing + Polish
+;; Delivers: Production-ready CLI
+;; =============================================================================
+
+(given task-i1-e2e)
+(given task-i2-errors)
+(given task-i3-completions)
+(given task-i4-schema)
+
+(meta task-i1-e2e
+  (phase "I")
+  (description "Write E2E test script tests/e2e/test_full_pipeline.sh: init -> add (fixture videos) -> transcribe -> edit create -> add-segment -> move-segment -> trim-segment -> validate -> play -> render -o out.mp4 -> verify output duration/codec. Uses real fixture videos.")
+  (acceptance "Full pipeline completes exit 0; output video has correct duration; codec matches expected"))
+
+(meta task-i2-errors
+  (phase "I")
+  (description "Review and polish all error messages across CLI and core: consistent formatting, actionable suggestions (e.g. 'run ar-edit doctor to check dependencies'), helpful context. Verify CON-009 exit codes are correct in all error paths. No raw panics exposed to users.")
+  (acceptance "All error messages include actionable next steps; exit codes consistent with CON-009; no panic messages visible"))
+
+(meta task-i3-completions
+  (phase "I")
+  (description "Generate shell completions via clap_complete for bash, zsh, and fish. Either build-time generation or runtime via ar-edit completions generate <shell>.")
+  (acceptance "Completions work in bash, zsh, and fish; all subcommands, flags, and source-id arguments completed"))
+
+(meta task-i4-schema
+  (phase "I")
+  (description "Implement ar-edit schema edit: output JSON Schema for the edit document format. Schema should validate the examples from DATA-MODEL.md. Implements REQ-019.")
+  (acceptance "Valid JSON Schema output; schema correctly validates example edit documents"))
+
+;; Phase I readiness
+(normally r-ready-i1-e2e (and task-i1-e2e completed-f6-tests completed-g4-tests completed-h9-tests) ready-i1-e2e)
+(normally r-ready-i2-errors (and task-i2-errors completed-f6-tests) ready-i2-errors)
+(normally r-ready-i3-completions (and task-i3-completions completed-a4-cli) ready-i3-completions)
+(normally r-ready-i4-schema (and task-i4-schema completed-c7-tests) ready-i4-schema)
+
+;; =============================================================================
+;; PHASE J: Markers and Annotations
+;; Delivers: ar-edit mark, ar-edit markers, shot notes
+;; (runs in parallel with later phases, depends on B + C)
+;; =============================================================================
+
+(given task-j1-markers)
+(given task-j2-listing)
+(given task-j3-notes)
+(given task-j4-integrate)
+(given task-j5-tests)
+
+(meta task-j1-markers
+  (phase "J")
+  (description "Implement source marker creation per DATA-MODEL section 5: ar-edit mark <source-id> with --from-word/--to-word, --from-scene/--to-scene, or --from-ms/--to-ms range, --label <label> (select/hero/avoid/maybe/freeform), optional --note. Store in annotations/src-NNN.markers.json. Sequential marker IDs (mark-NNN). Implements REQ-049.")
+  (acceptance "Markers created with correct range, label, note; stored in annotations/; IDs sequential; range uses ShotRange tagged union"))
+
+(meta task-j2-listing
+  (phase "J")
+  (description "Implement ar-edit markers [<source-id>] [--label <filter>]: list markers showing marker ID, source, label, note, resolved time range, transcript/scene text at that range. --json support per CON-003 patterns. Implements REQ-050.")
+  (acceptance "Lists all markers or filtered by source/label; includes resolved timestamps and text at range"))
+
+(meta task-j3-notes
+  (phase "J")
+  (description "Implement ar-edit edit note <edit> --shot <shot-id> --text <note>: append note to shot's notes array (append-only, never deleted). Notes visible in ar-edit edit show --json output. Per DATA-MODEL section 5 shot notes. Implements REQ-051, REQ-053.")
+  (acceptance "Notes appended to shot; visible in show --json output; never deleted; timestamps recorded"))
+
+(meta task-j4-integrate
+  (phase "J")
+  (description "Implement marker interleaving for agent consumption: ar-edit markers --json outputs markers with resolved context; ar-edit transcripts read <source-id> --json --with-markers interleaves markers at their timestamp positions. Implements REQ-052.")
+  (acceptance "Markers interleaved at correct timestamp positions in transcript output; agent can parse marker context for edit assembly"))
+
+(meta task-j5-tests
+  (phase "J")
+  (description "Write tests TEST-054 (marker creation), TEST-055 (marker listing with filters), TEST-056 (shot notes append-only), TEST-057 (agent reads markers in transcript), TEST-058 (agent reads shot notes in edit show).")
+  (acceptance "All 5 tests pass"))
+
+;; Phase J readiness (depends on A models, C resolve/ops, B transcript ops)
+(normally r-ready-j1-markers (and task-j1-markers completed-a2-models completed-c4-resolve) ready-j1-markers)
+(normally r-ready-j2-listing (and task-j2-listing completed-j1-markers completed-b5-ops) ready-j2-listing)
+(normally r-ready-j3-notes (and task-j3-notes completed-c1-ops) ready-j3-notes)
+(normally r-ready-j4-integrate (and task-j4-integrate completed-j2-listing) ready-j4-integrate)
+(normally r-ready-j5-tests (and task-j5-tests completed-j4-integrate completed-j3-notes) ready-j5-tests)
+
+;; =============================================================================
+;; Assignment rules — all tasks assigned to claude agent
+;; =============================================================================
+
+;; Phase A
+(normally r-assign-a1 (and ready-a1-workspace agent-claude-available) assign-to-a1-workspace-claude)
+(normally r-assign-a2 (and ready-a2-models agent-claude-available) assign-to-a2-models-claude)
+(normally r-assign-a3 (and ready-a3-project agent-claude-available) assign-to-a3-project-claude)
+(normally r-assign-a4 (and ready-a4-cli agent-claude-available) assign-to-a4-cli-claude)
+(normally r-assign-a5 (and ready-a5-tests agent-claude-available) assign-to-a5-tests-claude)
+
+;; Phase B
+(normally r-assign-b1 (and ready-b1-audio agent-claude-available) assign-to-b1-audio-claude)
+(normally r-assign-b2 (and ready-b2-whisper agent-claude-available) assign-to-b2-whisper-claude)
+(normally r-assign-b3 (and ready-b3-ingest agent-claude-available) assign-to-b3-ingest-claude)
+(normally r-assign-b4 (and ready-b4-import agent-claude-available) assign-to-b4-import-claude)
+(normally r-assign-b5 (and ready-b5-ops agent-claude-available) assign-to-b5-ops-claude)
+(normally r-assign-b6 (and ready-b6-tests agent-claude-available) assign-to-b6-tests-claude)
+
+;; Phase C
+(normally r-assign-c1 (and ready-c1-ops agent-claude-available) assign-to-c1-ops-claude)
+(normally r-assign-c2 (and ready-c2-snapshot agent-claude-available) assign-to-c2-snapshot-claude)
+(normally r-assign-c3 (and ready-c3-undo agent-claude-available) assign-to-c3-undo-claude)
+(normally r-assign-c4 (and ready-c4-resolve agent-claude-available) assign-to-c4-resolve-claude)
+(normally r-assign-c5 (and ready-c5-validate agent-claude-available) assign-to-c5-validate-claude)
+(normally r-assign-c6 (and ready-c6-display agent-claude-available) assign-to-c6-display-claude)
+(normally r-assign-c7 (and ready-c7-tests agent-claude-available) assign-to-c7-tests-claude)
+
+;; Phase D
+(normally r-assign-d1 (and ready-d1-scenes agent-claude-available) assign-to-d1-scenes-claude)
+(normally r-assign-d2 (and ready-d2-thumbs agent-claude-available) assign-to-d2-thumbs-claude)
+(normally r-assign-d3 (and ready-d3-index agent-claude-available) assign-to-d3-index-claude)
+(normally r-assign-d4 (and ready-d4-describe agent-claude-available) assign-to-d4-describe-claude)
+(normally r-assign-d5 (and ready-d5-search agent-claude-available) assign-to-d5-search-claude)
+(normally r-assign-d6 (and ready-d6-tests agent-claude-available) assign-to-d6-tests-claude)
+
+;; Phase E
+(normally r-assign-e1 (and ready-e1-detect agent-claude-available) assign-to-e1-detect-claude)
+(normally r-assign-e2 (and ready-e2-segment agent-claude-available) assign-to-e2-segment-claude)
+(normally r-assign-e3 (and ready-e3-full agent-claude-available) assign-to-e3-full-claude)
+(normally r-assign-e4 (and ready-e4-overlay agent-claude-available) assign-to-e4-overlay-claude)
+(normally r-assign-e5 (and ready-e5-feedback agent-claude-available) assign-to-e5-feedback-claude)
+(normally r-assign-e6 (and ready-e6-tests agent-claude-available) assign-to-e6-tests-claude)
+
+;; Phase F
+(normally r-assign-f1 (and ready-f1-extract agent-claude-available) assign-to-f1-extract-claude)
+(normally r-assign-f2 (and ready-f2-concat agent-claude-available) assign-to-f2-concat-claude)
+(normally r-assign-f3 (and ready-f3-codec agent-claude-available) assign-to-f3-codec-claude)
+(normally r-assign-f4 (and ready-f4-progress agent-claude-available) assign-to-f4-progress-claude)
+(normally r-assign-f5 (and ready-f5-subtitles agent-claude-available) assign-to-f5-subtitles-claude)
+(normally r-assign-f6 (and ready-f6-tests agent-claude-available) assign-to-f6-tests-claude)
+
+;; Phase G
+(normally r-assign-g1 (and ready-g1-export agent-claude-available) assign-to-g1-export-claude)
+(normally r-assign-g2 (and ready-g2-import agent-claude-available) assign-to-g2-import-claude)
+(normally r-assign-g3 (and ready-g3-fuzzy agent-claude-available) assign-to-g3-fuzzy-claude)
+(normally r-assign-g4 (and ready-g4-tests agent-claude-available) assign-to-g4-tests-claude)
+
+;; Phase H
+(normally r-assign-h1 (and ready-h1-skeleton agent-claude-available) assign-to-h1-skeleton-claude)
+(normally r-assign-h2 (and ready-h2-timeline agent-claude-available) assign-to-h2-timeline-claude)
+(normally r-assign-h3 (and ready-h3-transcript agent-claude-available) assign-to-h3-transcript-claude)
+(normally r-assign-h4 (and ready-h4-sources agent-claude-available) assign-to-h4-sources-claude)
+(normally r-assign-h5 (and ready-h5-status agent-claude-available) assign-to-h5-status-claude)
+(normally r-assign-h6 (and ready-h6-keys agent-claude-available) assign-to-h6-keys-claude)
+(normally r-assign-h7 (and ready-h7-watcher agent-claude-available) assign-to-h7-watcher-claude)
+(normally r-assign-h8 (and ready-h8-search agent-claude-available) assign-to-h8-search-claude)
+(normally r-assign-h9 (and ready-h9-tests agent-claude-available) assign-to-h9-tests-claude)
+
+;; Phase I
+(normally r-assign-i1 (and ready-i1-e2e agent-claude-available) assign-to-i1-e2e-claude)
+(normally r-assign-i2 (and ready-i2-errors agent-claude-available) assign-to-i2-errors-claude)
+(normally r-assign-i3 (and ready-i3-completions agent-claude-available) assign-to-i3-completions-claude)
+(normally r-assign-i4 (and ready-i4-schema agent-claude-available) assign-to-i4-schema-claude)
+
+;; Phase J
+(normally r-assign-j1 (and ready-j1-markers agent-claude-available) assign-to-j1-markers-claude)
+(normally r-assign-j2 (and ready-j2-listing agent-claude-available) assign-to-j2-listing-claude)
+(normally r-assign-j3 (and ready-j3-notes agent-claude-available) assign-to-j3-notes-claude)
+(normally r-assign-j4 (and ready-j4-integrate agent-claude-available) assign-to-j4-integrate-claude)
+(normally r-assign-j5 (and ready-j5-tests agent-claude-available) assign-to-j5-tests-claude)
