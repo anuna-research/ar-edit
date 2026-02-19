@@ -1,12 +1,12 @@
 {
-  "task_id": "c2-snapshot",
+  "task_id": "i3-completions",
   "token_budget": 8000,
-  "tokens_used": 342,
+  "tokens_used": 338,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement snapshot recomputation per ADR-001: replay ops[0..=head] to produce EditSnapshot. Handle all EditOpKind variants: AddShot inserts at end, RemoveShot removes by id, MoveShot reorders, TrimShot updates range. Cache snapshot in edit JSON on disk.",
-      "token_cost": 63,
+      "content": "Generate shell completions via clap_complete for bash, zsh, and fish. Either build-time generation or runtime via ar-edit completions generate <shell>.",
+      "token_cost": 37,
       "priority": "PlanMeta"
     },
     {
@@ -62,8 +62,14 @@
       "content": "Modified 1 files (+167, -2): crates/ar-edit-core/src/index.rs",
       "token_cost": 15,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-c2-snapshot-changes",
+      "content": "Modified 2 files (+498, -5): .hence/context-manifest.json, crates/ar-edit-core/src/edit.rs",
+      "token_cost": 22,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:48:27Z"
+  "constructed_at": "2026-02-19T04:53:00Z"
 }

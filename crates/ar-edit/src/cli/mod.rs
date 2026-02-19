@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 
 // ---------------------------------------------------------------------------
 // Exit codes (CON-009)
@@ -112,6 +113,24 @@ pub enum Commands {
 
     /// Launch the interactive terminal UI
     Tui,
+
+    /// Generate shell completions
+    Completions {
+        /// Target shell
+        shell: Shell,
+    },
+}
+
+impl Cli {
+    /// Write shell completions to stdout.
+    pub fn print_completions(shell: Shell) {
+        clap_complete::generate(
+            shell,
+            &mut Cli::command(),
+            "ar-edit",
+            &mut std::io::stdout(),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -913,6 +932,27 @@ mod tests {
     fn cli_parses_tui() {
         let cli = Cli::try_parse_from(["ar-edit", "tui"]).unwrap();
         assert!(matches!(cli.command, Commands::Tui));
+    }
+
+    #[test]
+    fn cli_parses_completions() {
+        let cli = Cli::try_parse_from(["ar-edit", "completions", "bash"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Completions { shell: Shell::Bash }
+        ));
+
+        let cli = Cli::try_parse_from(["ar-edit", "completions", "zsh"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Completions { shell: Shell::Zsh }
+        ));
+
+        let cli = Cli::try_parse_from(["ar-edit", "completions", "fish"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Completions { shell: Shell::Fish }
+        ));
     }
 
     #[test]
