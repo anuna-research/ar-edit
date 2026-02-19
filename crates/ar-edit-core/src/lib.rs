@@ -6,3 +6,4 @@ pub mod models;
 pub mod playback;
 pub mod project;
 pub mod resolve;
+pub mod validate;
