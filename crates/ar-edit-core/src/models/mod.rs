@@ -148,6 +148,7 @@ pub enum EditOpKind {
     MoveShot { shot_id: String, from_position: u32, to_position: u32 },
     TrimShot { shot_id: String, old_range: ShotRange, new_range: ShotRange },
     ReplaceRangeType { shot_id: String, old_range: ShotRange, new_range: ShotRange },
+    AddNote { shot_id: String, note: ShotNote },
 }
 
 // ---------------------------------------------------------------------------
@@ -581,6 +582,29 @@ mod tests {
         let json = serde_json::to_value(&markers).unwrap();
         let back: SourceMarkers = serde_json::from_value(json).unwrap();
         assert_eq!(back, markers);
+    }
+
+    #[test]
+    fn edit_op_add_note_roundtrip() {
+        let op = EditOp {
+            id: 6,
+            ts: "2026-02-19T15:00:00Z".parse().unwrap(),
+            op: EditOpKind::AddNote {
+                shot_id: "shot-002".into(),
+                note: ShotNote {
+                    text: "Too long, trim the first half".into(),
+                    created: "2026-02-19T15:00:00Z".parse().unwrap(),
+                },
+            },
+        };
+
+        let json = serde_json::to_value(&op).unwrap();
+        assert_eq!(json["op"], "add_note");
+        assert_eq!(json["shot_id"], "shot-002");
+        assert_eq!(json["note"]["text"], "Too long, trim the first half");
+
+        let back: EditOp = serde_json::from_value(json).unwrap();
+        assert_eq!(back, op);
     }
 
     #[test]

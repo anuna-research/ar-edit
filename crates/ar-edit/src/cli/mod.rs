@@ -918,6 +918,31 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_edit_note() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "edit",
+            "note",
+            "rough-cut",
+            "--shot",
+            "shot-001",
+            "--text",
+            "Too long, trim the first half",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Edit {
+                command: EditCommand::Note { ref edit, ref shot, ref text },
+            } => {
+                assert_eq!(edit, "rough-cut");
+                assert_eq!(shot, "shot-001");
+                assert_eq!(text, "Too long, trim the first half");
+            }
+            _ => panic!("expected Edit Note"),
+        }
+    }
+
+    #[test]
     fn cli_parses_schema_edit() {
         let cli = Cli::try_parse_from(["ar-edit", "schema", "edit"]).unwrap();
         assert!(matches!(

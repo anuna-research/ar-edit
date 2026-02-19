@@ -4,7 +4,7 @@ use std::path::Path;
 use chrono::Utc;
 use thiserror::Error;
 
-use crate::models::{EditDocument, EditOp, EditOpKind, EditSnapshot, Shot, ShotRange};
+use crate::models::{EditDocument, EditOp, EditOpKind, EditSnapshot, Shot, ShotNote, ShotRange};
 
 #[derive(Debug, Error)]
 pub enum EditError {
@@ -108,6 +108,26 @@ impl EditDocument {
         Ok(())
     }
 
+    /// Append a note to a shot's notes array.
+    ///
+    /// Notes are append-only and never deleted.
+    pub fn add_note(&mut self, shot_id: &str, text: impl Into<String>) -> Result<&ShotNote, EditError> {
+        let idx = self.find_shot_position(shot_id)?;
+
+        let note = ShotNote {
+            text: text.into(),
+            created: Utc::now(),
+        };
+
+        self.push_op(EditOpKind::AddNote {
+            shot_id: shot_id.into(),
+            note: note.clone(),
+        });
+
+        self.snapshot.shots[idx].notes.push(note);
+        Ok(self.snapshot.shots[idx].notes.last().unwrap())
+    }
+
     // -- undo / redo ----------------------------------------------------------
 
     /// Undo the last operation: decrement head and recompute the snapshot.
@@ -180,6 +200,11 @@ impl EditDocument {
                 } => {
                     if let Some(shot) = snapshot.shots.iter_mut().find(|s| s.id == *shot_id) {
                         shot.range = new_range.clone();
+                    }
+                }
+                EditOpKind::AddNote { shot_id, note } => {
+                    if let Some(shot) = snapshot.shots.iter_mut().find(|s| s.id == *shot_id) {
+                        shot.notes.push(note.clone());
                     }
                 }
             }
@@ -888,5 +913,98 @@ mod tests {
     fn load_nonexistent_file_errors() {
         let err = EditDocument::load(Path::new("/nonexistent/file.json")).unwrap_err();
         assert!(matches!(err, EditError::Io(_)));
+    }
+
+    // -- add_note -------------------------------------------------------------
+
+    #[test]
+    fn add_note_appends_to_shot() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+
+        let note = doc.add_note("shot-001", "Too long, trim the first half").unwrap();
+        assert_eq!(note.text, "Too long, trim the first half");
+
+        assert_eq!(doc.snapshot.shots[0].notes.len(), 1);
+        assert_eq!(doc.snapshot.shots[0].notes[0].text, "Too long, trim the first half");
+
+        assert_eq!(doc.ops.len(), 2);
+        match &doc.ops[1].op {
+            EditOpKind::AddNote { shot_id, note } => {
+                assert_eq!(shot_id, "shot-001");
+                assert_eq!(note.text, "Too long, trim the first half");
+            }
+            other => panic!("expected AddNote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_multiple_notes_to_same_shot() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+
+        doc.add_note("shot-001", "First note").unwrap();
+        doc.add_note("shot-001", "Second note").unwrap();
+
+        assert_eq!(doc.snapshot.shots[0].notes.len(), 2);
+        assert_eq!(doc.snapshot.shots[0].notes[0].text, "First note");
+        assert_eq!(doc.snapshot.shots[0].notes[1].text, "Second note");
+        assert_eq!(doc.ops.len(), 3);
+    }
+
+    #[test]
+    fn add_note_shot_not_found() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+
+        let err = doc.add_note("shot-999", "note text").unwrap_err();
+        assert!(matches!(err, EditError::ShotNotFound(id) if id == "shot-999"));
+    }
+
+    #[test]
+    fn add_note_undo_removes_note() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_note("shot-001", "A note").unwrap();
+
+        assert_eq!(doc.snapshot.shots[0].notes.len(), 1);
+
+        doc.undo().unwrap();
+        assert!(doc.snapshot.shots[0].notes.is_empty());
+
+        doc.redo().unwrap();
+        assert_eq!(doc.snapshot.shots[0].notes.len(), 1);
+        assert_eq!(doc.snapshot.shots[0].notes[0].text, "A note");
+    }
+
+    #[test]
+    fn recompute_handles_add_note() {
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_note("shot-001", "First note").unwrap();
+        doc.add_note("shot-001", "Second note").unwrap();
+
+        let recomputed = EditDocument::recompute_snapshot(&doc.ops, doc.head);
+        assert_eq!(recomputed, doc.snapshot);
+        assert_eq!(recomputed.shots[0].notes.len(), 2);
+    }
+
+    #[test]
+    fn save_load_roundtrip_with_notes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("test.edit.json");
+
+        let mut doc = EditDocument::create("test");
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+        doc.add_note("shot-001", "A note on this shot").unwrap();
+
+        doc.save(&path).unwrap();
+        let loaded = EditDocument::load(&path).unwrap();
+
+        assert_eq!(loaded.snapshot.shots[0].notes.len(), 1);
+        assert_eq!(loaded.snapshot.shots[0].notes[0].text, "A note on this shot");
+
+        let recomputed = EditDocument::recompute_snapshot(&loaded.ops, loaded.head);
+        assert_eq!(recomputed, loaded.snapshot);
     }
 }
