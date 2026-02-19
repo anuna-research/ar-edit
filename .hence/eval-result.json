@@ -3,25 +3,27 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 4,
-    "insertions": 598,
-    "deletions": 12,
+    "files_changed": 6,
+    "insertions": 791,
+    "deletions": 13,
     "file_list": [
       ".hence/context-manifest.json",
+      "crates/ar-edit-core/src/lib.rs",
       "crates/ar-edit-core/src/render.rs",
-      "crates/ar-edit-core/tests/test_049_render_progress.rs",
+      "crates/ar-edit-core/src/subtitles.rs",
+      "crates/ar-edit-core/tests/test_059_render_codec.rs",
       "crates/ar-edit/src/main.rs"
     ],
-    "dirty_files": 6420
+    "dirty_files": 11857
   },
   "learnings": [
     {
-      "key": "task-f4-progress-changes",
-      "content": "Modified 4 files (+598, -12): .hence/context-manifest.json, crates/ar-edit-core/src/render.rs, crates/ar-edit-core/tests/test_049_render_progress.rs, crates/ar-edit/src/main.rs",
+      "key": "task-f5-subtitles-changes",
+      "content": "Modified 6 files (+791, -13): .hence/context-manifest.json, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/render.rs, crates/ar-edit-core/src/subtitles.rs, crates/ar-edit-core/tests/test_059_render_codec.rs and 1 more",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/f4-progress-v1",
-  "evaluated_at": "2026-02-19T13:30:31Z"
+  "branch_name": "hence/f5-subtitles-v1",
+  "evaluated_at": "2026-02-19T13:42:09Z"
 }
