@@ -443,10 +443,11 @@ fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
     let player = playback::detect_player().map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let is_source = args.target.starts_with("src-");
+    let overlay_mode = ar_edit_core::overlay::OverlayMode::from_flag(args.overlay.as_deref());
 
     if !is_source && args.shot.is_none() {
         // Full edit playback (REQ-022): render all shots concatenated, then play
-        return cmd_play_full(cli, &project_dir, &args.target, &player);
+        return cmd_play_full(cli, &project_dir, &args.target, &player, overlay_mode);
     }
 
     let req = if is_source {
@@ -494,16 +495,22 @@ fn cmd_play_full(
     project_dir: &PathBuf,
     edit_name: &str,
     player: &playback::Player,
+    overlay_mode: ar_edit_core::overlay::OverlayMode,
 ) -> anyhow::Result<()> {
     let path = edit_path(edit_name);
     let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let shot_count = doc.snapshot.shots.len();
     if !cli.json {
-        println!("Rendering full preview of \"{edit_name}\" ({shot_count} shots)...");
+        let overlay_label = match overlay_mode {
+            ar_edit_core::overlay::OverlayMode::Clean => "",
+            ar_edit_core::overlay::OverlayMode::Full => " [overlay: full]",
+            ar_edit_core::overlay::OverlayMode::Minimal => " [overlay: minimal]",
+        };
+        println!("Rendering full preview of \"{edit_name}\" ({shot_count} shots){overlay_label}...");
     }
 
-    let preview_path = ar_edit_core::render::render_preview(&doc, project_dir)
+    let preview_path = ar_edit_core::render::render_preview(&doc, project_dir, overlay_mode)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let req = playback::PlayRequest {

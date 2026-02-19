@@ -1,12 +1,12 @@
 {
-  "task_id": "j4-integrate",
+  "task_id": "e4-overlay",
   "token_budget": 8000,
-  "tokens_used": 361,
+  "tokens_used": 379,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement marker interleaving for agent consumption: ar-edit markers --json outputs markers with resolved context; ar-edit transcripts read <source-id> --json --with-markers interleaves markers at their timestamp positions. Implements REQ-052.",
-      "token_cost": 60,
+      "content": "Implement ffmpeg drawtext filter overlay per REQ-023: timecode HH:MM:SS.mmm, shot ID, source ID, transcript/scene snippet. Semi-transparent background, top-left corner, monospace font. Three modes: clean (no flag), full (--overlay), minimal (--overlay minimal). Not present in final renders unless --burn-overlay.",
+      "token_cost": 78,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T07:25:21Z"
+  "constructed_at": "2026-02-19T07:31:49Z"
 }
