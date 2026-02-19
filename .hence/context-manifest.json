@@ -1,15 +1,21 @@
 {
-  "task_id": "a1-workspace",
+  "task_id": "a2-models",
   "token_budget": 8000,
-  "tokens_used": 64,
+  "tokens_used": 148,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Set up Cargo workspace with ar-edit-core (library) and ar-edit (binary) crates. Configure workspace Cargo.toml. Core deps: serde, serde_json, chrono, thiserror, which, regex. Binary deps: clap (derive), ratatui, crossterm, notify, indicatif, tokio, anyhow.",
-      "token_cost": 64,
+      "content": "Implement all serde structs in ar-edit-core/src/models/: Manifest, Source, Defaults, Transcript, TranscriptSegment, Word, EditDocument, EditSnapshot, Shot, ShotNote, ShotRange (tagged union enum per ADR-002), EditOp, EditOpKind, SourceIndex, SourceMetadata, Thumbnail, Scene, SourceMarkers, Marker. All derive Serialize/Deserialize. ShotRange uses serde adjacently-tagged enum: words{from,to}, scenes{from,to}, time{from_ms,to_ms}.",
+      "token_cost": 107,
       "priority": "PlanMeta"
+    },
+    {
+      "source": "memory/episodic/task-a1-workspace-changes",
+      "content": "Modified 7 files (+1514, -0): Cargo.lock, Cargo.toml, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/models/mod.rs and 2 more",
+      "token_cost": 41,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:02:39Z"
+  "constructed_at": "2026-02-19T04:04:43Z"
 }
