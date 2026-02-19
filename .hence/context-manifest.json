@@ -1,12 +1,12 @@
 {
-  "task_id": "c1-ops",
+  "task_id": "a3-project",
   "token_budget": 8000,
-  "tokens_used": 213,
+  "tokens_used": 214,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement edit document operations in ar-edit-core/src/edit.rs per ADR-001 event-sourced design: create (empty edit with ops:[], head:-1), add_shot (append AddShot op), move_shot (append MoveShot op with from/to positions), remove_shot (append RemoveShot op preserving full shot data for undo), trim_shot (append TrimShot op with old/new range). All ops append to log and update snapshot. Implements REQ-011 through REQ-015.",
-      "token_cost": 106,
+      "content": "Implement project operations in ar-edit-core/src/project.rs: init (create dir structure + manifest.json per CON-001), add (symlink/copy source, extract metadata via ffprobe subprocess per ADR-003, assign src-NNN ID, update manifest per CON-001), doctor (detect ffmpeg/whisper.cpp/VLC via which crate). Reject non-video files per REQ-003.",
+      "token_cost": 84,
       "priority": "PlanMeta"
     },
     {
@@ -26,8 +26,14 @@
       "content": "Modified 5 files (+574, -6): .hence/context-manifest.json, Cargo.lock, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/resolve.rs",
       "token_cost": 42,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-c1-ops-changes",
+      "content": "Modified 2 files (+406, -0): crates/ar-edit-core/src/edit.rs, crates/ar-edit-core/src/lib.rs",
+      "token_cost": 23,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:12:50Z"
+  "constructed_at": "2026-02-19T04:18:15Z"
 }
