@@ -1,12 +1,12 @@
 {
-  "task_id": "d6-tests",
+  "task_id": "i2-errors",
   "token_budget": 8000,
-  "tokens_used": 353,
+  "tokens_used": 366,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Write tests TEST-037 (source indexing), TEST-038 (thumbnail extraction), TEST-039 (scene description scaffolding), TEST-040 (cross-index search), TEST-041 (index summary). Create pre-generated index fixtures.",
-      "token_cost": 52,
+      "content": "Review and polish all error messages across CLI and core: consistent formatting, actionable suggestions (e.g. 'run ar-edit doctor to check dependencies'), helpful context. Verify CON-009 exit codes are correct in all error paths. No raw panics exposed to users.",
+      "token_cost": 65,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T14:04:59Z"
+  "constructed_at": "2026-02-19T14:12:54Z"
 }

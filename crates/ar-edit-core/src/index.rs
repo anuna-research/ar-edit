@@ -24,7 +24,7 @@ pub enum IndexError {
     SceneOutOfRange { index: u32, count: u32 },
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("JSON error: {0}")]
+    #[error("failed to parse index JSON: {0}")]
     Json(#[from] serde_json::Error),
 }
 

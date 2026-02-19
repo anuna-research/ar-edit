@@ -16,19 +16,89 @@ use cli::{
 
 use std::thread;
 
+// ---------------------------------------------------------------------------
+// CLI error with exit code classification (CON-009)
+// ---------------------------------------------------------------------------
+
+/// An error that carries an exit code for the process.
+///
+/// Wrap core-library errors with one of the constructors (`user`, `system`,
+/// `validation`) so that `main()` can extract the correct exit code.
+#[derive(Debug)]
+struct CliError {
+    message: String,
+    code: i32,
+}
+
+impl CliError {
+    fn user(msg: impl std::fmt::Display) -> Self {
+        Self {
+            message: msg.to_string(),
+            code: exit_code::USER_ERROR,
+        }
+    }
+
+    fn system(msg: impl std::fmt::Display) -> Self {
+        Self {
+            message: msg.to_string(),
+            code: exit_code::SYSTEM_ERROR,
+        }
+    }
+
+    fn validation(msg: impl std::fmt::Display) -> Self {
+        Self {
+            message: msg.to_string(),
+            code: exit_code::VALIDATION_ERROR,
+        }
+    }
+
+    fn with_hint(mut self, hint: &str) -> Self {
+        self.message = format!("{}\n\n  Hint: {hint}", self.message);
+        self
+    }
+}
+
+impl std::fmt::Display for CliError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for CliError {}
+
+/// Extension trait for classifying Result errors with exit codes.
+trait ResultExt<T> {
+    fn user_err(self) -> anyhow::Result<T>;
+    fn system_err(self) -> anyhow::Result<T>;
+}
+
+impl<T, E: std::fmt::Display> ResultExt<T> for Result<T, E> {
+    fn user_err(self) -> anyhow::Result<T> {
+        self.map_err(|e| anyhow::Error::new(CliError::user(&e)))
+    }
+    fn system_err(self) -> anyhow::Result<T> {
+        self.map_err(|e| anyhow::Error::new(CliError::system(&e)))
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
 
     let code = match run(&cli) {
         Ok(()) => exit_code::SUCCESS,
         Err(e) => {
+            let code = e
+                .downcast_ref::<CliError>()
+                .map(|ce| ce.code)
+                .unwrap_or(exit_code::USER_ERROR);
+
             if cli.json {
                 let msg = serde_json::json!({ "error": format!("{e:#}") });
                 eprintln!("{msg}");
             } else {
                 eprintln!("Error: {e:#}");
             }
-            exit_code::USER_ERROR
+            code
         }
     };
 
@@ -38,16 +108,27 @@ fn main() {
 fn run(cli: &Cli) -> anyhow::Result<()> {
     match &cli.command {
         Commands::Init { name } => {
-            todo!("init: {name}")
+            anyhow::bail!("'init' is not yet implemented (name: {name})")
         }
         Commands::Add { files } => {
-            todo!("add: {files:?}")
+            anyhow::bail!(
+                "'add' is not yet implemented ({} file{})",
+                files.len(),
+                if files.len() == 1 { "" } else { "s" }
+            )
         }
         Commands::Doctor => {
-            todo!("doctor")
+            anyhow::bail!("'doctor' is not yet implemented")
         }
         Commands::Transcribe(args) => {
-            todo!("transcribe: source_id={:?}, all={}", args.source_id, args.all)
+            let target = if args.all {
+                "all sources".to_string()
+            } else if let Some(ref id) = args.source_id {
+                id.clone()
+            } else {
+                "none".to_string()
+            };
+            anyhow::bail!("'transcribe' is not yet implemented (target: {target})")
         }
         Commands::Transcripts { command } => match command {
             TranscriptsCommand::List => cmd_transcripts_list(cli),
@@ -62,20 +143,34 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             }
         },
         Commands::Edit { command } => match command {
-            EditCommand::Create { name } => todo!("edit create: {name}"),
+            EditCommand::Create { name } => {
+                anyhow::bail!("'edit create' is not yet implemented (name: {name})")
+            }
             EditCommand::AddSegment(args) => {
-                todo!("edit add-segment: edit={}, source={}", args.edit, args.source)
+                anyhow::bail!(
+                    "'edit add-segment' is not yet implemented (edit: {}, source: {})",
+                    args.edit, args.source
+                )
             }
             EditCommand::MoveSegment {
                 edit,
                 shot,
                 position,
-            } => todo!("edit move-segment: {edit}, shot={shot}, pos={position}"),
+            } => {
+                anyhow::bail!(
+                    "'edit move-segment' is not yet implemented (edit: {edit}, shot: {shot}, position: {position})"
+                )
+            }
             EditCommand::RemoveSegment { edit, shot } => {
-                todo!("edit remove-segment: {edit}, shot={shot}")
+                anyhow::bail!(
+                    "'edit remove-segment' is not yet implemented (edit: {edit}, shot: {shot})"
+                )
             }
             EditCommand::TrimSegment(args) => {
-                todo!("edit trim-segment: edit={}, shot={}", args.edit, args.shot)
+                anyhow::bail!(
+                    "'edit trim-segment' is not yet implemented (edit: {}, shot: {})",
+                    args.edit, args.shot
+                )
             }
             EditCommand::Show { edit } => cmd_show(cli, edit),
             EditCommand::History { edit } => cmd_history(cli, edit),
@@ -86,7 +181,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         },
         Commands::Undo { edit } => cmd_undo(cli, edit),
         Commands::Redo { edit } => cmd_redo(cli, edit),
-        Commands::Validate { edit } => todo!("validate: {edit}"),
+        Commands::Validate { edit } => cmd_validate(cli, edit),
         Commands::Play(args) => cmd_play(cli, args),
         Commands::Render(args) => cmd_render(cli, args),
         Commands::Index(args) => match &args.command {
@@ -147,16 +242,31 @@ fn op_summary(kind: &EditOpKind) -> (&str, &str) {
     }
 }
 
+/// Load an edit document, producing a user-error with hint on failure.
+fn load_edit(edit: &str) -> anyhow::Result<EditDocument> {
+    let path = edit_path(edit);
+    EditDocument::load(&path).map_err(|e| {
+        anyhow::Error::new(
+            CliError::user(e).with_hint(
+                &format!("check that edit '{edit}' exists in the edits/ directory"),
+            ),
+        )
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Command handlers: undo / redo / history
 // ---------------------------------------------------------------------------
 
 fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
     let path = edit_path(edit);
-    let mut doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut doc = load_edit(edit)?;
 
-    let undone = doc.undo().map_err(|e| anyhow::anyhow!("{e}"))?.clone();
-    doc.save(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let undone = doc
+        .undo()
+        .map_err(|e| anyhow::Error::new(CliError::user(e)))?
+        .clone();
+    doc.save(&path).system_err()?;
 
     if cli.json {
         let output = serde_json::json!({
@@ -173,10 +283,13 @@ fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
 
 fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
     let path = edit_path(edit);
-    let mut doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut doc = load_edit(edit)?;
 
-    let redone = doc.redo().map_err(|e| anyhow::anyhow!("{e}"))?.clone();
-    doc.save(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let redone = doc
+        .redo()
+        .map_err(|e| anyhow::Error::new(CliError::user(e)))?
+        .clone();
+    doc.save(&path).system_err()?;
 
     if cli.json {
         let output = serde_json::json!({
@@ -192,8 +305,7 @@ fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
 }
 
 fn cmd_history(cli: &Cli, edit: &str) -> anyhow::Result<()> {
-    let path = edit_path(edit);
-    let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let doc = load_edit(edit)?;
 
     if cli.json {
         let output = serde_json::json!({
@@ -224,8 +336,13 @@ fn cmd_history(cli: &Cli, edit: &str) -> anyhow::Result<()> {
 
 fn cmd_transcripts_list(cli: &Cli) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
-    let transcripts = ar_edit_core::transcript_ops::list(&project_dir)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let transcripts = ar_edit_core::transcript_ops::list(&project_dir).map_err(|e| {
+        anyhow::Error::new(
+            CliError::user(e).with_hint(
+                "ensure you are inside an ar-edit project directory, or run `ar-edit init <name>` to create one",
+            ),
+        )
+    })?;
 
     if cli.json {
         let output = serde_json::json!({ "transcripts": transcripts });
@@ -256,19 +373,24 @@ fn cmd_transcripts_list(cli: &Cli) -> anyhow::Result<()> {
 
 fn cmd_transcripts_read(cli: &Cli, source_id: &str, with_markers: bool) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
-    let transcript = ar_edit_core::transcript_ops::read(&project_dir, source_id)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let transcript = ar_edit_core::transcript_ops::read(&project_dir, source_id).map_err(|e| {
+        anyhow::Error::new(
+            CliError::user(e).with_hint(
+                &format!("run `ar-edit transcribe {source_id}` to generate a transcript, or check source ID with `ar-edit transcripts list`"),
+            ),
+        )
+    })?;
 
     if with_markers {
         // Load and resolve markers for this source
         let source_markers = ar_edit_core::marker::list_markers(&project_dir, source_id)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .user_err()?;
         let resolved = ar_edit_core::display::resolve_markers(
             &source_markers.markers,
             source_id,
             &project_dir,
         )
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .user_err()?;
 
         let interleaved =
             ar_edit_core::display::interleave_transcript_with_markers(&transcript, &resolved);
@@ -321,7 +443,7 @@ fn cmd_transcripts_search(
 ) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
     let results = ar_edit_core::transcript_ops::search(&project_dir, query, source)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .user_err()?;
 
     if cli.json {
         let output = serde_json::json!({ "results": results });
@@ -362,12 +484,12 @@ fn cmd_transcripts_export(
     output: Option<&Path>,
 ) -> anyhow::Result<()> {
     if format != "editable" {
-        anyhow::bail!("unsupported export format: {format} (only 'editable' is supported)");
+        anyhow::bail!("unsupported export format '{format}': only 'editable' is currently supported");
     }
 
     let project_dir = PathBuf::from(".");
     let markdown = ar_edit_core::export::export_editable(&project_dir)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .user_err()?;
 
     if let Some(path) = output {
         std::fs::write(path, &markdown)?;
@@ -384,12 +506,11 @@ fn cmd_transcripts_export(
 // ---------------------------------------------------------------------------
 
 fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
-    let path = edit_path(edit);
-    let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let doc = load_edit(edit)?;
     let project_dir = PathBuf::from(".");
 
     let resolved = ar_edit_core::display::resolve_edit(&doc, &project_dir)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .user_err()?;
 
     if cli.json {
         let output = serde_json::json!({
@@ -447,10 +568,16 @@ fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
 
 fn cmd_note(cli: &Cli, edit: &str, shot: &str, text: &str) -> anyhow::Result<()> {
     let path = edit_path(edit);
-    let mut doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut doc = load_edit(edit)?;
 
-    let note = doc.add_note(shot, text).map_err(|e| anyhow::anyhow!("{e}"))?.clone();
-    doc.save(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let note = doc.add_note(shot, text).map_err(|e| {
+        anyhow::Error::new(
+            CliError::user(e).with_hint(
+                &format!("run `ar-edit edit show {edit}` to list available shots"),
+            ),
+        )
+    })?.clone();
+    doc.save(&path).system_err()?;
 
     if cli.json {
         println!("{}", serde_json::to_string_pretty(&note)?);
@@ -461,13 +588,61 @@ fn cmd_note(cli: &Cli, edit: &str, shot: &str, text: &str) -> anyhow::Result<()>
 }
 
 // ---------------------------------------------------------------------------
+// Command handlers: validate (CON-005, REQ-017)
+// ---------------------------------------------------------------------------
+
+fn cmd_validate(cli: &Cli, edit: &str) -> anyhow::Result<()> {
+    let doc = load_edit(edit)?;
+    let project_dir = PathBuf::from(".");
+    let manifest = ar_edit_core::project::read_manifest(&project_dir).map_err(|e| {
+        anyhow::Error::new(
+            CliError::user(e).with_hint(
+                "ensure you are inside an ar-edit project directory",
+            ),
+        )
+    })?;
+
+    let result = ar_edit_core::validate::validate(&doc, &manifest, &project_dir);
+
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else if result.valid {
+        println!("Edit '{edit}' is valid.");
+    } else {
+        eprintln!("Edit '{edit}' has {} validation error{}:",
+            result.errors.len(),
+            if result.errors.len() == 1 { "" } else { "s" }
+        );
+        for err in &result.errors {
+            eprintln!("  {}: {}", err.shot_id, err.error);
+        }
+    }
+
+    if !result.valid {
+        return Err(anyhow::Error::new(
+            CliError::validation(format!(
+                "edit '{edit}' failed validation with {} error{}",
+                result.errors.len(),
+                if result.errors.len() == 1 { "" } else { "s" }
+            ))
+        ));
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Command handlers: play (REQ-021, REQ-024)
 // ---------------------------------------------------------------------------
 
 fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
 
-    let player = playback::detect_player().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let player = playback::detect_player().map_err(|e| {
+        anyhow::Error::new(
+            CliError::system(e).with_hint("run `ar-edit doctor` to check dependencies"),
+        )
+    })?;
 
     let is_source = args.target.starts_with("src-");
     let overlay_mode = ar_edit_core::overlay::OverlayMode::from_flag(args.overlay.as_deref());
@@ -481,22 +656,38 @@ fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
     let (shot_id, source_id) = if is_source {
         (None, args.target.clone())
     } else {
-        let shot_id_str = args.shot.as_deref().unwrap();
-        let path = edit_path(&args.target);
-        let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+        // Safe: clap guarantees --shot is required for edit playback when this
+        // branch is reached, and the `if !is_source && args.shot.is_none()`
+        // guard above redirects to full-edit playback.
+        let shot_id_str = args.shot.as_deref().ok_or_else(|| {
+            anyhow::Error::new(CliError::user("--shot is required for edit playback"))
+        })?;
+        let doc = load_edit(&args.target)?;
         let shot = doc
             .snapshot
             .shots
             .iter()
             .find(|s| s.id == shot_id_str)
-            .ok_or_else(|| anyhow::anyhow!("shot not found: {shot_id_str}"))?;
+            .ok_or_else(|| {
+                anyhow::Error::new(
+                    CliError::user(format!("shot not found: {shot_id_str}"))
+                        .with_hint(&format!(
+                            "run `ar-edit edit show {}` to list available shots",
+                            args.target
+                        )),
+                )
+            })?;
         (Some(shot_id_str.to_string()), shot.source.clone())
     };
 
     let req = if is_source {
         build_source_play_request(&project_dir, &args.target, args)?
     } else {
-        build_edit_play_request(&project_dir, &args.target, args.shot.as_deref().unwrap())?
+        // Safe: same reasoning as above — shot is guaranteed to be Some here.
+        let shot_ref = args.shot.as_deref().ok_or_else(|| {
+            anyhow::Error::new(CliError::user("--shot is required for edit playback"))
+        })?;
+        build_edit_play_request(&project_dir, &args.target, shot_ref)?
     };
 
     if !cli.json {
@@ -516,7 +707,7 @@ fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
         );
     }
 
-    let mut child = playback::launch_player(&player, &req).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut child = playback::launch_player(&player, &req).system_err()?;
     child.wait()?;
 
     // REQ-037: Output structured feedback after playback exits
@@ -541,8 +732,7 @@ fn cmd_play_full(
     player: &playback::Player,
     overlay_mode: ar_edit_core::overlay::OverlayMode,
 ) -> anyhow::Result<()> {
-    let path = edit_path(edit_name);
-    let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let doc = load_edit(edit_name)?;
 
     let shot_count = doc.snapshot.shots.len();
     if !cli.json {
@@ -556,10 +746,14 @@ fn cmd_play_full(
 
     // Resolve shots for feedback timings before rendering
     let resolved = ar_edit_core::display::resolve_edit(&doc, project_dir)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .user_err()?;
 
     let preview_path = ar_edit_core::render::render_preview(&doc, project_dir, overlay_mode)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .map_err(|e| {
+            anyhow::Error::new(
+                CliError::system(e).with_hint("run `ar-edit doctor` to check dependencies"),
+            )
+        })?;
 
     let req = playback::PlayRequest {
         file: preview_path.clone(),
@@ -574,7 +768,7 @@ fn cmd_play_full(
         );
     }
 
-    let mut child = playback::launch_player(player, &req).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut child = playback::launch_player(player, &req).system_err()?;
     child.wait()?;
 
     // REQ-037: Output structured feedback after playback exits
@@ -609,12 +803,14 @@ fn cmd_play_full(
 
 fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
-    let path = edit_path(&args.edit);
-    let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let doc = load_edit(&args.edit)?;
 
     let shot_count = doc.snapshot.shots.len();
     if shot_count == 0 {
-        anyhow::bail!("edit '{}' has no shots", args.edit);
+        return Err(anyhow::Error::new(
+            CliError::user(format!("edit '{}' has no shots", args.edit))
+                .with_hint("add shots with `ar-edit edit add-segment`"),
+        ));
     }
 
     let overlay_mode = if args.burn_overlay {
@@ -629,7 +825,7 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
         .as_deref()
         .map(ar_edit_core::render::parse_resolution)
         .transpose()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .user_err()?;
 
     let render_options = ar_edit_core::render::RenderOptions {
         video_codec: args.codec.clone(),
@@ -655,6 +851,12 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
         }
     }
 
+    let render_err = |e: ar_edit_core::render::RenderError| -> anyhow::Error {
+        anyhow::Error::new(
+            CliError::system(e).with_hint("run `ar-edit doctor` to check dependencies"),
+        )
+    };
+
     if cli.json {
         // --json mode: streaming JSON lines for progress (CON-007, REQ-027)
         ar_edit_core::render::render_to_file_with_progress(
@@ -672,7 +874,7 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
                 let _ = writeln!(std::io::stderr(), "{}", line);
             },
         )
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .map_err(render_err)?;
 
         // Final success line on stdout
         let output = serde_json::json!({
@@ -719,7 +921,7 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
                 }
             },
         )
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .map_err(render_err)?;
 
         eprintln!("Done. Output: {}", args.output.display());
     }
@@ -733,10 +935,10 @@ fn build_source_play_request(
     args: &PlayArgs,
 ) -> anyhow::Result<playback::PlayRequest> {
     let (file, _source) =
-        playback::resolve_source_path(source_id, project_dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+        playback::resolve_source_path(source_id, project_dir).user_err()?;
 
     let start_ms = if let Some(ref tc) = args.at {
-        playback::parse_timecode(tc).map_err(|e| anyhow::anyhow!("{e}"))?
+        playback::parse_timecode(tc).user_err()?
     } else if let Some(word_idx) = args.at_word {
         let range = ShotRange::Words {
             from: word_idx,
@@ -748,7 +950,7 @@ fn build_source_play_request(
             source_id,
             &transcripts_dir,
         )
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .user_err()?;
         start
     } else if let Some(scene_idx) = args.at_scene {
         let range = ShotRange::Scenes {
@@ -761,7 +963,7 @@ fn build_source_play_request(
             source_id,
             &index_dir,
         )
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .user_err()?;
         start
     } else {
         0
@@ -779,19 +981,25 @@ fn build_edit_play_request(
     edit_name: &str,
     shot_id: &str,
 ) -> anyhow::Result<playback::PlayRequest> {
-    let path = edit_path(edit_name);
-    let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let doc = load_edit(edit_name)?;
 
     let shot = doc
         .snapshot
         .shots
         .iter()
         .find(|s| s.id == shot_id)
-        .ok_or_else(|| anyhow::anyhow!("shot not found: {shot_id}"))?;
+        .ok_or_else(|| {
+            anyhow::Error::new(
+                CliError::user(format!("shot not found: {shot_id}"))
+                    .with_hint(&format!(
+                        "run `ar-edit edit show {edit_name}` to list available shots",
+                    )),
+            )
+        })?;
 
     let source_id = &shot.source;
     let (file, _source) =
-        playback::resolve_source_path(source_id, project_dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+        playback::resolve_source_path(source_id, project_dir).user_err()?;
 
     // Resolve shot range to timestamps
     let range = &shot.range;
@@ -802,7 +1010,7 @@ fn build_edit_play_request(
     };
     let (start_ms, end_ms) =
         ar_edit_core::resolve::resolve_range_from_dir(range, source_id, &dir)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .user_err()?;
 
     Ok(playback::PlayRequest {
         file,
@@ -826,7 +1034,7 @@ fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
         &args.label,
         args.note.as_deref(),
     )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    .user_err()?;
 
     if cli.json {
         println!("{}", serde_json::to_string_pretty(&marker)?);
@@ -854,11 +1062,11 @@ fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyho
     // Collect source markers: either one source or all
     let source_docs = if let Some(sid) = source_id {
         let doc = ar_edit_core::marker::list_markers(&project_dir, sid)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .user_err()?;
         vec![doc]
     } else {
         ar_edit_core::marker::list_all_markers(&project_dir)
-            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .user_err()?
     };
 
     // Resolve all markers and apply label filter
@@ -875,7 +1083,7 @@ fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyho
         }
 
         let resolved = ar_edit_core::display::resolve_markers(&markers, &doc.source_id, &project_dir)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .user_err()?;
         all_resolved.extend(resolved);
     }
 
@@ -943,7 +1151,7 @@ fn cmd_search(cli: &Cli, args: &cli::SearchArgs) -> anyhow::Result<()> {
         args.source.as_deref(),
         type_filter.as_ref(),
     )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    .user_err()?;
 
     if cli.json {
         let output = serde_json::json!({ "results": results });
@@ -978,7 +1186,13 @@ fn cmd_search(cli: &Cli, args: &cli::SearchArgs) -> anyhow::Result<()> {
 
 fn cmd_index_run(cli: &Cli, args: &cli::IndexRunArgs) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
-    let mut manifest = ar_edit_core::project::read_manifest(&project_dir)?;
+    let mut manifest = ar_edit_core::project::read_manifest(&project_dir).map_err(|e| {
+        anyhow::Error::new(
+            CliError::user(e).with_hint(
+                "ensure you are inside an ar-edit project directory, or run `ar-edit init <name>` to create one",
+            ),
+        )
+    })?;
 
     let threshold = 0.3;
     let interval_sec = args
@@ -998,7 +1212,12 @@ fn cmd_index_run(cli: &Cli, args: &cli::IndexRunArgs) -> anyhow::Result<()> {
             .sources
             .iter()
             .find(|s| s.id == *id)
-            .ok_or_else(|| anyhow::anyhow!("source not found: {id}"))?;
+            .ok_or_else(|| {
+                anyhow::Error::new(
+                    CliError::user(format!("source not found: {id}"))
+                        .with_hint("check available sources in manifest.json"),
+                )
+            })?;
         vec![source.clone()]
     } else {
         anyhow::bail!("specify a source ID or --all");
@@ -1015,6 +1234,12 @@ fn cmd_index_run(cli: &Cli, args: &cli::IndexRunArgs) -> anyhow::Result<()> {
 
     let parallel = args.parallel.unwrap_or(1).max(1);
     let mut indexed = Vec::new();
+
+    let index_err = |e: ar_edit_core::index::IndexError| -> anyhow::Error {
+        anyhow::Error::new(
+            CliError::system(e).with_hint("run `ar-edit doctor` to check dependencies"),
+        )
+    };
 
     if parallel > 1 && sources.len() > 1 {
         for chunk in sources.chunks(parallel) {
@@ -1035,12 +1260,17 @@ fn cmd_index_run(cli: &Cli, args: &cli::IndexRunArgs) -> anyhow::Result<()> {
 
                 handles
                     .into_iter()
-                    .map(|h| h.join().unwrap())
+                    .map(|h| match h.join() {
+                        Ok(result) => result,
+                        Err(_) => Err(ar_edit_core::index::IndexError::FfmpegFailed(
+                            "indexing thread panicked unexpectedly".to_string(),
+                        )),
+                    })
                     .collect()
             });
 
             for result in results {
-                let index = result.map_err(|e| anyhow::anyhow!("{e}"))?;
+                let index = result.map_err(index_err)?;
                 if let Some(s) = manifest.sources.iter_mut().find(|s| s.id == index.source_id) {
                     s.indexed = true;
                 }
@@ -1061,7 +1291,7 @@ fn cmd_index_run(cli: &Cli, args: &cli::IndexRunArgs) -> anyhow::Result<()> {
                 threshold,
                 interval_sec,
             )
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .map_err(index_err)?;
 
             if let Some(s) = manifest.sources.iter_mut().find(|s| s.id == source.id) {
                 s.indexed = true;
@@ -1087,8 +1317,13 @@ fn cmd_index_run(cli: &Cli, args: &cli::IndexRunArgs) -> anyhow::Result<()> {
 
 fn cmd_index_show(cli: &Cli, source_id: &str) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
-    let index =
-        ar_edit_core::index::load_index(&project_dir, source_id).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let index = ar_edit_core::index::load_index(&project_dir, source_id).map_err(|e| {
+        anyhow::Error::new(
+            CliError::user(e).with_hint(
+                &format!("run `ar-edit index {source_id}` to index this source"),
+            ),
+        )
+    })?;
 
     if cli.json {
         println!("{}", serde_json::to_string_pretty(&index)?);
@@ -1134,7 +1369,7 @@ fn cmd_index_set_description(
     let project_dir = PathBuf::from(".");
     let (index, old_description) =
         ar_edit_core::index::set_scene_description(&project_dir, source_id, scene, text)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .user_err()?;
 
     if cli.json {
         let mut output = serde_json::to_value(&index.scenes[scene as usize])?;
@@ -1158,15 +1393,8 @@ fn cmd_index_set_description(
 // ---------------------------------------------------------------------------
 
 fn cmd_from_transcript(cli: &Cli, file: &Path, output: Option<&str>) -> anyhow::Result<()> {
-    let doc = ar_edit_core::import::from_transcript(file, output).map_err(|e| {
-        match &e {
-            ar_edit_core::import::ImportError::ParseErrors(_) => {
-                // Parse errors should exit with code 1 (USER_ERROR)
-                anyhow::anyhow!("{e}")
-            }
-            _ => anyhow::anyhow!("{e}"),
-        }
-    })?;
+    let doc = ar_edit_core::import::from_transcript(file, output)
+        .user_err()?;
 
     let edits_dir = PathBuf::from("edits");
     std::fs::create_dir_all(&edits_dir)?;
@@ -1175,7 +1403,7 @@ fn cmd_from_transcript(cli: &Cli, file: &Path, output: Option<&str>) -> anyhow::
     let shot_count = doc.snapshot.shots.len();
     let name = doc.name.clone();
 
-    doc.save(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    doc.save(&path).system_err()?;
 
     if cli.json {
         let output = serde_json::json!({
@@ -1219,4 +1447,3 @@ fn range_summary(range: &ShotRange) -> String {
         ShotRange::Time { from_ms, to_ms } => format!("{from_ms}ms..{to_ms}ms"),
     }
 }
-
