@@ -3,27 +3,24 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 6,
-    "insertions": 68,
-    "deletions": 6,
+    "files_changed": 3,
+    "insertions": 532,
+    "deletions": 9,
     "file_list": [
       ".hence/context-manifest.json",
-      "Cargo.lock",
-      "Cargo.toml",
-      "crates/ar-edit/Cargo.toml",
-      "crates/ar-edit/src/cli/mod.rs",
-      "crates/ar-edit/src/main.rs"
+      "crates/ar-edit/src/main.rs",
+      "crates/ar-edit/tests/test_051_undo_redo.rs"
     ],
-    "dirty_files": 1240
+    "dirty_files": 2001
   },
   "learnings": [
     {
-      "key": "task-i3-completions-changes",
-      "content": "Modified 6 files (+68, -6): .hence/context-manifest.json, Cargo.lock, Cargo.toml, crates/ar-edit/Cargo.toml, crates/ar-edit/src/cli/mod.rs and 1 more",
+      "key": "task-c3-undo-changes",
+      "content": "Modified 3 files (+532, -9): .hence/context-manifest.json, crates/ar-edit/src/main.rs, crates/ar-edit/tests/test_051_undo_redo.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/i3-completions-v1",
-  "evaluated_at": "2026-02-19T04:55:11Z"
+  "branch_name": "hence/c3-undo-v1",
+  "evaluated_at": "2026-02-19T05:03:51Z"
 }
