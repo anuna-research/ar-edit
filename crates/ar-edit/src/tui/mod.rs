@@ -1,3 +1,5 @@
+mod panels;
+
 use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -10,7 +12,8 @@ use crossterm::terminal::{
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
-use ar_edit_core::models::{EditDocument, Shot, Source};
+use ar_edit_core::display::{self, ResolvedShot};
+use ar_edit_core::models::{EditDocument, Source};
 
 // ---------------------------------------------------------------------------
 // App mode
@@ -29,6 +32,7 @@ pub enum Mode {
 pub struct App {
     pub edit: Option<EditDocument>,
     pub sources: Vec<Source>,
+    pub resolved_shots: Vec<ResolvedShot>,
     pub selected_shot: ListState,
     pub mode: Mode,
     pub project_dir: PathBuf,
@@ -44,6 +48,7 @@ impl App {
         Self {
             edit: None,
             sources: Vec::new(),
+            resolved_shots: Vec::new(),
             selected_shot,
             mode: Mode::Normal,
             project_dir,
@@ -73,17 +78,29 @@ impl App {
                     EditDocument::load(&entry.path()).map_err(|e| anyhow::anyhow!("{e}"))?;
                 self.status_message = format!("Loaded edit: {}", doc.name);
                 self.edit = Some(doc);
+                self.resolve_shots();
             }
         }
 
         Ok(())
     }
 
+    /// Resolve shots from the current edit document for display.
+    ///
+    /// Uses `display::resolve_edit` to get duration and text previews. Falls
+    /// back to basic shot data if resolution fails (e.g. missing transcripts).
+    fn resolve_shots(&mut self) {
+        self.resolved_shots = match &self.edit {
+            Some(doc) => match display::resolve_edit(doc, &self.project_dir) {
+                Ok(resolved) => resolved,
+                Err(_) => panels::timeline::fallback_resolved(&doc.snapshot.shots),
+            },
+            None => Vec::new(),
+        };
+    }
+
     fn shot_count(&self) -> usize {
-        self.edit
-            .as_ref()
-            .map(|e| e.snapshot.shots.len())
-            .unwrap_or(0)
+        self.resolved_shots.len()
     }
 
     fn select_next(&mut self) {
@@ -100,9 +117,9 @@ impl App {
         self.selected_shot.select(Some(i.saturating_sub(1)));
     }
 
-    fn selected_shot(&self) -> Option<&Shot> {
+    fn selected_resolved_shot(&self) -> Option<&ResolvedShot> {
         let idx = self.selected_shot.selected()?;
-        self.edit.as_ref()?.snapshot.shots.get(idx)
+        self.resolved_shots.get(idx)
     }
 }
 
@@ -243,7 +260,12 @@ fn ui(f: &mut Frame, app: &mut App) {
     let transcript_area = columns[1];
 
     // --- Timeline panel (REQ-039) ---
-    draw_timeline(f, app, timeline_area);
+    panels::timeline::draw(
+        f,
+        &app.resolved_shots,
+        &mut app.selected_shot,
+        timeline_area,
+    );
 
     // --- Transcript panel (REQ-040) ---
     draw_transcript(f, app, transcript_area);
@@ -259,56 +281,38 @@ fn ui(f: &mut Frame, app: &mut App) {
 // Panel renderers
 // ---------------------------------------------------------------------------
 
-fn draw_timeline(f: &mut Frame, app: &mut App, area: Rect) {
-    let block = Block::default()
-        .title(" Timeline ")
-        .borders(Borders::ALL);
-
-    let items: Vec<ListItem> = match &app.edit {
-        Some(doc) => doc
-            .snapshot
-            .shots
-            .iter()
-            .map(|shot| {
-                let range_str = match &shot.range {
-                    ar_edit_core::models::ShotRange::Words { from, to } => {
-                        format!("words {from}..{to}")
-                    }
-                    ar_edit_core::models::ShotRange::Scenes { from, to } => {
-                        format!("scenes {from}..{to}")
-                    }
-                    ar_edit_core::models::ShotRange::Time { from_ms, to_ms } => {
-                        format!("{from_ms}ms..{to_ms}ms")
-                    }
-                };
-                ListItem::new(format!("{} [{}] {}", shot.id, shot.source, range_str))
-            })
-            .collect(),
-        None => vec![ListItem::new("(no edit loaded)")],
-    };
-
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-        .highlight_symbol("> ");
-
-    f.render_stateful_widget(list, area, &mut app.selected_shot);
-}
-
 fn draw_transcript(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .title(" Transcript ")
         .borders(Borders::ALL);
 
-    let text = match app.selected_shot() {
-        Some(shot) => format!(
-            "Shot: {}\nSource: {}\n\n(transcript content will appear here)",
-            shot.id, shot.source
-        ),
+    let text = match app.selected_resolved_shot() {
+        Some(shot) => {
+            let mut lines = format!("Shot: {}\nSource: {}\n", shot.id, shot.source);
+            lines.push_str(&format!(
+                "Duration: {}\n",
+                display::format_time(shot.duration_ms)
+            ));
+            if let Some(ref preview) = shot.text_preview {
+                lines.push_str(&format!("\n{preview}"));
+            }
+            if let Some(ref preview) = shot.scene_preview {
+                lines.push_str(&format!("\n{preview}"));
+            }
+            if !shot.notes.is_empty() {
+                lines.push_str("\n\nNotes:");
+                for note in &shot.notes {
+                    lines.push_str(&format!("\n  - {}", note.text));
+                }
+            }
+            lines
+        }
         None => String::from("Select a shot to view its transcript"),
     };
 
-    let paragraph = Paragraph::new(text).block(block).wrap(ratatui::widgets::Wrap { trim: true });
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .wrap(ratatui::widgets::Wrap { trim: true });
     f.render_widget(paragraph, area);
 }
 
@@ -347,8 +351,15 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         .map(|e| e.name.as_str())
         .unwrap_or("(none)");
 
+    let shot_info = match app.selected_shot.selected() {
+        Some(i) if !app.resolved_shots.is_empty() => {
+            format!("  shot {}/{}", i + 1, app.resolved_shots.len())
+        }
+        _ => String::new(),
+    };
+
     let status = format!(
-        " [{mode_label}]  edit: {edit_label}  | {}",
+        " [{mode_label}]  edit: {edit_label}{shot_info}  | {}",
         app.status_message
     );
 
