@@ -1,0 +1,31 @@
+{
+  "source_id": "src-001",
+  "indexed_at": "2026-01-15T10:30:00Z",
+  "metadata": {
+    "duration_ms": 5000,
+    "resolution": [320, 240],
+    "codec": "h264",
+    "file_size_bytes": 24576
+  },
+  "thumbnails": [
+    { "path": "thumbnails/src-001_00m00s.jpg", "timestamp_ms": 0, "description": null },
+    { "path": "thumbnails/src-001_00m02s.jpg", "timestamp_ms": 2500, "description": "Scene change" }
+  ],
+  "scene_count": 2,
+  "scenes": [
+    {
+      "index": 0,
+      "start_ms": 0,
+      "end_ms": 2500,
+      "thumbnail": "thumbnails/src-001_scene_0.jpg",
+      "description": "Opening shot"
+    },
+    {
+      "index": 1,
+      "start_ms": 2500,
+      "end_ms": 5000,
+      "thumbnail": "thumbnails/src-001_scene_1.jpg",
+      "description": null
+    }
+  ]
+}
