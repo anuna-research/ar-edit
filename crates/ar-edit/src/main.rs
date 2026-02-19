@@ -3,10 +3,11 @@ mod cli;
 use std::path::PathBuf;
 use std::process;
 
-use ar_edit_core::models::{EditDocument, EditOpKind};
+use ar_edit_core::models::{EditDocument, EditOpKind, ShotRange};
 use clap::Parser;
 use cli::{
-    exit_code, Cli, Commands, EditCommand, IndexCommand, SchemaCommand, TranscriptsCommand,
+    exit_code, Cli, Commands, EditCommand, IndexCommand, RangeArgs, SchemaCommand,
+    TranscriptsCommand,
 };
 
 fn main() {
@@ -96,8 +97,8 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             ),
         },
         Commands::Search(args) => todo!("search: {}", args.query),
-        Commands::Mark(args) => todo!("mark: source={}, label={}", args.source_id, args.label),
-        Commands::Markers { source_id } => todo!("markers: {source_id}"),
+        Commands::Mark(args) => cmd_mark(cli, args),
+        Commands::Markers { source_id } => cmd_markers(cli, source_id),
         Commands::Schema { command } => match command {
             SchemaCommand::Edit => todo!("schema edit"),
         },
@@ -198,5 +199,97 @@ fn cmd_history(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: mark / markers (REQ-049, REQ-050)
+// ---------------------------------------------------------------------------
+
+fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
+    let range = parse_range(&args.range)?;
+    let project_dir = PathBuf::from(".");
+
+    let marker = ar_edit_core::marker::add_marker(
+        &project_dir,
+        &args.source_id,
+        range,
+        &args.label,
+        args.note.as_deref(),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&marker)?);
+    } else {
+        let note_part = marker
+            .note
+            .as_deref()
+            .map(|n| format!("  note: {n}"))
+            .unwrap_or_default();
+        println!(
+            "Created {} on {} [{}] label={}{}",
+            marker.id,
+            args.source_id,
+            range_summary(&marker.range),
+            marker.label,
+            note_part,
+        );
+    }
+    Ok(())
+}
+
+fn cmd_markers(cli: &Cli, source_id: &str) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+
+    let doc = ar_edit_core::marker::list_markers(&project_dir, source_id)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&doc)?);
+    } else {
+        if doc.markers.is_empty() {
+            println!("No markers for {source_id}.");
+        } else {
+            for m in &doc.markers {
+                let note_part = m
+                    .note
+                    .as_deref()
+                    .map(|n| format!("  \"{n}\""))
+                    .unwrap_or_default();
+                println!(
+                    "  {}  {:<8} [{}]{}",
+                    m.id,
+                    m.label,
+                    range_summary(&m.range),
+                    note_part,
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Convert CLI RangeArgs into a ShotRange.
+fn parse_range(range: &RangeArgs) -> anyhow::Result<ShotRange> {
+    if let (Some(from), Some(to)) = (range.from_word, range.to_word) {
+        Ok(ShotRange::Words { from, to })
+    } else if let (Some(from), Some(to)) = (range.from_scene, range.to_scene) {
+        Ok(ShotRange::Scenes { from, to })
+    } else if let (Some(from_ms), Some(to_ms)) = (range.from_ms, range.to_ms) {
+        Ok(ShotRange::Time { from_ms, to_ms })
+    } else {
+        anyhow::bail!(
+            "no range specified (use --from-word/--to-word, --from-scene/--to-scene, or --from-ms/--to-ms)"
+        )
+    }
+}
+
+/// Human-readable summary of a ShotRange.
+fn range_summary(range: &ShotRange) -> String {
+    match range {
+        ShotRange::Words { from, to } => format!("words {from}..{to}"),
+        ShotRange::Scenes { from, to } => format!("scenes {from}..{to}"),
+        ShotRange::Time { from_ms, to_ms } => format!("{from_ms}ms..{to_ms}ms"),
+    }
 }
 
