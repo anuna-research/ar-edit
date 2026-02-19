@@ -13,6 +13,7 @@ use crate::models::EditDocument;
 use crate::overlay::{self, OverlayInfo, OverlayMode};
 use crate::playback;
 use crate::project;
+use crate::subtitles;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -32,6 +33,8 @@ pub enum RenderError {
     Playback(#[from] playback::PlaybackError),
     #[error(transparent)]
     Project(#[from] project::ProjectError),
+    #[error(transparent)]
+    Subtitle(#[from] subtitles::SubtitleError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -53,6 +56,8 @@ pub struct RenderOptions {
     /// Target output resolution `(width, height)`. `None` means "use highest
     /// input resolution".
     pub resolution: Option<(u32, u32)>,
+    /// Embed SRT subtitles generated from transcripts (REQ-036).
+    pub subtitles: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +245,14 @@ pub fn render_to_file(
     // Clean up work directory regardless of success/failure
     let _ = std::fs::remove_dir_all(&work_dir);
 
-    result
+    result?;
+
+    // Embed subtitles if requested (REQ-036)
+    if options.subtitles {
+        embed_subtitles_into_output(&resolved, project_dir, output)?;
+    }
+
+    Ok(())
 }
 
 /// Render an edit document with progress reporting via a callback (REQ-027).
@@ -278,7 +290,14 @@ where
 
     let _ = std::fs::remove_dir_all(&work_dir);
 
-    result
+    result?;
+
+    // Embed subtitles if requested (REQ-036)
+    if options.subtitles {
+        embed_subtitles_into_output(&resolved, project_dir, output)?;
+    }
+
+    Ok(())
 }
 
 /// Internal: extract segments with progress callbacks, write filelist.txt, and concatenate.
@@ -882,6 +901,33 @@ fn concat_segments(concat_list: &Path, output: &Path) -> Result<(), RenderError>
     Ok(())
 }
 
+/// Generate SRT subtitles and embed them into the rendered video (REQ-036).
+///
+/// Writes a temporary `.srt` file next to the output, embeds it via ffmpeg,
+/// then cleans up the temporary file.
+fn embed_subtitles_into_output(
+    resolved: &[ResolvedShot],
+    project_dir: &Path,
+    output: &Path,
+) -> Result<(), RenderError> {
+    let srt_content = subtitles::generate_srt(resolved, project_dir)?;
+    if srt_content.is_empty() {
+        return Ok(());
+    }
+
+    let srt_path = output.with_extension("srt");
+    std::fs::write(&srt_path, &srt_content)?;
+
+    let result = subtitles::embed_subtitles(output, &srt_path);
+
+    // Clean up the temp SRT file regardless of success
+    let _ = std::fs::remove_file(&srt_path);
+
+    result?;
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -969,7 +1015,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let options = RenderOptions {
             video_codec: Some("h265".into()),
-            resolution: None,
+            ..Default::default()
         };
         let params = resolve_encode_params(&resolved, tmp.path(), &options).unwrap();
         assert_eq!(params.target_codec.as_deref(), Some("h265"));
@@ -980,8 +1026,8 @@ mod tests {
         let resolved = vec![fake_resolved_shot("shot-001", "src-001")];
         let tmp = TempDir::new().unwrap();
         let options = RenderOptions {
-            video_codec: None,
             resolution: Some((1280, 720)),
+            ..Default::default()
         };
         let params = resolve_encode_params(&resolved, tmp.path(), &options).unwrap();
         assert_eq!(params.target_resolution, Some((1280, 720)));

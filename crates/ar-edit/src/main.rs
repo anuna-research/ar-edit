@@ -634,15 +634,17 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
     let render_options = ar_edit_core::render::RenderOptions {
         video_codec: args.codec.clone(),
         resolution,
+        subtitles: args.subtitles,
     };
 
     if !cli.json {
         let overlay_label = if args.burn_overlay { " [overlay: full]" } else { "" };
         let codec_label = args.codec.as_deref().map(|c| format!(" [codec: {c}]")).unwrap_or_default();
         let res_label = args.resolution.as_deref().map(|r| format!(" [resolution: {r}]")).unwrap_or_default();
+        let subs_label = if args.subtitles { " [subtitles]" } else { "" };
         eprintln!(
-            "Rendering '{}' ({} shots) to {}{}{}{}...",
-            args.edit, shot_count, args.output.display(), overlay_label, codec_label, res_label
+            "Rendering '{}' ({} shots) to {}{}{}{}{}...",
+            args.edit, shot_count, args.output.display(), overlay_label, codec_label, res_label, subs_label
         );
     }
 

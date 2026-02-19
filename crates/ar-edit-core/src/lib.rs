@@ -14,6 +14,7 @@ pub mod render;
 pub mod schema;
 pub mod resolve;
 pub mod search;
+pub mod subtitles;
 pub mod transcript;
 pub mod transcript_ops;
 pub mod validate;
