@@ -55,6 +55,37 @@ pub fn list_markers(
     load_or_create(source_id, &path)
 }
 
+/// Load all markers across all sources by scanning `annotations/*.markers.json`.
+pub fn list_all_markers(project_dir: &Path) -> Result<Vec<SourceMarkers>, MarkerError> {
+    let annotations_dir = project_dir.join("annotations");
+    if !annotations_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut results = Vec::new();
+    let mut entries: Vec<_> = fs::read_dir(&annotations_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.ends_with(".markers.json"))
+                .unwrap_or(false)
+        })
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    for entry in entries {
+        let content = fs::read_to_string(entry.path())?;
+        let doc: SourceMarkers = serde_json::from_str(&content)?;
+        if !doc.markers.is_empty() {
+            results.push(doc);
+        }
+    }
+
+    Ok(results)
+}
+
 /// Build the path to a source's markers file: `annotations/<source_id>.markers.json`.
 fn markers_path(project_dir: &Path, source_id: &str) -> std::path::PathBuf {
     project_dir

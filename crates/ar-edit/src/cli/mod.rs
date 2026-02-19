@@ -99,10 +99,14 @@ pub enum Commands {
     /// Add a marker to a source
     Mark(MarkArgs),
 
-    /// List markers for a source
+    /// List markers for a source (or all sources)
     Markers {
-        /// Source ID
-        source_id: String,
+        /// Source ID (omit to list across all sources)
+        source_id: Option<String>,
+
+        /// Filter by label
+        #[arg(long)]
+        label: Option<String>,
     },
 
     /// Output JSON Schema for data formats
@@ -909,12 +913,39 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_markers() {
+    fn cli_parses_markers_with_source() {
         let cli = Cli::try_parse_from(["ar-edit", "markers", "src-001"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Commands::Markers { ref source_id } if source_id == "src-001"
-        ));
+        match cli.command {
+            Commands::Markers { ref source_id, ref label } => {
+                assert_eq!(source_id.as_deref(), Some("src-001"));
+                assert!(label.is_none());
+            }
+            _ => panic!("expected Markers"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_markers_all_sources() {
+        let cli = Cli::try_parse_from(["ar-edit", "markers"]).unwrap();
+        match cli.command {
+            Commands::Markers { ref source_id, ref label } => {
+                assert!(source_id.is_none());
+                assert!(label.is_none());
+            }
+            _ => panic!("expected Markers"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_markers_with_label_filter() {
+        let cli = Cli::try_parse_from(["ar-edit", "markers", "src-001", "--label", "select"]).unwrap();
+        match cli.command {
+            Commands::Markers { ref source_id, ref label } => {
+                assert_eq!(source_id.as_deref(), Some("src-001"));
+                assert_eq!(label.as_deref(), Some("select"));
+            }
+            _ => panic!("expected Markers"),
+        }
     }
 
     #[test]

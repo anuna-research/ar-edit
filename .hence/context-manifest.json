@@ -1,12 +1,12 @@
 {
-  "task_id": "h5-status",
+  "task_id": "j2-listing",
   "token_budget": 8000,
-  "tokens_used": 352,
+  "tokens_used": 357,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement status bar in ar-edit/src/tui/panels/status.rs: playback position, render progress bar, current mode indicator (normal/search/add). Real-time updates during playback and render. Implements REQ-044.",
-      "token_cost": 51,
+      "content": "Implement ar-edit markers [<source-id>] [--label <filter>]: list markers showing marker ID, source, label, note, resolved time range, transcript/scene text at that range. --json support per CON-003 patterns. Implements REQ-050.",
+      "token_cost": 56,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T07:05:55Z"
+  "constructed_at": "2026-02-19T07:12:32Z"
 }
