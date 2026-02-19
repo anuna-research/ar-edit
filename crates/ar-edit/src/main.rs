@@ -79,7 +79,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             EditCommand::Show { edit } => cmd_show(cli, edit),
             EditCommand::History { edit } => cmd_history(cli, edit),
             EditCommand::FromTranscript { file, output } => {
-                todo!("edit from-transcript: {file:?}, output={output:?}")
+                cmd_from_transcript(cli, file, output.as_deref())
             }
             EditCommand::Note { edit, shot, text } => cmd_note(cli, edit, shot, text),
         },
@@ -974,6 +974,49 @@ fn cmd_index_set_description(
         println!(
             "Set description for {} scene {}: {}",
             source_id, scene, text
+        );
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: from-transcript (CON-004, REQ-018)
+// ---------------------------------------------------------------------------
+
+fn cmd_from_transcript(cli: &Cli, file: &Path, output: Option<&str>) -> anyhow::Result<()> {
+    let doc = ar_edit_core::import::from_transcript(file, output).map_err(|e| {
+        match &e {
+            ar_edit_core::import::ImportError::ParseErrors(_) => {
+                // Parse errors should exit with code 1 (USER_ERROR)
+                anyhow::anyhow!("{e}")
+            }
+            _ => anyhow::anyhow!("{e}"),
+        }
+    })?;
+
+    let edits_dir = PathBuf::from("edits");
+    std::fs::create_dir_all(&edits_dir)?;
+
+    let path = edits_dir.join(format!("{}.edit.json", doc.name));
+    let shot_count = doc.snapshot.shots.len();
+    let name = doc.name.clone();
+
+    doc.save(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if cli.json {
+        let output = serde_json::json!({
+            "name": name,
+            "path": path.display().to_string(),
+            "shot_count": shot_count,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!(
+            "Created edit '{}' with {} shots from {}",
+            name,
+            shot_count,
+            file.display()
         );
     }
 
