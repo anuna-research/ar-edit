@@ -1,0 +1,59 @@
+{
+  "source_id": "src-001",
+  "indexed_at": "2026-02-19T12:05:00Z",
+  "metadata": {
+    "duration_ms": 124500,
+    "resolution": [1920, 1080],
+    "codec": "h264",
+    "file_size_bytes": 52428800
+  },
+  "thumbnails": [
+    { "path": "thumbnails/src-001_00m00s.jpg", "timestamp_ms": 0, "description": null },
+    { "path": "thumbnails/src-001_00m10s.jpg", "timestamp_ms": 10000, "description": null },
+    { "path": "thumbnails/src-001_00m18s.jpg", "timestamp_ms": 18000, "description": "Scene change detected" },
+    { "path": "thumbnails/src-001_00m20s.jpg", "timestamp_ms": 20000, "description": null },
+    { "path": "thumbnails/src-001_00m30s.jpg", "timestamp_ms": 30000, "description": null },
+    { "path": "thumbnails/src-001_00m40s.jpg", "timestamp_ms": 40000, "description": null },
+    { "path": "thumbnails/src-001_00m45s.jpg", "timestamp_ms": 45000, "description": null },
+    { "path": "thumbnails/src-001_00m50s.jpg", "timestamp_ms": 50000, "description": null },
+    { "path": "thumbnails/src-001_01m00s.jpg", "timestamp_ms": 60000, "description": null },
+    { "path": "thumbnails/src-001_01m10s.jpg", "timestamp_ms": 70000, "description": null },
+    { "path": "thumbnails/src-001_01m20s.jpg", "timestamp_ms": 80000, "description": null },
+    { "path": "thumbnails/src-001_01m27s.jpg", "timestamp_ms": 87000, "description": null },
+    { "path": "thumbnails/src-001_01m30s.jpg", "timestamp_ms": 90000, "description": null },
+    { "path": "thumbnails/src-001_01m40s.jpg", "timestamp_ms": 100000, "description": null },
+    { "path": "thumbnails/src-001_01m50s.jpg", "timestamp_ms": 110000, "description": null },
+    { "path": "thumbnails/src-001_02m00s.jpg", "timestamp_ms": 120000, "description": null }
+  ],
+  "scene_count": 4,
+  "scenes": [
+    {
+      "index": 0,
+      "start_ms": 0,
+      "end_ms": 18000,
+      "thumbnail": "thumbnails/src-001_00m00s.jpg",
+      "description": "Interior office, wide shot"
+    },
+    {
+      "index": 1,
+      "start_ms": 18000,
+      "end_ms": 45000,
+      "thumbnail": "thumbnails/src-001_00m18s.jpg",
+      "description": "Close-up interview"
+    },
+    {
+      "index": 2,
+      "start_ms": 45000,
+      "end_ms": 87000,
+      "thumbnail": "thumbnails/src-001_00m45s.jpg",
+      "description": null
+    },
+    {
+      "index": 3,
+      "start_ms": 87000,
+      "end_ms": 124500,
+      "thumbnail": "thumbnails/src-001_01m27s.jpg",
+      "description": "Exterior establishing shot"
+    }
+  ]
+}
