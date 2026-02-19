@@ -1,12 +1,12 @@
 {
-  "task_id": "f2-concat",
+  "task_id": "f3-codec",
   "token_budget": 8000,
-  "tokens_used": 349,
+  "tokens_used": 365,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement ffmpeg concat demuxer: generate filelist.txt with all segments in order, run ffmpeg -f concat -safe 0 -i filelist.txt -c copy <output>. Handle segment ordering matching edit snapshot.",
-      "token_cost": 48,
+      "content": "Implement render format options per CON-007: --codec, --resolution flags. Default H.264/AAC in MP4 matching highest input resolution. Stream copy when codecs match, re-encode when needed. Support --burn-overlay for overlay in final render. Implements REQ-026.",
+      "token_cost": 64,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T12:22:38Z"
+  "constructed_at": "2026-02-19T12:31:56Z"
 }
