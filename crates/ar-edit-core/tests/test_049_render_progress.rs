@@ -3,9 +3,13 @@
 //! Verifies the data formatting used by the render progress bar in the TUI
 //! status bar: time formatting, progress fraction calculations, and shot
 //! count tracking across a multi-shot edit timeline.
+//! Also tests ffmpeg stderr parsing and progress computation (REQ-027).
+
+use std::time::Instant;
 
 use ar_edit_core::display::{self, ResolvedShot};
 use ar_edit_core::models::ShotRange;
+use ar_edit_core::render;
 
 // ---------------------------------------------------------------------------
 // Tests: Time formatting for progress display
@@ -267,4 +271,150 @@ fn shot_position_single_shot() {
     let total = 1;
     let display = format!("shot {}/{}", idx + 1, total);
     assert_eq!(display, "shot 1/1");
+}
+
+// ---------------------------------------------------------------------------
+// Tests: ffmpeg stderr progress parsing (REQ-027)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn parse_ffmpeg_progress_typical_line() {
+    let line = "frame=  120 fps= 30 q=28.0 size=    1024kB time=00:00:04.00 bitrate= 2048.0kbits/s speed=1.50x";
+    let p = render::parse_ffmpeg_progress(line).unwrap();
+    assert_eq!(p.frame, Some(120));
+    assert!((p.time_secs.unwrap() - 4.0).abs() < 0.01);
+    assert!((p.speed.unwrap() - 1.5).abs() < 0.01);
+}
+
+#[test]
+fn parse_ffmpeg_progress_no_time_returns_none() {
+    let line = "Input #0, mov,mp4,m4a,3gp from 'test.mp4':";
+    assert!(render::parse_ffmpeg_progress(line).is_none());
+}
+
+#[test]
+fn parse_ffmpeg_progress_zero_time() {
+    let line = "frame=    0 fps=0.0 q=0.0 size=       0kB time=00:00:00.00 bitrate=N/A speed=N/A";
+    let p = render::parse_ffmpeg_progress(line).unwrap();
+    assert_eq!(p.frame, Some(0));
+    assert!((p.time_secs.unwrap() - 0.0).abs() < 0.01);
+    assert!(p.speed.is_none()); // "N/A" doesn't parse as a float
+}
+
+#[test]
+fn parse_ffmpeg_progress_large_time() {
+    let line = "frame= 5400 fps= 60 q=23.0 size=   50000kB time=01:30:00.00 bitrate= 1234.0kbits/s speed=2.00x";
+    let p = render::parse_ffmpeg_progress(line).unwrap();
+    assert_eq!(p.frame, Some(5400));
+    assert!((p.time_secs.unwrap() - 5400.0).abs() < 0.01);
+    assert!((p.speed.unwrap() - 2.0).abs() < 0.01);
+}
+
+#[test]
+fn parse_ffmpeg_progress_fractional_speed() {
+    let line = "frame=   10 fps=5.0 q=20.0 size=     128kB time=00:00:02.50 bitrate= 512.0kbits/s speed=0.83x";
+    let p = render::parse_ffmpeg_progress(line).unwrap();
+    assert!((p.speed.unwrap() - 0.83).abs() < 0.01);
+}
+
+// ---------------------------------------------------------------------------
+// Tests: compute_progress (REQ-027)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn compute_progress_first_shot_no_ffmpeg() {
+    let durations = vec![5000, 10000, 3000];
+    let start = Instant::now();
+    let rp = render::compute_progress(0, 3, &durations, None, start, "shot-001");
+    assert_eq!(rp.shot_index, 1);
+    assert_eq!(rp.shot_count, 3);
+    assert_eq!(rp.current_shot, "shot-001");
+    assert!(rp.progress < 0.01); // At the very start
+}
+
+#[test]
+fn compute_progress_second_shot_no_ffmpeg() {
+    let durations = vec![5000, 10000, 3000]; // total = 18000
+    let start = Instant::now();
+    let rp = render::compute_progress(1, 3, &durations, None, start, "shot-002");
+    // completed_ms = 5000, within_shot_ms = 0 → rendered_ms = 5000 / 18000 ≈ 0.278
+    assert!((rp.progress - 5000.0 / 18000.0).abs() < 0.01);
+    assert_eq!(rp.shot_index, 2);
+}
+
+#[test]
+fn compute_progress_with_ffmpeg_time() {
+    let durations = vec![10000, 10000]; // total = 20000
+    let start = Instant::now();
+    let ffp = render::FfmpegProgress {
+        frame: Some(150),
+        time_secs: Some(5.0), // 5000ms into a 10000ms shot
+        speed: Some(1.0),
+    };
+    let rp = render::compute_progress(0, 2, &durations, Some(&ffp), start, "shot-001");
+    // rendered_ms = 0 + 5000 = 5000, total = 20000 → 0.25
+    assert!((rp.progress - 0.25).abs() < 0.01);
+}
+
+#[test]
+fn compute_progress_within_shot_clamped_to_duration() {
+    let durations = vec![3000]; // total = 3000
+    let start = Instant::now();
+    let ffp = render::FfmpegProgress {
+        frame: Some(200),
+        time_secs: Some(10.0), // 10000ms > 3000ms shot duration
+        speed: Some(2.0),
+    };
+    let rp = render::compute_progress(0, 1, &durations, Some(&ffp), start, "shot-001");
+    // Should be clamped to 3000/3000 = 1.0
+    assert!((rp.progress - 1.0).abs() < 0.01);
+}
+
+#[test]
+fn compute_progress_all_shots_done() {
+    let durations = vec![5000, 5000];
+    let start = Instant::now();
+    let ffp = render::FfmpegProgress {
+        frame: Some(300),
+        time_secs: Some(5.0),
+        speed: Some(1.5),
+    };
+    // shot_idx = 1 (last shot), ffmpeg reports 5s = full duration
+    let rp = render::compute_progress(1, 2, &durations, Some(&ffp), start, "shot-002");
+    // completed = 5000, within = min(5000, 5000) = 5000, total = 10000 → 1.0
+    assert!((rp.progress - 1.0).abs() < 0.01);
+}
+
+#[test]
+fn render_progress_serializes_to_json() {
+    let rp = render::RenderProgress {
+        progress: 0.45,
+        current_shot: "shot-003".into(),
+        eta_seconds: Some(12),
+        shot_index: 3,
+        shot_count: 5,
+    };
+    let json = serde_json::to_value(&rp).unwrap();
+    assert_eq!(json["progress"], 0.45);
+    assert_eq!(json["current_shot"], "shot-003");
+    assert_eq!(json["eta_seconds"], 12);
+    assert_eq!(json["shot_index"], 3);
+    assert_eq!(json["shot_count"], 5);
+}
+
+#[test]
+fn render_progress_json_matches_con_007_format() {
+    // CON-007 specifies: { "progress": 0.45, "current_shot": "shot-003", "eta_seconds": 12 }
+    let rp = render::RenderProgress {
+        progress: 0.45,
+        current_shot: "shot-003".into(),
+        eta_seconds: Some(12),
+        shot_index: 3,
+        shot_count: 5,
+    };
+    let json = serde_json::to_value(&rp).unwrap();
+    // Must contain the three fields specified by CON-007
+    assert!(json.get("progress").is_some());
+    assert!(json.get("current_shot").is_some());
+    assert!(json.get("eta_seconds").is_some());
 }

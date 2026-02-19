@@ -2,6 +2,7 @@ mod cli;
 #[cfg(feature = "tui")]
 mod tui;
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -652,19 +653,72 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
         }
     }
 
-    ar_edit_core::render::render_to_file(
-        &doc, &project_dir, &args.output, overlay_mode, &render_options,
-    )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
-
     if cli.json {
+        // --json mode: streaming JSON lines for progress (CON-007, REQ-027)
+        ar_edit_core::render::render_to_file_with_progress(
+            &doc,
+            &project_dir,
+            &args.output,
+            overlay_mode,
+            &render_options,
+            move |rp| {
+                let line = serde_json::json!({
+                    "progress": (rp.progress * 100.0).round() / 100.0,
+                    "current_shot": rp.current_shot,
+                    "eta_seconds": rp.eta_seconds.unwrap_or(0),
+                });
+                let _ = writeln!(std::io::stderr(), "{}", line);
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        // Final success line on stdout
         let output = serde_json::json!({
+            "success": true,
             "edit": args.edit,
             "output": args.output.display().to_string(),
             "shot_count": shot_count,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
+        // Human mode: indicatif progress bar (REQ-027)
+        use indicatif::{ProgressBar, ProgressStyle};
+
+        let pb = ProgressBar::new(100);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{msg} [{bar:26}] {pos}%  {prefix}")
+                .unwrap_or_else(|_| ProgressStyle::default_bar())
+                .progress_chars("##-"),
+        );
+        pb.set_message("Rendering");
+
+        ar_edit_core::render::render_to_file_with_progress(
+            &doc,
+            &project_dir,
+            &args.output,
+            overlay_mode,
+            &render_options,
+            move |rp| {
+                let pct = (rp.progress * 100.0).round() as u64;
+                pb.set_position(pct);
+                let shot_label = format!("shot {}/{}", rp.shot_index, rp.shot_count);
+                let eta_label = match rp.eta_seconds {
+                    Some(secs) => {
+                        let mins = secs / 60;
+                        let s = secs % 60;
+                        format!("  ETA {mins:02}:{s:02}")
+                    }
+                    None => String::new(),
+                };
+                pb.set_prefix(format!("{shot_label}{eta_label}"));
+                if rp.progress >= 1.0 {
+                    pb.finish_with_message("Done");
+                }
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
         eprintln!("Done. Output: {}", args.output.display());
     }
 

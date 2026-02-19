@@ -1,12 +1,12 @@
 {
-  "task_id": "f3-codec",
+  "task_id": "f4-progress",
   "token_budget": 8000,
-  "tokens_used": 365,
+  "tokens_used": 353,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement render format options per CON-007: --codec, --resolution flags. Default H.264/AAC in MP4 matching highest input resolution. Stream copy when codecs match, re-encode when needed. Support --burn-overlay for overlay in final render. Implements REQ-026.",
-      "token_cost": 64,
+      "content": "Parse ffmpeg stderr for render progress: frame count, time, speed. Report as percentage, current shot, ETA. Human mode: indicatif progress bar. --json mode: streaming JSON lines. Per CON-007. Implements REQ-027.",
+      "token_cost": 52,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T12:31:56Z"
+  "constructed_at": "2026-02-19T12:44:28Z"
 }
