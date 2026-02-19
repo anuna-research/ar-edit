@@ -1,8 +1,11 @@
 use std::collections::HashSet;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Instant;
 
+use regex::Regex;
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::display::{self, ResolvedShot};
@@ -50,6 +53,121 @@ pub struct RenderOptions {
     /// Target output resolution `(width, height)`. `None` means "use highest
     /// input resolution".
     pub resolution: Option<(u32, u32)>,
+}
+
+// ---------------------------------------------------------------------------
+// Progress reporting (REQ-027)
+// ---------------------------------------------------------------------------
+
+/// Progress update emitted during rendering.
+#[derive(Debug, Clone, Serialize)]
+pub struct RenderProgress {
+    /// Overall progress fraction (0.0 to 1.0).
+    pub progress: f64,
+    /// ID of the shot currently being rendered.
+    pub current_shot: String,
+    /// Estimated seconds remaining, if calculable.
+    pub eta_seconds: Option<u64>,
+    /// 1-based index of the current shot.
+    pub shot_index: usize,
+    /// Total number of shots.
+    pub shot_count: usize,
+}
+
+/// Progress parsed from a single ffmpeg stderr progress line.
+#[derive(Debug, Clone, Default)]
+pub struct FfmpegProgress {
+    /// Frame count reported by ffmpeg.
+    pub frame: Option<u64>,
+    /// Current time in seconds parsed from `time=HH:MM:SS.ss`.
+    pub time_secs: Option<f64>,
+    /// Encoding speed multiplier (e.g. 1.5x).
+    pub speed: Option<f64>,
+}
+
+/// Parse an ffmpeg stderr line for progress information.
+///
+/// ffmpeg progress lines look like:
+/// `frame=  120 fps= 30 q=28.0 size=    1024kB time=00:00:04.00 bitrate= 2048.0kbits/s speed=1.50x`
+pub fn parse_ffmpeg_progress(line: &str) -> Option<FfmpegProgress> {
+    // Must contain "time=" to be a progress line
+    if !line.contains("time=") {
+        return None;
+    }
+
+    let mut progress = FfmpegProgress::default();
+
+    // Parse frame=NNN
+    if let Some(caps) = Regex::new(r"frame=\s*(\d+)").ok()?.captures(line) {
+        progress.frame = caps.get(1)?.as_str().parse().ok();
+    }
+
+    // Parse time=HH:MM:SS.ss
+    if let Some(caps) = Regex::new(r"time=(\d+):(\d+):(\d+\.\d+)").ok()?.captures(line) {
+        let h: f64 = caps.get(1)?.as_str().parse().ok()?;
+        let m: f64 = caps.get(2)?.as_str().parse().ok()?;
+        let s: f64 = caps.get(3)?.as_str().parse().ok()?;
+        progress.time_secs = Some(h * 3600.0 + m * 60.0 + s);
+    }
+
+    // Parse speed=N.NNx
+    if let Some(caps) = Regex::new(r"speed=\s*([\d.]+)x").ok()?.captures(line) {
+        progress.speed = caps.get(1)?.as_str().parse().ok();
+    }
+
+    Some(progress)
+}
+
+/// Compute a [`RenderProgress`] from per-shot timing and ffmpeg progress.
+///
+/// - `shot_idx`: 0-based index of the current shot being rendered
+/// - `shot_count`: total number of shots
+/// - `shot_durations_ms`: duration of each shot in milliseconds
+/// - `ffmpeg_progress`: latest progress from ffmpeg stderr (for within-shot progress)
+/// - `start_time`: wall-clock instant when rendering began
+pub fn compute_progress(
+    shot_idx: usize,
+    shot_count: usize,
+    shot_durations_ms: &[u64],
+    ffmpeg_progress: Option<&FfmpegProgress>,
+    start_time: Instant,
+    current_shot_id: &str,
+) -> RenderProgress {
+    let total_duration_ms: u64 = shot_durations_ms.iter().sum();
+    let completed_ms: u64 = shot_durations_ms.iter().take(shot_idx).sum();
+
+    // Within-shot progress from ffmpeg time
+    let current_shot_duration_ms = shot_durations_ms.get(shot_idx).copied().unwrap_or(0);
+    let within_shot_ms = ffmpeg_progress
+        .and_then(|p| p.time_secs)
+        .map(|t| (t * 1000.0) as u64)
+        .unwrap_or(0)
+        .min(current_shot_duration_ms);
+
+    let rendered_ms = completed_ms + within_shot_ms;
+    let progress = if total_duration_ms > 0 {
+        (rendered_ms as f64 / total_duration_ms as f64).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    // ETA from wall-clock elapsed
+    let elapsed = start_time.elapsed();
+    let eta_seconds = if progress > 0.01 {
+        let total_estimated = elapsed.as_secs_f64() / progress;
+        let remaining = total_estimated - elapsed.as_secs_f64();
+        Some(remaining.max(0.0).ceil() as u64)
+    } else {
+        None
+    };
+
+    RenderProgress {
+        progress,
+        current_shot: current_shot_id.to_string(),
+        eta_seconds,
+        shot_index: shot_idx + 1,
+        shot_count,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +241,188 @@ pub fn render_to_file(
     let _ = std::fs::remove_dir_all(&work_dir);
 
     result
+}
+
+/// Render an edit document with progress reporting via a callback (REQ-027).
+///
+/// Same pipeline as [`render_to_file`] but invokes `on_progress` after each
+/// shot extraction and as ffmpeg reports progress within each shot.
+pub fn render_to_file_with_progress<F>(
+    doc: &EditDocument,
+    project_dir: &Path,
+    output: &Path,
+    overlay_mode: OverlayMode,
+    options: &RenderOptions,
+    on_progress: F,
+) -> Result<(), RenderError>
+where
+    F: Fn(&RenderProgress) + Send + 'static,
+{
+    let resolved = display::resolve_edit(doc, project_dir)?;
+    if resolved.is_empty() {
+        return Err(RenderError::EmptyEdit);
+    }
+
+    let work_dir = output
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(format!(
+            ".ar-edit-render-{}",
+            output.file_stem().and_then(|s| s.to_str()).unwrap_or("out")
+        ));
+    std::fs::create_dir_all(&work_dir)?;
+
+    let result = render_segments_and_concat_with_progress(
+        &resolved, doc, project_dir, &work_dir, output, overlay_mode, options, &on_progress,
+    );
+
+    let _ = std::fs::remove_dir_all(&work_dir);
+
+    result
+}
+
+/// Internal: extract segments with progress callbacks, write filelist.txt, and concatenate.
+fn render_segments_and_concat_with_progress<F>(
+    resolved: &[ResolvedShot],
+    _doc: &EditDocument,
+    project_dir: &Path,
+    work_dir: &Path,
+    output: &Path,
+    overlay_mode: OverlayMode,
+    options: &RenderOptions,
+    on_progress: &F,
+) -> Result<(), RenderError>
+where
+    F: Fn(&RenderProgress),
+{
+    let encode_params = resolve_encode_params(resolved, project_dir, options)?;
+
+    let shot_durations_ms: Vec<u64> = resolved.iter().map(|s| s.duration_ms).collect();
+    let start_time = Instant::now();
+
+    let mut segment_paths = Vec::with_capacity(resolved.len());
+    let mut timeline_offset_ms: u64 = 0;
+
+    for (i, shot) in resolved.iter().enumerate() {
+        let (source_path, _) = playback::resolve_source_path(&shot.source, project_dir)?;
+        let segment_path = work_dir.join(format!("segment_{i:04}.mp4"));
+
+        // Emit initial progress for this shot
+        let initial = compute_progress(
+            i,
+            resolved.len(),
+            &shot_durations_ms,
+            None,
+            start_time,
+            &shot.id,
+        );
+        on_progress(&initial);
+
+        let overlay_filter = overlay::build_drawtext_filter(
+            overlay_mode,
+            &OverlayInfo {
+                shot_id: shot.id.clone(),
+                source_id: shot.source.clone(),
+                snippet: shot.text_preview.clone().or(shot.scene_preview.clone()),
+                timecode_offset_sec: timeline_offset_ms as f64 / 1000.0,
+            },
+        );
+
+        let source_info = encode_params
+            .source_info
+            .iter()
+            .find(|s| s.id == shot.source);
+
+        let needs_video_reencode = match source_info {
+            Some(info) => {
+                let codec_mismatch = encode_params.target_codec.is_some()
+                    && normalize_codec(&info.video_codec)
+                        != normalize_codec(encode_params.target_codec.as_deref().unwrap());
+                let res_mismatch = encode_params.target_resolution.is_some()
+                    && info.resolution != encode_params.target_resolution.unwrap();
+                codec_mismatch || res_mismatch
+            }
+            None => options.video_codec.is_some() || options.resolution.is_some(),
+        };
+
+        let has_overlay = overlay_filter.is_some();
+
+        if has_overlay || needs_video_reencode {
+            let mut filters: Vec<String> = Vec::new();
+
+            if let Some((w, h)) = encode_params.target_resolution {
+                let needs_scale = match source_info {
+                    Some(info) => info.resolution != (w, h),
+                    None => true,
+                };
+                if needs_scale {
+                    filters.push(format!("scale={w}:{h}"));
+                }
+            }
+
+            if let Some(ref vf) = overlay_filter {
+                filters.push(vf.clone());
+            }
+
+            let combined_filter = if filters.is_empty() {
+                None
+            } else {
+                Some(filters.join(","))
+            };
+
+            let encoder = encode_params
+                .target_codec
+                .as_deref()
+                .map(ffmpeg_video_encoder)
+                .unwrap_or("libx264");
+
+            extract_segment_with_progress(
+                &source_path,
+                shot.start_ms,
+                shot.end_ms,
+                &segment_path,
+                combined_filter.as_deref(),
+                Some(encoder),
+                i,
+                resolved.len(),
+                &shot_durations_ms,
+                start_time,
+                &shot.id,
+                on_progress,
+            )?;
+        } else {
+            extract_segment(&source_path, shot.start_ms, shot.end_ms, &segment_path)?;
+        }
+
+        segment_paths.push(segment_path);
+        timeline_offset_ms += shot.duration_ms;
+    }
+
+    // Emit a final progress for concat phase
+    let concat_progress = RenderProgress {
+        progress: 0.99,
+        current_shot: resolved.last().map(|s| s.id.clone()).unwrap_or_default(),
+        eta_seconds: Some(0),
+        shot_index: resolved.len(),
+        shot_count: resolved.len(),
+    };
+    on_progress(&concat_progress);
+
+    let concat_list_path = work_dir.join("filelist.txt");
+    write_concat_list(&segment_paths, &concat_list_path)?;
+    concat_segments(&concat_list_path, output)?;
+
+    // Emit 100% done
+    let done = RenderProgress {
+        progress: 1.0,
+        current_shot: resolved.last().map(|s| s.id.clone()).unwrap_or_default(),
+        eta_seconds: Some(0),
+        shot_index: resolved.len(),
+        shot_count: resolved.len(),
+    };
+    on_progress(&done);
+
+    Ok(())
 }
 
 /// Internal: extract segments, write filelist.txt, and concatenate.
@@ -476,6 +776,88 @@ fn write_concat_list(segment_paths: &[PathBuf], output: &Path) -> Result<(), Ren
     for path in segment_paths {
         writeln!(f, "file '{}'", path.display())?;
     }
+    Ok(())
+}
+
+/// Extract a segment while streaming ffmpeg stderr for progress updates.
+///
+/// When `video_encoder` is `Some`, re-encodes; when `None`, uses stream copy.
+/// Reads ffmpeg stderr line-by-line and calls `on_progress` with updated status.
+fn extract_segment_with_progress<F>(
+    source: &Path,
+    start_ms: u64,
+    end_ms: u64,
+    output: &Path,
+    video_filter: Option<&str>,
+    video_encoder: Option<&str>,
+    shot_idx: usize,
+    shot_count: usize,
+    shot_durations_ms: &[u64],
+    start_time: Instant,
+    shot_id: &str,
+    on_progress: &F,
+) -> Result<(), RenderError>
+where
+    F: Fn(&RenderProgress),
+{
+    let start_secs = start_ms as f64 / 1000.0;
+    let duration_secs = end_ms.saturating_sub(start_ms) as f64 / 1000.0;
+
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(["-y", "-progress", "pipe:2", "-ss", &format!("{start_secs:.3}"), "-i"])
+        .arg(source)
+        .args(["-t", &format!("{duration_secs:.3}")]);
+
+    if let Some(vf) = video_filter {
+        cmd.args(["-vf", vf]);
+    }
+
+    if let Some(encoder) = video_encoder {
+        cmd.args(["-c:v", encoder, "-c:a", "aac"]);
+    } else {
+        cmd.args(["-c", "copy"]);
+    }
+
+    cmd.arg(output);
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| RenderError::FfmpegFailed(format!("failed to run ffmpeg: {e}")))?;
+
+    // Read stderr for progress
+    if let Some(stderr) = child.stderr.take() {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+            if let Some(ffp) = parse_ffmpeg_progress(&line) {
+                let rp = compute_progress(
+                    shot_idx,
+                    shot_count,
+                    shot_durations_ms,
+                    Some(&ffp),
+                    start_time,
+                    shot_id,
+                );
+                on_progress(&rp);
+            }
+        }
+    }
+
+    let status = child
+        .wait()
+        .map_err(|e| RenderError::FfmpegFailed(format!("ffmpeg wait failed: {e}")))?;
+
+    if !status.success() {
+        return Err(RenderError::FfmpegFailed(format!(
+            "segment extraction failed (exit code: {:?})",
+            status.code()
+        )));
+    }
+
     Ok(())
 }
 
