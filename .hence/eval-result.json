@@ -3,26 +3,23 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 5,
-    "insertions": 574,
-    "deletions": 6,
+    "files_changed": 2,
+    "insertions": 406,
+    "deletions": 0,
     "file_list": [
-      ".hence/context-manifest.json",
-      "Cargo.lock",
-      "crates/ar-edit-core/Cargo.toml",
-      "crates/ar-edit-core/src/lib.rs",
-      "crates/ar-edit-core/src/resolve.rs"
+      "crates/ar-edit-core/src/edit.rs",
+      "crates/ar-edit-core/src/lib.rs"
     ],
-    "dirty_files": 236
+    "dirty_files": 162
   },
   "learnings": [
     {
-      "key": "task-c4-resolve-changes",
-      "content": "Modified 5 files (+574, -6): .hence/context-manifest.json, Cargo.lock, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/resolve.rs",
+      "key": "task-c1-ops-changes",
+      "content": "Modified 2 files (+406, -0): crates/ar-edit-core/src/edit.rs, crates/ar-edit-core/src/lib.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/c4-resolve-v1",
-  "evaluated_at": "2026-02-19T04:12:41Z"
+  "branch_name": "hence/c1-ops-v1",
+  "evaluated_at": "2026-02-19T04:18:05Z"
 }
