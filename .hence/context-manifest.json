@@ -1,12 +1,12 @@
 {
-  "task_id": "c3-undo",
+  "task_id": "j1-markers",
   "token_budget": 8000,
-  "tokens_used": 380,
+  "tokens_used": 383,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Implement undo/redo per ADR-001: undo decrements head and recomputes snapshot; redo increments head (if ops exist beyond). New mutation after undo truncates ops beyond head (fork behavior). Wire CLI commands: ar-edit undo <edit>, ar-edit redo <edit>, ar-edit edit history <edit>. Implements REQ-046, REQ-047, REQ-048.",
-      "token_cost": 79,
+      "content": "Implement source marker creation per DATA-MODEL section 5: ar-edit mark <source-id> with --from-word/--to-word, --from-scene/--to-scene, or --from-ms/--to-ms range, --label <label> (select/hero/avoid/maybe/freeform), optional --note. Store in annotations/src-NNN.markers.json. Sequential marker IDs (mark-NNN). Implements REQ-049.",
+      "token_cost": 82,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:55:31Z"
+  "constructed_at": "2026-02-19T05:04:09Z"
 }
