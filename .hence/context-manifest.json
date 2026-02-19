@@ -1,12 +1,12 @@
 {
-  "task_id": "i3-completions",
+  "task_id": "c3-undo",
   "token_budget": 8000,
-  "tokens_used": 338,
+  "tokens_used": 380,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Generate shell completions via clap_complete for bash, zsh, and fish. Either build-time generation or runtime via ar-edit completions generate <shell>.",
-      "token_cost": 37,
+      "content": "Implement undo/redo per ADR-001: undo decrements head and recomputes snapshot; redo increments head (if ops exist beyond). New mutation after undo truncates ops beyond head (fork behavior). Wire CLI commands: ar-edit undo <edit>, ar-edit redo <edit>, ar-edit edit history <edit>. Implements REQ-046, REQ-047, REQ-048.",
+      "token_cost": 79,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T04:53:00Z"
+  "constructed_at": "2026-02-19T04:55:31Z"
 }
