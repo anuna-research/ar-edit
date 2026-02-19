@@ -1,10 +1,12 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use chrono::Utc;
 use regex::Regex;
 use thiserror::Error;
 
-use crate::models::{Scene, Thumbnail};
+use crate::models::{Scene, Source, SourceIndex, SourceMetadata, Thumbnail};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -16,8 +18,14 @@ pub enum IndexError {
     FfmpegFailed(String),
     #[error("failed to parse ffmpeg output: {0}")]
     ParseFailed(String),
+    #[error("source not indexed: {0}")]
+    NotIndexed(String),
+    #[error("scene index {index} out of range (source has {count} scenes)")]
+    SceneOutOfRange { index: u32, count: u32 },
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 // ---------------------------------------------------------------------------
@@ -92,9 +100,119 @@ pub fn generate_thumbnails(
     Ok(thumbnails)
 }
 
+/// Build a complete SourceIndex for a source: detect scenes, extract thumbnails,
+/// and write the index file to `index/<source_id>.index.json`.
+///
+/// Scene thumbnails are assigned by matching each scene's `start_ms` to the
+/// corresponding thumbnail path. The source file size is read from disk for
+/// the metadata block.
+pub fn build_source_index(
+    project_dir: &Path,
+    source: &Source,
+    threshold: f64,
+    interval_sec: u32,
+) -> Result<SourceIndex, IndexError> {
+    let source_path = project_dir.join(&source.path);
+    let thumbs_dir = project_dir.join("thumbnails");
+
+    let file_size_bytes = std::fs::metadata(&source_path)?.len();
+
+    let mut scenes = detect_scenes(&source_path, source.duration_ms, threshold)?;
+
+    let thumbnails = generate_thumbnails(
+        &source_path,
+        &source.id,
+        source.duration_ms,
+        &scenes,
+        interval_sec,
+        &thumbs_dir,
+    )?;
+
+    // Map timestamp → thumbnail path so we can assign each scene its thumbnail.
+    let thumb_map: HashMap<u64, &PathBuf> =
+        thumbnails.iter().map(|t| (t.timestamp_ms, &t.path)).collect();
+
+    for scene in &mut scenes {
+        if let Some(path) = thumb_map.get(&scene.start_ms) {
+            scene.thumbnail = (*path).clone();
+        }
+    }
+
+    let scene_count = scenes.len() as u32;
+
+    let index = SourceIndex {
+        source_id: source.id.clone(),
+        indexed_at: Utc::now(),
+        metadata: SourceMetadata {
+            duration_ms: source.duration_ms,
+            resolution: source.resolution,
+            codec: source.video_codec.clone(),
+            file_size_bytes,
+        },
+        thumbnails,
+        scene_count,
+        scenes,
+    };
+
+    save_index(project_dir, &index)?;
+
+    Ok(index)
+}
+
+/// Load a previously saved SourceIndex from `index/<source_id>.index.json`.
+pub fn load_index(project_dir: &Path, source_id: &str) -> Result<SourceIndex, IndexError> {
+    let path = index_path(project_dir, source_id);
+    if !path.exists() {
+        return Err(IndexError::NotIndexed(source_id.to_string()));
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let index: SourceIndex = serde_json::from_str(&content)?;
+    Ok(index)
+}
+
+/// Write a SourceIndex to `index/<source_id>.index.json`.
+pub fn save_index(project_dir: &Path, index: &SourceIndex) -> Result<(), IndexError> {
+    let path = index_path(project_dir, &index.source_id);
+    let json = serde_json::to_string_pretty(index)?;
+    std::fs::write(&path, json)?;
+    Ok(())
+}
+
+/// Set the description for a scene in an existing index.
+///
+/// Loads the index, updates the scene description, and saves it back.
+/// Returns the updated SourceIndex.
+pub fn set_scene_description(
+    project_dir: &Path,
+    source_id: &str,
+    scene_index: u32,
+    text: &str,
+) -> Result<SourceIndex, IndexError> {
+    let mut index = load_index(project_dir, source_id)?;
+
+    if scene_index >= index.scene_count {
+        return Err(IndexError::SceneOutOfRange {
+            index: scene_index,
+            count: index.scene_count,
+        });
+    }
+
+    index.scenes[scene_index as usize].description = Some(text.to_string());
+    save_index(project_dir, &index)?;
+
+    Ok(index)
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// On-disk path for an index file.
+fn index_path(project_dir: &Path, source_id: &str) -> PathBuf {
+    project_dir
+        .join("index")
+        .join(format!("{source_id}.index.json"))
+}
 
 /// Parse scene-change timestamps (in ms) from ffmpeg showinfo output.
 ///
@@ -231,6 +349,7 @@ fn extract_frame(source: &Path, timestamp_ms: u64, out_path: &Path) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     // -- parse_scene_timestamps -----------------------------------------------
 
@@ -416,5 +535,200 @@ mod tests {
             format_thumbnail_filename("src-001", 18500),
             "src-001_00m18s.jpg"
         );
+    }
+
+    // -- index_path ------------------------------------------------------------
+
+    #[test]
+    fn index_path_format() {
+        let p = index_path(Path::new("/project"), "src-001");
+        assert_eq!(p, PathBuf::from("/project/index/src-001.index.json"));
+    }
+
+    // -- save_index / load_index roundtrip ------------------------------------
+
+    #[test]
+    fn save_and_load_index_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+        let index_dir = tmp.path().join("index");
+        std::fs::create_dir(&index_dir).unwrap();
+
+        let index = SourceIndex {
+            source_id: "src-001".into(),
+            indexed_at: "2026-02-19T12:05:00Z".parse().unwrap(),
+            metadata: SourceMetadata {
+                duration_ms: 124500,
+                resolution: (1920, 1080),
+                codec: "h264".into(),
+                file_size_bytes: 52428800,
+            },
+            thumbnails: vec![
+                Thumbnail {
+                    path: PathBuf::from("thumbnails/src-001_00m00s.jpg"),
+                    timestamp_ms: 0,
+                    description: None,
+                },
+                Thumbnail {
+                    path: PathBuf::from("thumbnails/src-001_00m18s.jpg"),
+                    timestamp_ms: 18000,
+                    description: Some("Scene change".into()),
+                },
+            ],
+            scene_count: 2,
+            scenes: vec![
+                Scene {
+                    index: 0,
+                    start_ms: 0,
+                    end_ms: 18000,
+                    thumbnail: PathBuf::from("thumbnails/src-001_00m00s.jpg"),
+                    description: Some("Wide shot".into()),
+                },
+                Scene {
+                    index: 1,
+                    start_ms: 18000,
+                    end_ms: 124500,
+                    thumbnail: PathBuf::from("thumbnails/src-001_00m18s.jpg"),
+                    description: None,
+                },
+            ],
+        };
+
+        save_index(tmp.path(), &index).unwrap();
+
+        // Verify the file exists
+        assert!(index_dir.join("src-001.index.json").exists());
+
+        // Load and compare
+        let loaded = load_index(tmp.path(), "src-001").unwrap();
+        assert_eq!(loaded, index);
+    }
+
+    #[test]
+    fn load_index_not_indexed() {
+        let tmp = TempDir::new().unwrap();
+        let index_dir = tmp.path().join("index");
+        std::fs::create_dir(&index_dir).unwrap();
+
+        let err = load_index(tmp.path(), "src-999").unwrap_err();
+        assert!(matches!(err, IndexError::NotIndexed(ref id) if id == "src-999"));
+    }
+
+    // -- set_scene_description ------------------------------------------------
+
+    #[test]
+    fn set_scene_description_updates_scene() {
+        let tmp = TempDir::new().unwrap();
+        let index_dir = tmp.path().join("index");
+        std::fs::create_dir(&index_dir).unwrap();
+
+        let index = SourceIndex {
+            source_id: "src-002".into(),
+            indexed_at: "2026-02-19T12:05:00Z".parse().unwrap(),
+            metadata: SourceMetadata {
+                duration_ms: 60000,
+                resolution: (1280, 720),
+                codec: "h264".into(),
+                file_size_bytes: 10000000,
+            },
+            thumbnails: vec![],
+            scene_count: 3,
+            scenes: vec![
+                Scene {
+                    index: 0,
+                    start_ms: 0,
+                    end_ms: 20000,
+                    thumbnail: Default::default(),
+                    description: None,
+                },
+                Scene {
+                    index: 1,
+                    start_ms: 20000,
+                    end_ms: 40000,
+                    thumbnail: Default::default(),
+                    description: None,
+                },
+                Scene {
+                    index: 2,
+                    start_ms: 40000,
+                    end_ms: 60000,
+                    thumbnail: Default::default(),
+                    description: None,
+                },
+            ],
+        };
+        save_index(tmp.path(), &index).unwrap();
+
+        let updated =
+            set_scene_description(tmp.path(), "src-002", 1, "Close-up interview").unwrap();
+        assert_eq!(
+            updated.scenes[1].description.as_deref(),
+            Some("Close-up interview")
+        );
+        // Other scenes unchanged
+        assert_eq!(updated.scenes[0].description, None);
+        assert_eq!(updated.scenes[2].description, None);
+
+        // Persisted to disk
+        let reloaded = load_index(tmp.path(), "src-002").unwrap();
+        assert_eq!(
+            reloaded.scenes[1].description.as_deref(),
+            Some("Close-up interview")
+        );
+    }
+
+    #[test]
+    fn set_scene_description_out_of_range() {
+        let tmp = TempDir::new().unwrap();
+        let index_dir = tmp.path().join("index");
+        std::fs::create_dir(&index_dir).unwrap();
+
+        let index = SourceIndex {
+            source_id: "src-003".into(),
+            indexed_at: "2026-02-19T12:05:00Z".parse().unwrap(),
+            metadata: SourceMetadata {
+                duration_ms: 30000,
+                resolution: (1920, 1080),
+                codec: "h264".into(),
+                file_size_bytes: 5000000,
+            },
+            thumbnails: vec![],
+            scene_count: 2,
+            scenes: vec![
+                Scene {
+                    index: 0,
+                    start_ms: 0,
+                    end_ms: 15000,
+                    thumbnail: Default::default(),
+                    description: None,
+                },
+                Scene {
+                    index: 1,
+                    start_ms: 15000,
+                    end_ms: 30000,
+                    thumbnail: Default::default(),
+                    description: None,
+                },
+            ],
+        };
+        save_index(tmp.path(), &index).unwrap();
+
+        let err = set_scene_description(tmp.path(), "src-003", 5, "nope").unwrap_err();
+        assert!(matches!(
+            err,
+            IndexError::SceneOutOfRange {
+                index: 5,
+                count: 2
+            }
+        ));
+    }
+
+    #[test]
+    fn set_scene_description_not_indexed() {
+        let tmp = TempDir::new().unwrap();
+        let index_dir = tmp.path().join("index");
+        std::fs::create_dir(&index_dir).unwrap();
+
+        let err = set_scene_description(tmp.path(), "src-999", 0, "text").unwrap_err();
+        assert!(matches!(err, IndexError::NotIndexed(_)));
     }
 }
