@@ -123,7 +123,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 println!("{}", serde_json::to_string_pretty(&added)?);
             } else {
                 for s in &added {
-                    println!("Added source src-{:03}: {}", s.id, s.original_filename);
+                    println!("Added source {}: {}", s.id, s.original_filename);
                 }
             }
             Ok(())

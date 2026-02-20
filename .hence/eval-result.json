@@ -3,24 +3,23 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 3,
-    "insertions": 31,
-    "deletions": 5,
+    "files_changed": 2,
+    "insertions": 12,
+    "deletions": 6,
     "file_list": [
       ".hence/context-manifest.json",
-      "crates/ar-edit-core/src/display.rs",
       "crates/ar-edit/src/main.rs"
     ],
     "dirty_files": 0
   },
   "learnings": [
     {
-      "key": "task-imp-show-total-changes",
-      "content": "Modified 3 files (+31, -5): .hence/context-manifest.json, crates/ar-edit-core/src/display.rs, crates/ar-edit/src/main.rs",
+      "key": "task-bug-double-prefix-changes",
+      "content": "Modified 2 files (+12, -6): .hence/context-manifest.json, crates/ar-edit/src/main.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/imp-show-total-v1",
-  "evaluated_at": "2026-02-20T02:26:01Z"
+  "branch_name": "hence/bug-double-prefix-v1",
+  "evaluated_at": "2026-02-20T02:27:00Z"
 }

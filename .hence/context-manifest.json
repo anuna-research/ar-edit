@@ -1,12 +1,12 @@
 {
-  "task_id": "imp-show-total",
+  "task_id": "bug-double-prefix",
   "token_budget": 8000,
-  "tokens_used": 170,
+  "tokens_used": 210,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "The edit show command lists shots but doesn't display total duration. Add a summary line at the bottom: 'Total: N shots, HH:MM:SS.mmm'. Key file: main.rs cmd_show handler (lines 708-763).",
-      "token_cost": 46,
+      "content": "The add command displays 'src-src-001' instead of 'src-001'. The format string likely prepends 'src-' to an id that already includes the prefix. Fix the display formatting in the cmd_add handler (main.rs around lines 120-130).",
+      "token_cost": 56,
       "priority": "PlanMeta"
     },
     {
@@ -32,8 +32,14 @@
       "content": "Modified 1 files (+31, -0): crates/ar-edit/src/main.rs",
       "token_cost": 13,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-imp-show-total-changes",
+      "content": "Modified 3 files (+31, -5): .hence/context-manifest.json, crates/ar-edit-core/src/display.rs, crates/ar-edit/src/main.rs",
+      "token_cost": 30,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-20T02:22:56Z"
+  "constructed_at": "2026-02-20T02:26:06Z"
 }
