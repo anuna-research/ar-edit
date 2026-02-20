@@ -1,12 +1,12 @@
 {
-  "task_id": "imp-history-details",
+  "task_id": "bug-negative-ms",
   "token_budget": 8000,
-  "tokens_used": 236,
+  "tokens_used": 266,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Edit history shows operation type and shot ID but not what changed. Show old and new values for trim operations, source and range for add operations, etc. Key file: main.rs cmd_history handler (lines 368-392), models in edit.rs for operation data.",
-      "token_cost": 61,
+      "content": "Passing negative values like --from-ms -100 causes clap to interpret -100 as a flag, producing a confusing error. Fix by adding allow_hyphen_values=true to the relevant clap arguments in cli/mod.rs, then validate and reject negative values with a clear error message in the handler.",
+      "token_cost": 70,
       "priority": "PlanMeta"
     },
     {
@@ -44,8 +44,14 @@
       "content": "Modified 2 files (+12, -6): .hence/context-manifest.json, crates/ar-edit/src/main.rs",
       "token_cost": 21,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-imp-history-details-changes",
+      "content": "Modified 2 files (+54, -8): .hence/context-manifest.json, crates/ar-edit/src/main.rs",
+      "token_cost": 21,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-20T02:27:05Z"
+  "constructed_at": "2026-02-20T02:31:06Z"
 }

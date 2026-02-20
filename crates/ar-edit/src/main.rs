@@ -1762,11 +1762,20 @@ fn cmd_from_transcript(cli: &Cli, file: &Path, output: Option<&str>) -> anyhow::
 /// Convert CLI RangeArgs into a ShotRange.
 fn parse_range(range: &RangeArgs) -> anyhow::Result<ShotRange> {
     if let (Some(from), Some(to)) = (range.from_word, range.to_word) {
-        Ok(ShotRange::Words { from, to })
+        if from < 0 || to < 0 {
+            anyhow::bail!("--from-word and --to-word must be non-negative");
+        }
+        Ok(ShotRange::Words { from: from as u32, to: to as u32 })
     } else if let (Some(from), Some(to)) = (range.from_scene, range.to_scene) {
-        Ok(ShotRange::Scenes { from, to })
+        if from < 0 || to < 0 {
+            anyhow::bail!("--from-scene and --to-scene must be non-negative");
+        }
+        Ok(ShotRange::Scenes { from: from as u32, to: to as u32 })
     } else if let (Some(from_ms), Some(to_ms)) = (range.from_ms, range.to_ms) {
-        Ok(ShotRange::Time { from_ms, to_ms })
+        if from_ms < 0 || to_ms < 0 {
+            anyhow::bail!("--from-ms and --to-ms must be non-negative");
+        }
+        Ok(ShotRange::Time { from_ms: from_ms as u64, to_ms: to_ms as u64 })
     } else {
         anyhow::bail!(
             "no range specified (use --from-word/--to-word, --from-scene/--to-scene, or --from-ms/--to-ms)"
