@@ -3,23 +3,22 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 2,
-    "insertions": 46,
-    "deletions": 2,
+    "files_changed": 1,
+    "insertions": 31,
+    "deletions": 0,
     "file_list": [
-      "crates/ar-edit-core/src/project.rs",
       "crates/ar-edit/src/main.rs"
     ],
     "dirty_files": 1
   },
   "learnings": [
     {
-      "key": "task-imp-doctor-hints-changes",
-      "content": "Modified 2 files (+46, -2): crates/ar-edit-core/src/project.rs, crates/ar-edit/src/main.rs",
+      "key": "task-imp-auto-validate-changes",
+      "content": "Modified 1 files (+31, -0): crates/ar-edit/src/main.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/imp-doctor-hints-v1",
-  "evaluated_at": "2026-02-20T02:20:03Z"
+  "branch_name": "hence/imp-auto-validate-v1",
+  "evaluated_at": "2026-02-20T02:22:51Z"
 }
