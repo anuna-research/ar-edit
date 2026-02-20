@@ -1,75 +1,15 @@
 {
-  "task_id": "i2-errors",
+  "task_id": "imp-play-resolution",
   "token_budget": 8000,
-  "tokens_used": 366,
+  "tokens_used": 49,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Review and polish all error messages across CLI and core: consistent formatting, actionable suggestions (e.g. 'run ar-edit doctor to check dependencies'), helpful context. Verify CON-009 exit codes are correct in all error paths. No raw panics exposed to users.",
-      "token_cost": 65,
+      "content": "The play command always renders at full resolution for preview. Add --resolution flag and default preview renders to 720p. Key files: cli/mod.rs PlayArgs struct, main.rs cmd_play handler, render.rs.",
+      "token_cost": 49,
       "priority": "PlanMeta"
-    },
-    {
-      "source": "memory/episodic/task-a1-workspace-changes",
-      "content": "Modified 7 files (+1514, -0): Cargo.lock, Cargo.toml, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/models/mod.rs and 2 more",
-      "token_cost": 41,
-      "priority": "AgentMemory"
-    },
-    {
-      "source": "memory/episodic/task-a2-models-changes",
-      "content": "Modified 2 files (+632, -5): .hence/context-manifest.json, crates/ar-edit-core/src/models/mod.rs",
-      "token_cost": 24,
-      "priority": "AgentMemory"
-    },
-    {
-      "source": "memory/episodic/task-c4-resolve-changes",
-      "content": "Modified 5 files (+574, -6): .hence/context-manifest.json, Cargo.lock, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/resolve.rs",
-      "token_cost": 42,
-      "priority": "AgentMemory"
-    },
-    {
-      "source": "memory/episodic/task-c1-ops-changes",
-      "content": "Modified 2 files (+406, -0): crates/ar-edit-core/src/edit.rs, crates/ar-edit-core/src/lib.rs",
-      "token_cost": 23,
-      "priority": "AgentMemory"
-    },
-    {
-      "source": "memory/episodic/task-a3-project-changes",
-      "content": "Modified 3 files (+586, -5): .hence/context-manifest.json, crates/ar-edit-core/src/lib.rs, crates/ar-edit-core/src/project.rs",
-      "token_cost": 31,
-      "priority": "AgentMemory"
-    },
-    {
-      "source": "memory/episodic/task-d1-scenes-changes",
-      "content": "Modified 3 files (+267, -5): .hence/context-manifest.json, crates/ar-edit-core/src/index.rs, crates/ar-edit-core/src/lib.rs",
-      "token_cost": 30,
-      "priority": "AgentMemory"
-    },
-    {
-      "source": "memory/episodic/task-a4-cli-changes",
-      "content": "Modified 3 files (+1034, -16): .hence/context-manifest.json, crates/ar-edit/src/cli/mod.rs, crates/ar-edit/src/main.rs",
-      "token_cost": 29,
-      "priority": "AgentMemory"
-    },
-    {
-      "source": "memory/episodic/task-a5-tests-changes",
-      "content": "Modified 12 files (+819, -6): .hence/context-manifest.json, Cargo.lock, Cargo.toml, crates/ar-edit-core/Cargo.toml, crates/ar-edit-core/tests/test_001_project_init.rs and 7 more",
-      "token_cost": 44,
-      "priority": "AgentMemory"
-    },
-    {
-      "source": "memory/episodic/task-d2-thumbs-changes",
-      "content": "Modified 1 files (+167, -2): crates/ar-edit-core/src/index.rs",
-      "token_cost": 15,
-      "priority": "AgentMemory"
-    },
-    {
-      "source": "memory/episodic/task-c2-snapshot-changes",
-      "content": "Modified 2 files (+498, -5): .hence/context-manifest.json, crates/ar-edit-core/src/edit.rs",
-      "token_cost": 22,
-      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-19T14:12:54Z"
+  "constructed_at": "2026-02-20T01:48:45Z"
 }
