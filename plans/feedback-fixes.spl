@@ -1,0 +1,230 @@
+;; Plan: Address bugs and improvements from ar-edit feedback report
+;; Source: specs/ar-edit-feedback.md
+;; Created: 2026-02-20
+
+(meta plan
+  (id "AR-FEEDBACK-001")
+  (title "ar-edit CLI Feedback Fixes")
+  (version "1.0.0")
+  (status "active")
+  (created "2026-02-20")
+  (author "agent:claude")
+  (spec "specs/ar-edit-feedback.md")
+  (description "Address 5 bugs and 7 improvements identified in the ar-edit CLI feedback report"))
+
+;; ─── Agent ───────────────────────────────────────────────────────────────────
+
+(given agent-claude-available)
+
+;; ─── Phase 1: Bug Fixes ─────────────────────────────────────────────────────
+
+;; Bug 1 — add-segment accepts invalid data (Severity: High)
+(given task-bug-eager-validation)
+(given no-deps-bug-eager-validation)
+(meta task-bug-eager-validation
+  (description "add-segment and trim-segment accept invalid data silently (non-existent source, out-of-range times, inverted ranges). Move validation checks from validate.rs into the add_shot/trim_shot code paths in edit.rs so invalid segments are rejected at creation time with a non-zero exit code and clear error message.")
+  (acceptance "1) ar-edit edit add-segment with non-existent source returns error; 2) out-of-range times rejected; 3) inverted from>to rejected; 4) trim-segment similarly validated; 5) existing validate command still works; 6) all existing tests pass"))
+
+;; Bug 2 — Error messages printed twice (Severity: Medium)
+(given task-bug-double-errors)
+(given no-deps-bug-double-errors)
+(meta task-bug-double-errors
+  (description "Every error message is duplicated in stderr. The error is printed both by the subcommand handler and by the top-level main error handler in main.rs. Fix so only one layer prints errors. Key files: crates/ar-edit/src/main.rs (lines 84-106 for top-level handler, subcommand handlers throughout).")
+  (acceptance "1) Each error path produces exactly one error message on stderr; 2) Error hints still appear; 3) --json mode still works correctly; 4) Exit codes unchanged"))
+
+;; Bug 3 — Double-prefixed source IDs in add output (Severity: Low)
+(given task-bug-double-prefix)
+(given no-deps-bug-double-prefix)
+(meta task-bug-double-prefix
+  (description "The add command displays 'src-src-001' instead of 'src-001'. The format string likely prepends 'src-' to an id that already includes the prefix. Fix the display formatting in the cmd_add handler (main.rs around lines 120-130).")
+  (acceptance "1) ar-edit add outputs 'Added source src-001: filename.mkv' (single prefix); 2) manifest.json still stores src-001 correctly"))
+
+;; Bug 4 — Zero-duration scenes from scene detection (Severity: Low)
+(given task-bug-zero-duration-scenes)
+(given no-deps-bug-zero-duration-scenes)
+(meta task-bug-zero-duration-scenes
+  (description "Scene detection produces scenes with 0.0s duration (e.g. Scene 4: 128.1s - 128.1s). Filter out or merge zero-duration scenes in crates/ar-edit-core/src/index.rs detect_scenes() function. Apply a minimum duration threshold (e.g. 0.5s) — merge sub-threshold scenes with the previous scene by extending its end_ms.")
+  (acceptance "1) No scenes with duration < 500ms in output; 2) Scene indices are contiguous after filtering; 3) Total coverage still spans full source duration; 4) Existing index tests pass"))
+
+;; Bug 5 — Negative millisecond values cause confusing clap error (Severity: Low)
+(given task-bug-negative-ms)
+(given no-deps-bug-negative-ms)
+(meta task-bug-negative-ms
+  (description "Passing negative values like --from-ms -100 causes clap to interpret -100 as a flag, producing a confusing error. Fix by adding allow_hyphen_values=true to the relevant clap arguments in cli/mod.rs, then validate and reject negative values with a clear error message in the handler.")
+  (acceptance "1) ar-edit edit trim-segment ... --from-ms -100 produces clear 'negative values not allowed' error; 2) Same for --to-ms and add-segment; 3) Valid positive values still work"))
+
+;; ─── Phase 2: Improvements ──────────────────────────────────────────────────
+
+;; Improvement 1 — doctor install hints
+(given task-imp-doctor-hints)
+(given no-deps-imp-doctor-hints)
+(meta task-imp-doctor-hints
+  (description "ar-edit doctor reports missing dependencies but doesn't suggest installation commands. Add platform-specific install hints for each dependency. On macOS: 'brew install whisper-cpp', 'brew install --cask vlc', etc. Key file: main.rs cmd_doctor handler (lines 131-151) and project.rs doctor logic.")
+  (acceptance "1) Missing deps show install hint for current platform; 2) macOS shows brew commands; 3) Linux shows apt/dnf hints; 4) Present deps show no hint"))
+
+;; Improvement 2 — transcribe error hints
+(given task-imp-transcribe-hint)
+(given no-deps-imp-transcribe-hint)
+(meta task-imp-transcribe-hint
+  (description "When whisper model is missing, add a download hint to the error message: 'Hint: download with: whisper-cli --download-model base'. Key file: crates/ar-edit-core/src/transcript.rs where the model-not-found error is generated.")
+  (acceptance "1) Missing model error includes download command hint; 2) Hint references correct whisper-cli command"))
+
+;; Improvement 3 — Total duration in edit show
+(given task-imp-show-total)
+(given no-deps-imp-show-total)
+(meta task-imp-show-total
+  (description "The edit show command lists shots but doesn't display total duration. Add a summary line at the bottom: 'Total: N shots, HH:MM:SS.mmm'. Key file: main.rs cmd_show handler (lines 708-763).")
+  (acceptance "1) edit show displays total shot count and duration; 2) Duration formatted as MM:SS.mmm or HH:MM:SS.mmm; 3) --json output includes total_duration_ms field"))
+
+;; Improvement 4 — Auto-validate before render
+(given task-imp-auto-validate)
+(meta task-imp-auto-validate
+  (description "Run validation automatically before starting the render pipeline. If validation fails, abort render with the validation errors. Key file: main.rs cmd_render handler (lines 1004-1224) — call validate logic from validate.rs before proceeding.")
+  (acceptance "1) render with invalid edit shows validation errors and aborts; 2) render with valid edit proceeds normally; 3) No duplicate validation if user ran validate separately"))
+
+;; Improvement 5 — Play caching / reuse existing render
+(given task-imp-play-cache)
+(given no-deps-imp-play-cache)
+(meta task-imp-play-cache
+  (description "ar-edit play re-renders from scratch even when a render already exists. Check for existing render output before re-rendering. Compare edit document modification time against render output. Key file: main.rs cmd_play handler (lines 838-926) and playback.rs.")
+  (acceptance "1) play reuses existing render if edit unchanged; 2) play re-renders if edit modified since last render; 3) --force flag bypasses cache"))
+
+;; Improvement 6 — Play resolution flag
+(given task-imp-play-resolution)
+(given no-deps-imp-play-resolution)
+(meta task-imp-play-resolution
+  (description "The play command always renders at full resolution for preview. Add --resolution flag and default preview renders to 720p. Key files: cli/mod.rs PlayArgs struct, main.rs cmd_play handler, render.rs.")
+  (acceptance "1) play defaults to 720p preview; 2) --resolution 1080p overrides; 3) Full render command unaffected"))
+
+;; Improvement 7 — Edit history details
+(given task-imp-history-details)
+(given no-deps-imp-history-details)
+(meta task-imp-history-details
+  (description "Edit history shows operation type and shot ID but not what changed. Show old and new values for trim operations, source and range for add operations, etc. Key file: main.rs cmd_history handler (lines 368-392), models in edit.rs for operation data.")
+  (acceptance "1) trim_shot shows [old_from..old_to] -> [new_from..new_to]; 2) add_shot shows source and range; 3) remove_shot shows removed shot info; 4) --json output includes detail fields"))
+
+;; ─── Readiness Rules ─────────────────────────────────────────────────────────
+
+;; Phase 1 bugs — all independent, can start immediately
+(normally r-ready-bug-eager-validation
+  (and task-bug-eager-validation no-deps-bug-eager-validation)
+  ready-bug-eager-validation)
+
+(normally r-ready-bug-double-errors
+  (and task-bug-double-errors no-deps-bug-double-errors)
+  ready-bug-double-errors)
+
+(normally r-ready-bug-double-prefix
+  (and task-bug-double-prefix no-deps-bug-double-prefix)
+  ready-bug-double-prefix)
+
+(normally r-ready-bug-zero-duration-scenes
+  (and task-bug-zero-duration-scenes no-deps-bug-zero-duration-scenes)
+  ready-bug-zero-duration-scenes)
+
+(normally r-ready-bug-negative-ms
+  (and task-bug-negative-ms no-deps-bug-negative-ms)
+  ready-bug-negative-ms)
+
+;; Phase 2 improvements — mostly independent
+(normally r-ready-imp-doctor-hints
+  (and task-imp-doctor-hints no-deps-imp-doctor-hints)
+  ready-imp-doctor-hints)
+
+(normally r-ready-imp-transcribe-hint
+  (and task-imp-transcribe-hint no-deps-imp-transcribe-hint)
+  ready-imp-transcribe-hint)
+
+(normally r-ready-imp-show-total
+  (and task-imp-show-total no-deps-imp-show-total)
+  ready-imp-show-total)
+
+;; Auto-validate depends on eager validation being solid first
+(normally r-ready-imp-auto-validate
+  (and task-imp-auto-validate completed-bug-eager-validation)
+  ready-imp-auto-validate)
+
+(normally r-ready-imp-play-cache
+  (and task-imp-play-cache no-deps-imp-play-cache)
+  ready-imp-play-cache)
+
+(normally r-ready-imp-play-resolution
+  (and task-imp-play-resolution no-deps-imp-play-resolution)
+  ready-imp-play-resolution)
+
+(normally r-ready-imp-history-details
+  (and task-imp-history-details no-deps-imp-history-details)
+  ready-imp-history-details)
+
+;; ─── Assignment Rules ────────────────────────────────────────────────────────
+
+;; All tasks assigned to claude
+(normally r-assign-bug-eager-validation
+  (and ready-bug-eager-validation agent-claude-available)
+  assign-to-bug-eager-validation-claude)
+
+(normally r-assign-bug-double-errors
+  (and ready-bug-double-errors agent-claude-available)
+  assign-to-bug-double-errors-claude)
+
+(normally r-assign-bug-double-prefix
+  (and ready-bug-double-prefix agent-claude-available)
+  assign-to-bug-double-prefix-claude)
+
+(normally r-assign-bug-zero-duration-scenes
+  (and ready-bug-zero-duration-scenes agent-claude-available)
+  assign-to-bug-zero-duration-scenes-claude)
+
+(normally r-assign-bug-negative-ms
+  (and ready-bug-negative-ms agent-claude-available)
+  assign-to-bug-negative-ms-claude)
+
+(normally r-assign-imp-doctor-hints
+  (and ready-imp-doctor-hints agent-claude-available)
+  assign-to-imp-doctor-hints-claude)
+
+(normally r-assign-imp-transcribe-hint
+  (and ready-imp-transcribe-hint agent-claude-available)
+  assign-to-imp-transcribe-hint-claude)
+
+(normally r-assign-imp-show-total
+  (and ready-imp-show-total agent-claude-available)
+  assign-to-imp-show-total-claude)
+
+(normally r-assign-imp-auto-validate
+  (and ready-imp-auto-validate agent-claude-available)
+  assign-to-imp-auto-validate-claude)
+
+(normally r-assign-imp-play-cache
+  (and ready-imp-play-cache agent-claude-available)
+  assign-to-imp-play-cache-claude)
+
+(normally r-assign-imp-play-resolution
+  (and ready-imp-play-resolution agent-claude-available)
+  assign-to-imp-play-resolution-claude)
+
+(normally r-assign-imp-history-details
+  (and ready-imp-history-details agent-claude-available)
+  assign-to-imp-history-details-claude)
+
+;; ─── Priority: Bugs before improvements, high severity first ─────────────────
+
+;; High severity bug over medium/low bugs
+(prefer r-assign-bug-eager-validation r-assign-bug-double-errors)
+(prefer r-assign-bug-eager-validation r-assign-bug-double-prefix)
+(prefer r-assign-bug-eager-validation r-assign-bug-zero-duration-scenes)
+(prefer r-assign-bug-eager-validation r-assign-bug-negative-ms)
+
+;; Medium severity over low
+(prefer r-assign-bug-double-errors r-assign-bug-double-prefix)
+(prefer r-assign-bug-double-errors r-assign-bug-zero-duration-scenes)
+(prefer r-assign-bug-double-errors r-assign-bug-negative-ms)
+
+;; Bugs over improvements
+(prefer r-assign-bug-double-prefix r-assign-imp-doctor-hints)
+(prefer r-assign-bug-double-prefix r-assign-imp-transcribe-hint)
+(prefer r-assign-bug-double-prefix r-assign-imp-show-total)
+(prefer r-assign-bug-double-prefix r-assign-imp-auto-validate)
+(prefer r-assign-bug-double-prefix r-assign-imp-play-cache)
+(prefer r-assign-bug-double-prefix r-assign-imp-play-resolution)
+(prefer r-assign-bug-double-prefix r-assign-imp-history-details)
