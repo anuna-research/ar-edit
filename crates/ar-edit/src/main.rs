@@ -137,9 +137,15 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     if dep.found {
                         println!("  {} {}", name, dep.version.as_deref().unwrap_or("found"));
                     } else if let Some(fb) = &dep.fallback {
-                        println!("  {} missing (fallback: {})", name, fb);
+                        let hint = dep.install_hint.as_deref()
+                            .map(|h| format!("  Install: {h}"))
+                            .unwrap_or_default();
+                        println!("  {} missing (fallback: {}){}", name, fb, hint);
                     } else {
-                        println!("  {} MISSING", name);
+                        let hint = dep.install_hint.as_deref()
+                            .map(|h| format!("  Install: {h}"))
+                            .unwrap_or_default();
+                        println!("  {} MISSING{}", name, hint);
                     }
                 };
                 println!("Dependencies:");
