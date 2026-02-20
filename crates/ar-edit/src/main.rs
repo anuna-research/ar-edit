@@ -1067,6 +1067,37 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
         ));
     }
 
+    // Auto-validate before rendering
+    let manifest = ar_edit_core::project::read_manifest(&project_dir).map_err(|e| {
+        anyhow::Error::new(
+            CliError::user(e).with_hint(
+                "ensure you are inside an ar-edit project directory",
+            ),
+        )
+    })?;
+    let validation = ar_edit_core::validate::validate(&doc, &manifest, &project_dir);
+    if !validation.valid {
+        if !cli.json {
+            eprintln!("Edit '{}' has {} validation error{}:",
+                args.edit,
+                validation.errors.len(),
+                if validation.errors.len() == 1 { "" } else { "s" }
+            );
+            for err in &validation.errors {
+                eprintln!("  {}: {}", err.shot_id, err.error);
+            }
+        }
+        return Err(anyhow::Error::new(
+            CliError::validation(format!(
+                "edit '{}' failed validation with {} error{}",
+                args.edit,
+                validation.errors.len(),
+                if validation.errors.len() == 1 { "" } else { "s" }
+            ))
+            .with_hint("run `ar-edit validate` to see details"),
+        ));
+    }
+
     let overlay_mode = if args.burn_overlay {
         ar_edit_core::overlay::OverlayMode::Full
     } else {

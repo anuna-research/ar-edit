@@ -1,12 +1,12 @@
 {
-  "task_id": "imp-doctor-hints",
+  "task_id": "imp-auto-validate",
   "token_budget": 8000,
-  "tokens_used": 162,
+  "tokens_used": 171,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "ar-edit doctor reports missing dependencies but doesn't suggest installation commands. Add platform-specific install hints for each dependency. On macOS: 'brew install whisper-cpp', 'brew install --cask vlc', etc. Key file: main.rs cmd_doctor handler (lines 131-151) and project.rs doctor logic.",
-      "token_cost": 73,
+      "content": "Run validation automatically before starting the render pipeline. If validation fails, abort render with the validation errors. Key file: main.rs cmd_render handler (lines 1004-1224) — call validate logic from validate.rs before proceeding.",
+      "token_cost": 60,
       "priority": "PlanMeta"
     },
     {
@@ -20,8 +20,14 @@
       "content": "Modified 28 files (+631, -373): crates/ar-edit-core/src/display.rs, crates/ar-edit-core/src/edit.rs, crates/ar-edit-core/src/import.rs, crates/ar-edit-core/src/validate.rs, crates/ar-edit-core/tests/test_012_segment_addition.rs and 23 more",
       "token_cost": 59,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-imp-doctor-hints-changes",
+      "content": "Modified 2 files (+46, -2): crates/ar-edit-core/src/project.rs, crates/ar-edit/src/main.rs",
+      "token_cost": 22,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-20T02:16:51Z"
+  "constructed_at": "2026-02-20T02:20:08Z"
 }
