@@ -195,12 +195,13 @@ pub fn render_preview(
     doc: &EditDocument,
     project_dir: &Path,
     overlay_mode: OverlayMode,
+    options: &RenderOptions,
 ) -> Result<PathBuf, RenderError> {
     let preview_dir = std::env::temp_dir().join(format!("ar-edit-preview-{}", doc.name));
     std::fs::create_dir_all(&preview_dir)?;
 
     let output_path = preview_dir.join("preview.mp4");
-    render_to_file(doc, project_dir, &output_path, overlay_mode, &RenderOptions::default())?;
+    render_to_file(doc, project_dir, &output_path, overlay_mode, options)?;
 
     Ok(output_path)
 }
