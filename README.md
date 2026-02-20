@@ -106,6 +106,17 @@ Run `ar-edit doctor` to check availability.
 ## Building
 
 ```bash
+make build          # debug build
+make release        # release build
+make install        # install to ~/.cargo/bin
+make test           # run all tests
+make check          # fmt + clippy
+make fmt-fix        # auto-format code
+```
+
+Or directly with cargo:
+
+```bash
 cargo build --release
 ```
 
@@ -123,4 +134,4 @@ See [`specs/`](specs/) for the full specification:
 
 ## License
 
-TBD
+AGPL-3.0 — see [LICENCE](LICENCE).
