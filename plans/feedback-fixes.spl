@@ -228,3 +228,159 @@
 (prefer r-assign-bug-double-prefix r-assign-imp-play-cache)
 (prefer r-assign-bug-double-prefix r-assign-imp-play-resolution)
 (prefer r-assign-bug-double-prefix r-assign-imp-history-details)
+
+(claims agent:claude
+  :at "2026-02-20T01:48:45Z"
+  (given claim-v1-imp-play-resolution-by-claude)
+  (normally r-cl-state-v1-imp-play-resolution-by-claude claim-v1-imp-play-resolution-by-claude state-claimed-v1-imp-play-resolution-by-claude)
+  (normally r-cl-chain-v1-imp-play-resolution-by-claude state-claimed-v1-imp-play-resolution-by-claude claimed-imp-play-resolution)
+)
+
+(claims agent:claude
+  :at "2026-02-20T01:51:45Z"
+  (given completed-imp-play-resolution)
+  (given spawn-result-v1-imp-play-resolution-by-claude)
+)
+
+(claims agent:claude
+  :at "2026-02-20T01:51:50Z"
+  (given claim-v1-bug-eager-validation-by-claude)
+  (normally r-cl-state-v1-bug-eager-validation-by-claude claim-v1-bug-eager-validation-by-claude state-claimed-v1-bug-eager-validation-by-claude)
+  (normally r-cl-chain-v1-bug-eager-validation-by-claude state-claimed-v1-bug-eager-validation-by-claude claimed-bug-eager-validation)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:16:46Z"
+  (given completed-bug-eager-validation)
+  (given spawn-result-v1-bug-eager-validation-by-claude)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:16:51Z"
+  (given claim-v1-imp-doctor-hints-by-claude)
+  (normally r-cl-state-v1-imp-doctor-hints-by-claude claim-v1-imp-doctor-hints-by-claude state-claimed-v1-imp-doctor-hints-by-claude)
+  (normally r-cl-chain-v1-imp-doctor-hints-by-claude state-claimed-v1-imp-doctor-hints-by-claude claimed-imp-doctor-hints)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:20:03Z"
+  (given completed-imp-doctor-hints)
+  (given spawn-result-v1-imp-doctor-hints-by-claude)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:20:08Z"
+  (given claim-v1-imp-auto-validate-by-claude)
+  (normally r-cl-state-v1-imp-auto-validate-by-claude claim-v1-imp-auto-validate-by-claude state-claimed-v1-imp-auto-validate-by-claude)
+  (normally r-cl-chain-v1-imp-auto-validate-by-claude state-claimed-v1-imp-auto-validate-by-claude claimed-imp-auto-validate)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:22:51Z"
+  (given completed-imp-auto-validate)
+  (given spawn-result-v1-imp-auto-validate-by-claude)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:22:56Z"
+  (given claim-v1-imp-show-total-by-claude)
+  (normally r-cl-state-v1-imp-show-total-by-claude claim-v1-imp-show-total-by-claude state-claimed-v1-imp-show-total-by-claude)
+  (normally r-cl-chain-v1-imp-show-total-by-claude state-claimed-v1-imp-show-total-by-claude claimed-imp-show-total)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:26:01Z"
+  (given completed-imp-show-total)
+  (given spawn-result-v1-imp-show-total-by-claude)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:26:06Z"
+  (given claim-v1-bug-double-prefix-by-claude)
+  (normally r-cl-state-v1-bug-double-prefix-by-claude claim-v1-bug-double-prefix-by-claude state-claimed-v1-bug-double-prefix-by-claude)
+  (normally r-cl-chain-v1-bug-double-prefix-by-claude state-claimed-v1-bug-double-prefix-by-claude claimed-bug-double-prefix)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:27:00Z"
+  (given completed-bug-double-prefix)
+  (given spawn-result-v1-bug-double-prefix-by-claude)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:27:05Z"
+  (given claim-v1-imp-history-details-by-claude)
+  (normally r-cl-state-v1-imp-history-details-by-claude claim-v1-imp-history-details-by-claude state-claimed-v1-imp-history-details-by-claude)
+  (normally r-cl-chain-v1-imp-history-details-by-claude state-claimed-v1-imp-history-details-by-claude claimed-imp-history-details)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:31:01Z"
+  (given completed-imp-history-details)
+  (given spawn-result-v1-imp-history-details-by-claude)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:31:06Z"
+  (given claim-v1-bug-negative-ms-by-claude)
+  (normally r-cl-state-v1-bug-negative-ms-by-claude claim-v1-bug-negative-ms-by-claude state-claimed-v1-bug-negative-ms-by-claude)
+  (normally r-cl-chain-v1-bug-negative-ms-by-claude state-claimed-v1-bug-negative-ms-by-claude claimed-bug-negative-ms)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:34:24Z"
+  (given completed-bug-negative-ms)
+  (given spawn-result-v1-bug-negative-ms-by-claude)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:34:29Z"
+  (given claim-v1-imp-play-cache-by-claude)
+  (normally r-cl-state-v1-imp-play-cache-by-claude claim-v1-imp-play-cache-by-claude state-claimed-v1-imp-play-cache-by-claude)
+  (normally r-cl-chain-v1-imp-play-cache-by-claude state-claimed-v1-imp-play-cache-by-claude claimed-imp-play-cache)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:37:56Z"
+  (given completed-imp-play-cache)
+  (given spawn-result-v1-imp-play-cache-by-claude)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:38:01Z"
+  (given claim-v1-bug-zero-duration-scenes-by-claude)
+  (normally r-cl-state-v1-bug-zero-duration-scenes-by-claude claim-v1-bug-zero-duration-scenes-by-claude state-claimed-v1-bug-zero-duration-scenes-by-claude)
+  (normally r-cl-chain-v1-bug-zero-duration-scenes-by-claude state-claimed-v1-bug-zero-duration-scenes-by-claude claimed-bug-zero-duration-scenes)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:40:18Z"
+  (given completed-bug-zero-duration-scenes)
+  (given spawn-result-v1-bug-zero-duration-scenes-by-claude)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:40:23Z"
+  (given claim-v1-bug-double-errors-by-claude)
+  (normally r-cl-state-v1-bug-double-errors-by-claude claim-v1-bug-double-errors-by-claude state-claimed-v1-bug-double-errors-by-claude)
+  (normally r-cl-chain-v1-bug-double-errors-by-claude state-claimed-v1-bug-double-errors-by-claude claimed-bug-double-errors)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:42:27Z"
+  (given completed-bug-double-errors)
+  (given spawn-result-v1-bug-double-errors-by-claude)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:42:32Z"
+  (given claim-v1-imp-transcribe-hint-by-claude)
+  (normally r-cl-state-v1-imp-transcribe-hint-by-claude claim-v1-imp-transcribe-hint-by-claude state-claimed-v1-imp-transcribe-hint-by-claude)
+  (normally r-cl-chain-v1-imp-transcribe-hint-by-claude state-claimed-v1-imp-transcribe-hint-by-claude claimed-imp-transcribe-hint)
+)
+
+(claims agent:claude
+  :at "2026-02-20T02:43:18Z"
+  (given completed-imp-transcribe-hint)
+  (given spawn-result-v1-imp-transcribe-hint-by-claude)
+)
