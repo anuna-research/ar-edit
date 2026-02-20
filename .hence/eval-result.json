@@ -3,23 +3,24 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 2,
-    "insertions": 54,
-    "deletions": 8,
+    "files_changed": 3,
+    "insertions": 113,
+    "deletions": 20,
     "file_list": [
       ".hence/context-manifest.json",
+      "crates/ar-edit/src/cli/mod.rs",
       "crates/ar-edit/src/main.rs"
     ],
     "dirty_files": 0
   },
   "learnings": [
     {
-      "key": "task-imp-history-details-changes",
-      "content": "Modified 2 files (+54, -8): .hence/context-manifest.json, crates/ar-edit/src/main.rs",
+      "key": "task-bug-negative-ms-changes",
+      "content": "Modified 3 files (+113, -20): .hence/context-manifest.json, crates/ar-edit/src/cli/mod.rs, crates/ar-edit/src/main.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/imp-history-details-v1",
-  "evaluated_at": "2026-02-20T02:31:01Z"
+  "branch_name": "hence/bug-negative-ms-v1",
+  "evaluated_at": "2026-02-20T02:34:24Z"
 }
