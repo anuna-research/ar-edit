@@ -1,12 +1,12 @@
 {
-  "task_id": "bug-double-prefix",
+  "task_id": "imp-history-details",
   "token_budget": 8000,
-  "tokens_used": 210,
+  "tokens_used": 236,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "The add command displays 'src-src-001' instead of 'src-001'. The format string likely prepends 'src-' to an id that already includes the prefix. Fix the display formatting in the cmd_add handler (main.rs around lines 120-130).",
-      "token_cost": 56,
+      "content": "Edit history shows operation type and shot ID but not what changed. Show old and new values for trim operations, source and range for add operations, etc. Key file: main.rs cmd_history handler (lines 368-392), models in edit.rs for operation data.",
+      "token_cost": 61,
       "priority": "PlanMeta"
     },
     {
@@ -38,8 +38,14 @@
       "content": "Modified 3 files (+31, -5): .hence/context-manifest.json, crates/ar-edit-core/src/display.rs, crates/ar-edit/src/main.rs",
       "token_cost": 30,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-bug-double-prefix-changes",
+      "content": "Modified 2 files (+12, -6): .hence/context-manifest.json, crates/ar-edit/src/main.rs",
+      "token_cost": 21,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-20T02:26:06Z"
+  "constructed_at": "2026-02-20T02:27:05Z"
 }
