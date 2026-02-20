@@ -1,12 +1,12 @@
 {
-  "task_id": "bug-double-errors",
+  "task_id": "imp-transcribe-hint",
   "token_budget": 8000,
-  "tokens_used": 343,
+  "tokens_used": 326,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Every error message is duplicated in stderr. The error is printed both by the subcommand handler and by the top-level main error handler in main.rs. Fix so only one layer prints errors. Key files: crates/ar-edit/src/main.rs (lines 84-106 for top-level handler, subcommand handlers throughout).",
-      "token_cost": 73,
+      "content": "When whisper model is missing, add a download hint to the error message: 'Hint: download with: whisper-cli --download-model base'. Key file: crates/ar-edit-core/src/transcript.rs where the model-not-found error is generated.",
+      "token_cost": 56,
       "priority": "PlanMeta"
     },
     {
@@ -71,5 +71,5 @@
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-20T02:40:23Z"
+  "constructed_at": "2026-02-20T02:42:32Z"
 }
