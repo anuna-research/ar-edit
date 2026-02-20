@@ -25,6 +25,90 @@ pub struct ValidationError {
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Validate a single source + range combination against the project manifest
+/// and on-disk transcripts / scene indexes.
+///
+/// Returns a list of human-readable error strings (empty if valid).
+/// Does **not** check range ordering or zero duration — those are enforced
+/// by [`crate::edit::validate_range`].
+pub fn validate_shot_source(
+    source_id: &str,
+    range: &ShotRange,
+    manifest: &Manifest,
+    project_dir: &Path,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+
+    let source = match manifest.sources.iter().find(|s| s.id == source_id) {
+        Some(s) => s,
+        None => {
+            errors.push(format!("source '{}' not found in project", source_id));
+            return errors;
+        }
+    };
+
+    match range {
+        ShotRange::Words { from, to } => {
+            if !source.transcribed {
+                errors.push(format!(
+                    "source '{}' has no transcript; cannot use word range",
+                    source.id
+                ));
+            } else if let Some(t) = load_transcript(project_dir, &source.id) {
+                if *from >= t.word_count {
+                    errors.push(format!(
+                        "word index {} exceeds word_count {} for {}",
+                        from, t.word_count, source.id
+                    ));
+                }
+                if *to >= t.word_count {
+                    errors.push(format!(
+                        "word index {} exceeds word_count {} for {}",
+                        to, t.word_count, source.id
+                    ));
+                }
+            }
+        }
+        ShotRange::Scenes { from, to } => {
+            if !source.indexed {
+                errors.push(format!(
+                    "source '{}' has no scene index; cannot use scene range",
+                    source.id
+                ));
+            } else if let Some(idx) = load_index(project_dir, &source.id) {
+                if *from >= idx.scene_count {
+                    errors.push(format!(
+                        "scene index {} exceeds scene_count {} for {}",
+                        from, idx.scene_count, source.id
+                    ));
+                }
+                if *to >= idx.scene_count {
+                    errors.push(format!(
+                        "scene index {} exceeds scene_count {} for {}",
+                        to, idx.scene_count, source.id
+                    ));
+                }
+            }
+        }
+        ShotRange::Time { from_ms, to_ms } => {
+            if *from_ms > source.duration_ms {
+                errors.push(format!(
+                    "time {}ms exceeds duration {}ms for {}",
+                    from_ms, source.duration_ms, source.id
+                ));
+            }
+            if *to_ms > source.duration_ms {
+                errors.push(format!(
+                    "time {}ms exceeds duration {}ms for {}",
+                    to_ms, source.duration_ms, source.id
+                ));
+            }
+        }
+    }
+
+    errors
+}
+
 /// Validate every shot in `doc.snapshot` against the project manifest and
 /// on-disk transcripts / scene indexes.
 ///

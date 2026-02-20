@@ -159,9 +159,9 @@ fn resolve_edit_produces_correct_durations() {
 
     let mut doc = EditDocument::create("test");
     // Words 0-3: starts at 0ms, ends at 1200ms → duration 1200ms
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
     // Words 4-7: starts at 5230ms, ends at 6800ms → duration 1570ms
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 });
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 2);
@@ -179,8 +179,8 @@ fn time_range_shots_have_exact_duration() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 4000 });
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 6000, to_ms: 8500 });
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 4000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 6000, to_ms: 8500 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 2);
@@ -202,8 +202,8 @@ fn resolved_shots_maintain_edit_order() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 });
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 2);
@@ -226,8 +226,8 @@ fn resolve_preview_returns_shots() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
 
     let resolved = render::resolve_preview(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 2);
@@ -259,9 +259,9 @@ fn duration_consistency_across_resolve() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 });
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 2000 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 2000 }).unwrap();
 
     let resolved = render::resolve_preview(&doc, tmp.path()).unwrap();
 
@@ -283,7 +283,7 @@ fn single_shot_edit_duration() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();
 
     let resolved = render::resolve_preview(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 1);

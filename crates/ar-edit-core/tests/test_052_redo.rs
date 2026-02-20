@@ -9,9 +9,9 @@ use tempfile::TempDir;
 
 fn three_shot_doc() -> EditDocument {
     let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
-    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 }).unwrap();
     doc
 }
 
@@ -130,7 +130,7 @@ fn redo_move_op() {
 #[test]
 fn redo_trim_op() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 }).unwrap();
     doc.trim_shot("shot-001", ShotRange::Words { from: 10, to: 90 })
         .unwrap();
 
@@ -150,8 +150,8 @@ fn redo_trim_op() {
 #[test]
 fn redo_remove_op() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
     doc.remove_shot("shot-001").unwrap();
 
     doc.undo().unwrap();
@@ -165,7 +165,7 @@ fn redo_remove_op() {
 #[test]
 fn redo_note_op() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
     doc.add_note("shot-001", "A note").unwrap();
 
     doc.undo().unwrap();

@@ -123,7 +123,7 @@ fn segment_preview_resolves_words_shot() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 1);
@@ -150,7 +150,7 @@ fn segment_preview_resolves_scenes_shot() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 });
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 1);
@@ -175,7 +175,7 @@ fn segment_preview_resolves_time_shot() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 10000 });
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 10000 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 1);
@@ -204,7 +204,7 @@ fn segment_preview_vlc_args_for_segment() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     let shot = &resolved[0];
@@ -242,7 +242,7 @@ fn segment_preview_ffplay_args_for_segment() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 });
+    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     let shot = &resolved[0];
@@ -283,9 +283,9 @@ fn segment_preview_specific_shot_from_multi_shot_edit() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 2 });
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 10000, to_ms: 20000 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 2 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 10000, to_ms: 20000 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 3);
@@ -315,7 +315,7 @@ fn segment_preview_preserves_text_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(
@@ -331,7 +331,7 @@ fn segment_preview_preserves_scene_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(
@@ -352,7 +352,7 @@ fn segment_preview_cross_segment_words() {
 
     let mut doc = EditDocument::create("test-edit");
     // Range spanning both transcript segments
-    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 });
+    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     let shot = &resolved[0];

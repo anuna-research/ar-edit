@@ -9,9 +9,9 @@ use tempfile::TempDir;
 
 fn three_shot_doc() -> EditDocument {
     let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
-    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 }).unwrap();
     doc
 }
 

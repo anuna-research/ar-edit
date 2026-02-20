@@ -566,7 +566,7 @@ mod tests {
         setup_project(tmp.path());
 
         let mut doc = EditDocument::create("test");
-        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
         assert_eq!(resolved.len(), 1);
@@ -587,7 +587,7 @@ mod tests {
         setup_project(tmp.path());
 
         let mut doc = EditDocument::create("test");
-        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
         assert_eq!(resolved.len(), 1);
@@ -607,7 +607,7 @@ mod tests {
         setup_project(tmp.path());
 
         let mut doc = EditDocument::create("test");
-        doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 10000 });
+        doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 10000 }).unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
         assert_eq!(resolved.len(), 1);
@@ -624,9 +624,9 @@ mod tests {
         setup_project(tmp.path());
 
         let mut doc = EditDocument::create("test");
-        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 });
-        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 });
-        doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 3000 });
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
+        doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 3000 }).unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
         assert_eq!(resolved.len(), 3);
@@ -661,7 +661,7 @@ mod tests {
         setup_project(tmp.path());
 
         let mut doc = EditDocument::create("test");
-        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
         doc.add_note("shot-001", "Great take").unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
@@ -676,8 +676,8 @@ mod tests {
 
         let mut doc = EditDocument::create("test");
         // Two shots from same source — transcript should only be loaded once
-        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-        doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 });
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+        doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
         assert_eq!(resolved.len(), 2);
