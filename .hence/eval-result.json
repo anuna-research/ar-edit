@@ -3,24 +3,22 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 3,
-    "insertions": 55,
-    "deletions": 24,
+    "files_changed": 1,
+    "insertions": 81,
+    "deletions": 1,
     "file_list": [
-      ".hence/context-manifest.json",
-      "crates/ar-edit-core/src/render.rs",
-      "crates/ar-edit/src/main.rs"
+      "crates/ar-edit-core/src/index.rs"
     ],
-    "dirty_files": 0
+    "dirty_files": 1
   },
   "learnings": [
     {
-      "key": "task-imp-play-cache-changes",
-      "content": "Modified 3 files (+55, -24): .hence/context-manifest.json, crates/ar-edit-core/src/render.rs, crates/ar-edit/src/main.rs",
+      "key": "task-bug-zero-duration-scenes-changes",
+      "content": "Modified 1 files (+81, -1): crates/ar-edit-core/src/index.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/imp-play-cache-v1",
-  "evaluated_at": "2026-02-20T02:37:55Z"
+  "branch_name": "hence/bug-zero-duration-scenes-v1",
+  "evaluated_at": "2026-02-20T02:40:18Z"
 }
