@@ -753,10 +753,12 @@ fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         .user_err()?;
 
     if cli.json {
+        let total_duration_ms: u64 = resolved.iter().map(|s| s.duration_ms).sum();
         let output = serde_json::json!({
             "name": doc.name,
             "head": doc.head,
             "shot_count": resolved.len(),
+            "total_duration_ms": total_duration_ms,
             "shots": resolved,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
@@ -796,6 +798,14 @@ fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
                     println!("  {:>12} note: {}", "", note.text);
                 }
             }
+
+            let total_ms: u64 = resolved.iter().map(|s| s.duration_ms).sum();
+            println!("  {}", "-".repeat(78));
+            println!(
+                "  Total: {} shots, {}",
+                resolved.len(),
+                ar_edit_core::display::format_time_hms(total_ms),
+            );
         }
     }
 

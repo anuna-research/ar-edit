@@ -375,6 +375,16 @@ pub fn format_time(ms: u64) -> String {
     format!("{minutes:02}:{seconds:02}.{frac:03}")
 }
 
+/// Format milliseconds as `HH:MM:SS.mmm`.
+pub fn format_time_hms(ms: u64) -> String {
+    let total_secs = ms / 1000;
+    let frac = ms % 1000;
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}.{frac:03}")
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
