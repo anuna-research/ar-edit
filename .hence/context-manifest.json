@@ -1,12 +1,12 @@
 {
-  "task_id": "bug-negative-ms",
+  "task_id": "imp-play-cache",
   "token_budget": 8000,
-  "tokens_used": 266,
+  "tokens_used": 289,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Passing negative values like --from-ms -100 causes clap to interpret -100 as a flag, producing a confusing error. Fix by adding allow_hyphen_values=true to the relevant clap arguments in cli/mod.rs, then validate and reject negative values with a clear error message in the handler.",
-      "token_cost": 70,
+      "content": "ar-edit play re-renders from scratch even when a render already exists. Check for existing render output before re-rendering. Compare edit document modification time against render output. Key file: main.rs cmd_play handler (lines 838-926) and playback.rs.",
+      "token_cost": 64,
       "priority": "PlanMeta"
     },
     {
@@ -50,8 +50,14 @@
       "content": "Modified 2 files (+54, -8): .hence/context-manifest.json, crates/ar-edit/src/main.rs",
       "token_cost": 21,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-bug-negative-ms-changes",
+      "content": "Modified 3 files (+113, -20): .hence/context-manifest.json, crates/ar-edit/src/cli/mod.rs, crates/ar-edit/src/main.rs",
+      "token_cost": 29,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-20T02:31:06Z"
+  "constructed_at": "2026-02-20T02:34:29Z"
 }

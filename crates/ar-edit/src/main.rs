@@ -1038,26 +1038,42 @@ fn cmd_play_full(
     };
 
     let shot_count = doc.snapshot.shots.len();
-    if !cli.json {
-        let overlay_label = match overlay_mode {
-            ar_edit_core::overlay::OverlayMode::Clean => "",
-            ar_edit_core::overlay::OverlayMode::Full => " [overlay: full]",
-            ar_edit_core::overlay::OverlayMode::Minimal => " [overlay: minimal]",
-        };
-        let res = resolution.unwrap();
-        println!("Rendering full preview of \"{edit_name}\" ({shot_count} shots) [{}x{}]{overlay_label}...", res.0, res.1);
-    }
 
     // Resolve shots for feedback timings before rendering
     let resolved = ar_edit_core::display::resolve_edit(&doc, project_dir)
         .user_err()?;
 
-    let preview_path = ar_edit_core::render::render_preview(&doc, project_dir, overlay_mode, &render_options)
-        .map_err(|e| {
-            anyhow::Error::new(
-                CliError::system(e).with_hint("run `ar-edit doctor` to check dependencies"),
-            )
-        })?;
+    // Check if a cached render exists and is newer than the edit document
+    let preview_path = ar_edit_core::render::preview_output_path(&doc.name);
+    let edit_mtime = std::fs::metadata(&edit_path(edit_name)).and_then(|m| m.modified());
+    let preview_mtime = std::fs::metadata(&preview_path).and_then(|m| m.modified());
+    let cache_valid = match (edit_mtime, preview_mtime) {
+        (Ok(e), Ok(p)) => p >= e,
+        _ => false,
+    };
+
+    if cache_valid {
+        if !cli.json {
+            println!("Using cached render for \"{edit_name}\" ({shot_count} shots)");
+        }
+    } else {
+        if !cli.json {
+            let overlay_label = match overlay_mode {
+                ar_edit_core::overlay::OverlayMode::Clean => "",
+                ar_edit_core::overlay::OverlayMode::Full => " [overlay: full]",
+                ar_edit_core::overlay::OverlayMode::Minimal => " [overlay: minimal]",
+            };
+            let res = resolution.unwrap();
+            println!("Rendering full preview of \"{edit_name}\" ({shot_count} shots) [{}x{}]{overlay_label}...", res.0, res.1);
+        }
+
+        ar_edit_core::render::render_preview(&doc, project_dir, overlay_mode, &render_options)
+            .map_err(|e| {
+                anyhow::Error::new(
+                    CliError::system(e).with_hint("run `ar-edit doctor` to check dependencies"),
+                )
+            })?;
+    }
 
     let req = playback::PlayRequest {
         file: preview_path.clone(),
