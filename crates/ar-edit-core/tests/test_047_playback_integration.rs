@@ -256,7 +256,7 @@ fn full_playback_flow_simulation() {
 
     // 1. Load edit with a time-range shot
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 3000, to_ms: 8000 });
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 3000, to_ms: 8000 }).unwrap();
 
     // 2. Resolve the shot (time ranges don't need transcript)
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();

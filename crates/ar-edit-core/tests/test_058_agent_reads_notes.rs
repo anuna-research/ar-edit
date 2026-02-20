@@ -84,7 +84,7 @@ fn resolved_shot_includes_single_note() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
     doc.add_note("shot-001", "Perfect delivery, keep as-is").unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
@@ -99,7 +99,7 @@ fn resolved_shot_includes_multiple_notes() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
     doc.add_note("shot-001", "Good energy").unwrap();
     doc.add_note("shot-001", "Trim last 2 seconds").unwrap();
     doc.add_note("shot-001", "Add lower-third graphic").unwrap();
@@ -117,7 +117,7 @@ fn resolved_shot_without_notes_has_empty_vec() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert!(resolved[0].notes.is_empty());
@@ -129,9 +129,9 @@ fn notes_on_multiple_shots_resolved_correctly() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 8 });
-    doc.add_shot("src-001", ShotRange::Words { from: 9, to: 12 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 8 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 9, to: 12 }).unwrap();
 
     doc.add_note("shot-001", "Opening — strong").unwrap();
     doc.add_note("shot-002", "Core content").unwrap();
@@ -154,7 +154,7 @@ fn notes_preserved_alongside_text_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
     doc.add_note("shot-001", "Agent feedback: great intro").unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
@@ -175,7 +175,7 @@ fn notes_in_resolved_json_output() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
     doc.add_note("shot-001", "First note for agent").unwrap();
     doc.add_note("shot-001", "Second note for agent").unwrap();
 
@@ -198,7 +198,7 @@ fn notes_omitted_from_json_when_empty() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     let json = serde_json::to_value(&resolved).unwrap();
@@ -213,8 +213,8 @@ fn resolved_edit_with_notes_after_reorder() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 8 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 8 }).unwrap();
     doc.add_note("shot-001", "Opening note").unwrap();
     doc.add_note("shot-002", "Middle note").unwrap();
 
@@ -240,7 +240,7 @@ fn resolved_edit_roundtrip_with_notes() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
     doc.add_note("shot-001", "Agent context note").unwrap();
 
     // Save, load, then resolve

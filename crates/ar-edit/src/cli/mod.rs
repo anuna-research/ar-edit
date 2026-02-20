@@ -144,28 +144,28 @@ impl Cli {
 #[derive(Args)]
 pub struct RangeArgs {
     /// Start word index
-    #[arg(long, requires = "to_word", conflicts_with_all = ["from_scene", "to_scene", "from_ms", "to_ms"])]
-    pub from_word: Option<u32>,
+    #[arg(long, allow_hyphen_values = true, requires = "to_word", conflicts_with_all = ["from_scene", "to_scene", "from_ms", "to_ms"])]
+    pub from_word: Option<i32>,
 
     /// End word index
-    #[arg(long, requires = "from_word", conflicts_with_all = ["from_scene", "to_scene", "from_ms", "to_ms"])]
-    pub to_word: Option<u32>,
+    #[arg(long, allow_hyphen_values = true, requires = "from_word", conflicts_with_all = ["from_scene", "to_scene", "from_ms", "to_ms"])]
+    pub to_word: Option<i32>,
 
     /// Start scene index
-    #[arg(long, requires = "to_scene", conflicts_with_all = ["from_word", "to_word", "from_ms", "to_ms"])]
-    pub from_scene: Option<u32>,
+    #[arg(long, allow_hyphen_values = true, requires = "to_scene", conflicts_with_all = ["from_word", "to_word", "from_ms", "to_ms"])]
+    pub from_scene: Option<i32>,
 
     /// End scene index
-    #[arg(long, requires = "from_scene", conflicts_with_all = ["from_word", "to_word", "from_ms", "to_ms"])]
-    pub to_scene: Option<u32>,
+    #[arg(long, allow_hyphen_values = true, requires = "from_scene", conflicts_with_all = ["from_word", "to_word", "from_ms", "to_ms"])]
+    pub to_scene: Option<i32>,
 
     /// Start time in milliseconds
-    #[arg(long, requires = "to_ms", conflicts_with_all = ["from_word", "to_word", "from_scene", "to_scene"])]
-    pub from_ms: Option<u64>,
+    #[arg(long, allow_hyphen_values = true, requires = "to_ms", conflicts_with_all = ["from_word", "to_word", "from_scene", "to_scene"])]
+    pub from_ms: Option<i64>,
 
     /// End time in milliseconds
-    #[arg(long, requires = "from_ms", conflicts_with_all = ["from_word", "to_word", "from_scene", "to_scene"])]
-    pub to_ms: Option<u64>,
+    #[arg(long, allow_hyphen_values = true, requires = "from_ms", conflicts_with_all = ["from_word", "to_word", "from_scene", "to_scene"])]
+    pub to_ms: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +368,10 @@ pub struct PlayArgs {
     /// Start at scene index (source playback)
     #[arg(long)]
     pub at_scene: Option<u32>,
+
+    /// Preview resolution (e.g. "1280x720"); defaults to 720p
+    #[arg(long)]
+    pub resolution: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1146,5 +1150,83 @@ mod tests {
         assert_eq!(exit_code::USER_ERROR, 1);
         assert_eq!(exit_code::SYSTEM_ERROR, 2);
         assert_eq!(exit_code::VALIDATION_ERROR, 3);
+    }
+
+    #[test]
+    fn cli_accepts_negative_ms_values() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "edit",
+            "add-segment",
+            "rough-cut",
+            "--source",
+            "src-001",
+            "--from-ms",
+            "-100",
+            "--to-ms",
+            "5000",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Edit {
+                command: EditCommand::AddSegment(ref args),
+            } => {
+                assert_eq!(args.range.from_ms, Some(-100));
+                assert_eq!(args.range.to_ms, Some(5000));
+            }
+            _ => panic!("expected Edit AddSegment"),
+        }
+    }
+
+    #[test]
+    fn cli_accepts_negative_word_values() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "edit",
+            "add-segment",
+            "rough-cut",
+            "--source",
+            "src-001",
+            "--from-word",
+            "-5",
+            "--to-word",
+            "10",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Edit {
+                command: EditCommand::AddSegment(ref args),
+            } => {
+                assert_eq!(args.range.from_word, Some(-5));
+                assert_eq!(args.range.to_word, Some(10));
+            }
+            _ => panic!("expected Edit AddSegment"),
+        }
+    }
+
+    #[test]
+    fn cli_accepts_negative_scene_values() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "edit",
+            "add-segment",
+            "rough-cut",
+            "--source",
+            "src-001",
+            "--from-scene",
+            "-1",
+            "--to-scene",
+            "3",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Edit {
+                command: EditCommand::AddSegment(ref args),
+            } => {
+                assert_eq!(args.range.from_scene, Some(-1));
+                assert_eq!(args.range.to_scene, Some(3));
+            }
+            _ => panic!("expected Edit AddSegment"),
+        }
     }
 }

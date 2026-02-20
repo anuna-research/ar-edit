@@ -9,9 +9,9 @@ use tempfile::TempDir;
 
 fn three_shot_doc() -> EditDocument {
     let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
-    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 }).unwrap();
     doc
 }
 
@@ -28,7 +28,7 @@ fn new_op_after_undo_truncates_redo_history() {
     assert_eq!(doc.ops.len(), 3);
 
     // New edit forks: ops[1] and ops[2] are discarded
-    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 });
+    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
 
     assert_eq!(doc.ops.len(), 2); // op[0] kept + new op
     assert_eq!(doc.head, 1);
@@ -41,7 +41,7 @@ fn new_op_after_undo_truncates_redo_history() {
 fn redo_fails_after_fork() {
     let mut doc = three_shot_doc();
     doc.undo().unwrap();
-    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 });
+    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
 
     let err = doc.redo().unwrap_err();
     assert!(matches!(err, EditError::NothingToRedo));
@@ -58,7 +58,7 @@ fn fork_with_move_op() {
 
     // Cannot move with only 1 shot, so add another first
     // next_shot_id=4 persists, so new shot is shot-004
-    doc.add_shot("src-005", ShotRange::Words { from: 50, to: 60 });
+    doc.add_shot("src-005", ShotRange::Words { from: 50, to: 60 }).unwrap();
     // ops=[add shot-001, add shot-004], head=1
 
     doc.move_shot("shot-004", 0).unwrap();
@@ -106,13 +106,13 @@ fn double_fork() {
 
     // First fork: undo 1 + add new
     doc.undo().unwrap();
-    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 });
+    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
     assert_eq!(doc.ops.len(), 3); // add, add, add(new)
 
     // Second fork: undo 2 + add new
     doc.undo().unwrap();
     doc.undo().unwrap();
-    doc.add_shot("src-005", ShotRange::Scenes { from: 0, to: 1 });
+    doc.add_shot("src-005", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
     assert_eq!(doc.ops.len(), 2); // add(shot-001), add(shot-005)
     assert_eq!(doc.snapshot.shots.len(), 2);
     assert_eq!(doc.snapshot.shots[0].id, "shot-001");
@@ -127,7 +127,7 @@ fn op_ids_reset_correctly_after_fork() {
     doc.undo().unwrap();
     doc.undo().unwrap();
 
-    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 });
+    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
 
     let ids: Vec<u32> = doc.ops.iter().map(|op| op.id).collect();
     assert_eq!(ids, vec![0, 1]); // sequential from 0
@@ -143,7 +143,7 @@ fn save_load_after_fork() {
     let mut doc = three_shot_doc();
     doc.undo().unwrap();
     doc.undo().unwrap();
-    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 });
+    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
     doc.save(&path).unwrap();
 
     let loaded = EditDocument::load(&path).unwrap();
@@ -164,7 +164,7 @@ fn redo_fails_after_load_of_forked_doc() {
 
     let mut doc = three_shot_doc();
     doc.undo().unwrap();
-    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 });
+    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
     doc.save(&path).unwrap();
 
     let mut loaded = EditDocument::load(&path).unwrap();

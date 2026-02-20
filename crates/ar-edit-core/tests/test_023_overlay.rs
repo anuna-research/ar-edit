@@ -440,8 +440,8 @@ fn overlay_integration_full_mode_produces_filter_per_shot() {
     setup_project_for_overlay(tmp.path());
 
     let mut doc = EditDocument::create("overlay-test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
 
     let filters = build_filters_for_edit(&doc, tmp.path(), OverlayMode::Full);
     assert_eq!(filters.len(), 2);
@@ -467,9 +467,9 @@ fn overlay_integration_timecode_offset_accumulates() {
     setup_project_for_overlay(tmp.path());
 
     let mut doc = EditDocument::create("offset-test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });     // 1200ms duration
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 0 });    // 18000ms duration
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 8000 }); // 3000ms
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();     // 1200ms duration
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();    // 45000ms duration
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 8000 }).unwrap(); // 3000ms
 
     let filters = build_filters_for_edit(&doc, tmp.path(), OverlayMode::Minimal);
     assert_eq!(filters.len(), 3);
@@ -482,9 +482,9 @@ fn overlay_integration_timecode_offset_accumulates() {
     let f1 = filters[1].as_ref().unwrap();
     assert!(f1.contains("pts:hms:1.200"), "second shot offset should be 1.200");
 
-    // Third shot: offset = 19.200 (after 1200 + 18000 = 19200ms)
+    // Third shot: offset = 46.200 (after 1200 + 45000 = 46200ms)
     let f2 = filters[2].as_ref().unwrap();
-    assert!(f2.contains("pts:hms:19.200"), "third shot offset should be 19.200");
+    assert!(f2.contains("pts:hms:46.200"), "third shot offset should be 46.200");
 }
 
 #[test]
@@ -493,8 +493,8 @@ fn overlay_integration_clean_mode_no_filters() {
     setup_project_for_overlay(tmp.path());
 
     let mut doc = EditDocument::create("clean-test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
 
     let filters = build_filters_for_edit(&doc, tmp.path(), OverlayMode::Clean);
     assert_eq!(filters.len(), 2);
@@ -510,7 +510,7 @@ fn overlay_integration_minimal_mode_timecode_only() {
     setup_project_for_overlay(tmp.path());
 
     let mut doc = EditDocument::create("minimal-test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
 
     let filters = build_filters_for_edit(&doc, tmp.path(), OverlayMode::Minimal);
     let f = filters[0].as_ref().unwrap();
@@ -528,7 +528,7 @@ fn overlay_integration_snippet_from_transcript() {
     setup_project_for_overlay(tmp.path());
 
     let mut doc = EditDocument::create("snippet-test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
 
     let filters = build_filters_for_edit(&doc, tmp.path(), OverlayMode::Full);
     let f = filters[0].as_ref().unwrap();
@@ -544,7 +544,7 @@ fn overlay_integration_snippet_from_scene_description() {
     setup_project_for_overlay(tmp.path());
 
     let mut doc = EditDocument::create("scene-snippet-test");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
 
     let filters = build_filters_for_edit(&doc, tmp.path(), OverlayMode::Full);
     let f = filters[0].as_ref().unwrap();
@@ -563,7 +563,7 @@ fn overlay_integration_no_snippet_for_time_range() {
     setup_project_for_overlay(tmp.path());
 
     let mut doc = EditDocument::create("time-range-test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 3000 });
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 3000 }).unwrap();
 
     let filters = build_filters_for_edit(&doc, tmp.path(), OverlayMode::Full);
     let f = filters[0].as_ref().unwrap();
@@ -580,9 +580,9 @@ fn overlay_integration_all_filters_have_valid_drawtext_syntax() {
     setup_project_for_overlay(tmp.path());
 
     let mut doc = EditDocument::create("syntax-test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 5000 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
 
     let filters = build_filters_for_edit(&doc, tmp.path(), OverlayMode::Full);
 

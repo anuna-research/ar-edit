@@ -123,7 +123,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 println!("{}", serde_json::to_string_pretty(&added)?);
             } else {
                 for s in &added {
-                    println!("Added source src-{:03}: {}", s.id, s.original_filename);
+                    println!("Added source {}: {}", s.id, s.original_filename);
                 }
             }
             Ok(())
@@ -137,9 +137,15 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     if dep.found {
                         println!("  {} {}", name, dep.version.as_deref().unwrap_or("found"));
                     } else if let Some(fb) = &dep.fallback {
-                        println!("  {} missing (fallback: {})", name, fb);
+                        let hint = dep.install_hint.as_deref()
+                            .map(|h| format!("  Install: {h}"))
+                            .unwrap_or_default();
+                        println!("  {} missing (fallback: {}){}", name, fb, hint);
                     } else {
-                        println!("  {} MISSING", name);
+                        let hint = dep.install_hint.as_deref()
+                            .map(|h| format!("  Install: {h}"))
+                            .unwrap_or_default();
+                        println!("  {} MISSING{}", name, hint);
                     }
                 };
                 println!("Dependencies:");
@@ -182,7 +188,19 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 let path = edit_path(&args.edit);
                 let mut doc = EditDocument::load(&path)?;
                 let range = parse_range(&args.range)?;
-                let shot = doc.add_shot(&args.source, range);
+
+                // Eager validation: check source exists and range is in bounds
+                let project_dir = PathBuf::from(".");
+                let manifest = ar_edit_core::project::read_manifest(&project_dir)?;
+                let errors = ar_edit_core::validate::validate_shot_source(
+                    &args.source, &range, &manifest, &project_dir,
+                );
+                if !errors.is_empty() {
+                    let details: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
+                    anyhow::bail!("invalid segment:\n{}", details.join("\n"));
+                }
+
+                let shot = doc.add_shot(&args.source, range)?;
                 let shot_id = shot.id.clone();
                 doc.save(&path)?;
                 if cli.json {
@@ -224,6 +242,24 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 let path = edit_path(&args.edit);
                 let mut doc = EditDocument::load(&path)?;
                 let range = parse_range(&args.range)?;
+
+                // Find the shot's source for validation
+                let shot_source = doc.snapshot.shots.iter()
+                    .find(|s| s.id == args.shot)
+                    .map(|s| s.source.clone())
+                    .ok_or_else(|| anyhow::anyhow!("shot '{}' not found", args.shot))?;
+
+                // Eager validation: check range is in bounds for the source
+                let project_dir = PathBuf::from(".");
+                let manifest = ar_edit_core::project::read_manifest(&project_dir)?;
+                let errors = ar_edit_core::validate::validate_shot_source(
+                    &shot_source, &range, &manifest, &project_dir,
+                );
+                if !errors.is_empty() {
+                    let details: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
+                    anyhow::bail!("invalid segment:\n{}", details.join("\n"));
+                }
+
                 doc.trim_shot(&args.shot, range)?;
                 doc.save(&path)?;
                 if cli.json {
@@ -303,6 +339,43 @@ fn op_summary(kind: &EditOpKind) -> (&str, &str) {
     }
 }
 
+fn fmt_range(range: &ShotRange) -> String {
+    match range {
+        ShotRange::Words { from, to } => format!("words[{}..{}]", from, to),
+        ShotRange::Scenes { from, to } => format!("scenes[{}..{}]", from, to),
+        ShotRange::Time { from_ms, to_ms } => format!("time[{}ms..{}ms]", from_ms, to_ms),
+    }
+}
+
+fn op_detail(kind: &EditOpKind) -> String {
+    match kind {
+        EditOpKind::AddShot { shot } => {
+            format!("{} {}", shot.source, fmt_range(&shot.range))
+        }
+        EditOpKind::RemoveShot { shot, .. } => {
+            format!("{} {}", shot.source, fmt_range(&shot.range))
+        }
+        EditOpKind::MoveShot { from_position, to_position, .. } => {
+            format!("pos {} \u{2192} {}", from_position, to_position)
+        }
+        EditOpKind::TrimShot { old_range, new_range, .. } => {
+            format!("{} \u{2192} {}", fmt_range(old_range), fmt_range(new_range))
+        }
+        EditOpKind::ReplaceRangeType { old_range, new_range, .. } => {
+            format!("{} \u{2192} {}", fmt_range(old_range), fmt_range(new_range))
+        }
+        EditOpKind::AddNote { note, .. } => {
+            let text = &note.text;
+            let truncated: String = text.chars().take(40).collect();
+            if truncated.len() < text.len() {
+                format!("\"{}…\"", truncated)
+            } else {
+                format!("\"{}\"", text)
+            }
+        }
+    }
+}
+
 /// Load an edit document, producing a user-error with hint on failure.
 fn load_edit(edit: &str) -> anyhow::Result<EditDocument> {
     let path = edit_path(edit);
@@ -337,7 +410,8 @@ fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         let (op_type, shot_id) = op_summary(&undone.op);
-        println!("Undone: #{} {} {} (head \u{2192} {})", undone.id, op_type, shot_id, doc.head);
+        let detail = op_detail(&undone.op);
+        println!("Undone: #{} {} {} — {} (head \u{2192} {})", undone.id, op_type, shot_id, detail, doc.head);
     }
     Ok(())
 }
@@ -360,7 +434,8 @@ fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         let (op_type, shot_id) = op_summary(&redone.op);
-        println!("Redone: #{} {} {} (head \u{2192} {})", redone.id, op_type, shot_id, doc.head);
+        let detail = op_detail(&redone.op);
+        println!("Redone: #{} {} {} — {} (head \u{2192} {})", redone.id, op_type, shot_id, detail, doc.head);
     }
     Ok(())
 }
@@ -380,10 +455,11 @@ fn cmd_history(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         } else {
             for (i, op) in doc.ops.iter().enumerate() {
                 let (op_type, shot_id) = op_summary(&op.op);
+                let detail = op_detail(&op.op);
                 let marker = if i as i32 == doc.head { "\u{2192}" } else { " " };
                 let ts = op.ts.format("%Y-%m-%d %H:%M:%S");
                 let suffix = if (i as i32) > doc.head { "  (undone)" } else { "" };
-                println!("{marker} {id:>3}  {op_type:<19} {shot_id:<12} {ts}{suffix}",
+                println!("{marker} {id:>3}  {op_type:<19} {shot_id:<12} {detail:<40} {ts}{suffix}",
                     id = op.id);
             }
         }
@@ -713,10 +789,12 @@ fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         .user_err()?;
 
     if cli.json {
+        let total_duration_ms: u64 = resolved.iter().map(|s| s.duration_ms).sum();
         let output = serde_json::json!({
             "name": doc.name,
             "head": doc.head,
             "shot_count": resolved.len(),
+            "total_duration_ms": total_duration_ms,
             "shots": resolved,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
@@ -756,6 +834,14 @@ fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
                     println!("  {:>12} note: {}", "", note.text);
                 }
             }
+
+            let total_ms: u64 = resolved.iter().map(|s| s.duration_ms).sum();
+            println!("  {}", "-".repeat(78));
+            println!(
+                "  Total: {} shots, {}",
+                resolved.len(),
+                ar_edit_core::display::format_time_hms(total_ms),
+            );
         }
     }
 
@@ -808,24 +894,18 @@ fn cmd_validate(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else if result.valid {
         println!("Edit '{edit}' is valid.");
-    } else {
-        eprintln!("Edit '{edit}' has {} validation error{}:",
-            result.errors.len(),
-            if result.errors.len() == 1 { "" } else { "s" }
-        );
-        for err in &result.errors {
-            eprintln!("  {}: {}", err.shot_id, err.error);
-        }
     }
 
     if !result.valid {
-        return Err(anyhow::Error::new(
-            CliError::validation(format!(
-                "edit '{edit}' failed validation with {} error{}",
-                result.errors.len(),
-                if result.errors.len() == 1 { "" } else { "s" }
-            ))
-        ));
+        let plural = if result.errors.len() == 1 { "" } else { "s" };
+        let mut msg = format!(
+            "edit '{edit}' failed validation with {} error{plural}:",
+            result.errors.len(),
+        );
+        for err in &result.errors {
+            msg.push_str(&format!("\n  {}: {}", err.shot_id, err.error));
+        }
+        return Err(anyhow::Error::new(CliError::validation(msg)));
     }
 
     Ok(())
@@ -849,7 +929,7 @@ fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
 
     if !is_source && args.shot.is_none() {
         // Full edit playback (REQ-022): render all shots concatenated, then play
-        return cmd_play_full(cli, &project_dir, &args.target, &player, overlay_mode);
+        return cmd_play_full(cli, &project_dir, &args.target, &player, overlay_mode, args.resolution.as_deref());
     }
 
     // Capture shot/source context for feedback before building the request
@@ -931,29 +1011,59 @@ fn cmd_play_full(
     edit_name: &str,
     player: &playback::Player,
     overlay_mode: ar_edit_core::overlay::OverlayMode,
+    resolution_flag: Option<&str>,
 ) -> anyhow::Result<()> {
     let doc = load_edit(edit_name)?;
 
+    // Default preview to 720p; override with --resolution if provided.
+    let resolution = match resolution_flag {
+        Some(s) => Some(ar_edit_core::render::parse_resolution(s).map_err(|e| {
+            anyhow::Error::new(CliError::user(e).with_hint("expected format: WIDTHxHEIGHT, e.g. 1920x1080"))
+        })?),
+        None => Some((1280, 720)),
+    };
+    let render_options = ar_edit_core::render::RenderOptions {
+        resolution,
+        ..Default::default()
+    };
+
     let shot_count = doc.snapshot.shots.len();
-    if !cli.json {
-        let overlay_label = match overlay_mode {
-            ar_edit_core::overlay::OverlayMode::Clean => "",
-            ar_edit_core::overlay::OverlayMode::Full => " [overlay: full]",
-            ar_edit_core::overlay::OverlayMode::Minimal => " [overlay: minimal]",
-        };
-        println!("Rendering full preview of \"{edit_name}\" ({shot_count} shots){overlay_label}...");
-    }
 
     // Resolve shots for feedback timings before rendering
     let resolved = ar_edit_core::display::resolve_edit(&doc, project_dir)
         .user_err()?;
 
-    let preview_path = ar_edit_core::render::render_preview(&doc, project_dir, overlay_mode)
-        .map_err(|e| {
-            anyhow::Error::new(
-                CliError::system(e).with_hint("run `ar-edit doctor` to check dependencies"),
-            )
-        })?;
+    // Check if a cached render exists and is newer than the edit document
+    let preview_path = ar_edit_core::render::preview_output_path(&doc.name);
+    let edit_mtime = std::fs::metadata(&edit_path(edit_name)).and_then(|m| m.modified());
+    let preview_mtime = std::fs::metadata(&preview_path).and_then(|m| m.modified());
+    let cache_valid = match (edit_mtime, preview_mtime) {
+        (Ok(e), Ok(p)) => p >= e,
+        _ => false,
+    };
+
+    if cache_valid {
+        if !cli.json {
+            println!("Using cached render for \"{edit_name}\" ({shot_count} shots)");
+        }
+    } else {
+        if !cli.json {
+            let overlay_label = match overlay_mode {
+                ar_edit_core::overlay::OverlayMode::Clean => "",
+                ar_edit_core::overlay::OverlayMode::Full => " [overlay: full]",
+                ar_edit_core::overlay::OverlayMode::Minimal => " [overlay: minimal]",
+            };
+            let res = resolution.unwrap();
+            println!("Rendering full preview of \"{edit_name}\" ({shot_count} shots) [{}x{}]{overlay_label}...", res.0, res.1);
+        }
+
+        ar_edit_core::render::render_preview(&doc, project_dir, overlay_mode, &render_options)
+            .map_err(|e| {
+                anyhow::Error::new(
+                    CliError::system(e).with_hint("run `ar-edit doctor` to check dependencies"),
+                )
+            })?;
+    }
 
     let req = playback::PlayRequest {
         file: preview_path.clone(),
@@ -1010,6 +1120,31 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
         return Err(anyhow::Error::new(
             CliError::user(format!("edit '{}' has no shots", args.edit))
                 .with_hint("add shots with `ar-edit edit add-segment`"),
+        ));
+    }
+
+    // Auto-validate before rendering
+    let manifest = ar_edit_core::project::read_manifest(&project_dir).map_err(|e| {
+        anyhow::Error::new(
+            CliError::user(e).with_hint(
+                "ensure you are inside an ar-edit project directory",
+            ),
+        )
+    })?;
+    let validation = ar_edit_core::validate::validate(&doc, &manifest, &project_dir);
+    if !validation.valid {
+        let plural = if validation.errors.len() == 1 { "" } else { "s" };
+        let mut msg = format!(
+            "edit '{}' failed validation with {} error{plural}:",
+            args.edit,
+            validation.errors.len(),
+        );
+        for err in &validation.errors {
+            msg.push_str(&format!("\n  {}: {}", err.shot_id, err.error));
+        }
+        return Err(anyhow::Error::new(
+            CliError::validation(msg)
+                .with_hint("run `ar-edit validate` to see details"),
         ));
     }
 
@@ -1627,11 +1762,20 @@ fn cmd_from_transcript(cli: &Cli, file: &Path, output: Option<&str>) -> anyhow::
 /// Convert CLI RangeArgs into a ShotRange.
 fn parse_range(range: &RangeArgs) -> anyhow::Result<ShotRange> {
     if let (Some(from), Some(to)) = (range.from_word, range.to_word) {
-        Ok(ShotRange::Words { from, to })
+        if from < 0 || to < 0 {
+            anyhow::bail!("--from-word and --to-word must be non-negative");
+        }
+        Ok(ShotRange::Words { from: from as u32, to: to as u32 })
     } else if let (Some(from), Some(to)) = (range.from_scene, range.to_scene) {
-        Ok(ShotRange::Scenes { from, to })
+        if from < 0 || to < 0 {
+            anyhow::bail!("--from-scene and --to-scene must be non-negative");
+        }
+        Ok(ShotRange::Scenes { from: from as u32, to: to as u32 })
     } else if let (Some(from_ms), Some(to_ms)) = (range.from_ms, range.to_ms) {
-        Ok(ShotRange::Time { from_ms, to_ms })
+        if from_ms < 0 || to_ms < 0 {
+            anyhow::bail!("--from-ms and --to-ms must be non-negative");
+        }
+        Ok(ShotRange::Time { from_ms: from_ms as u64, to_ms: to_ms as u64 })
     } else {
         anyhow::bail!(
             "no range specified (use --from-word/--to-word, --from-scene/--to-scene, or --from-ms/--to-ms)"

@@ -179,6 +179,15 @@ pub fn compute_progress(
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Return the path where a preview render for the given edit name would be stored.
+///
+/// The preview lives in a temp directory named after the edit so it persists
+/// across invocations and can be reused when the edit hasn't changed.
+pub fn preview_output_path(edit_name: &str) -> PathBuf {
+    let preview_dir = std::env::temp_dir().join(format!("ar-edit-preview-{}", edit_name));
+    preview_dir.join("preview.mp4")
+}
+
 /// Render a full edit preview by extracting and concatenating all shots via ffmpeg.
 ///
 /// Steps:
@@ -195,12 +204,13 @@ pub fn render_preview(
     doc: &EditDocument,
     project_dir: &Path,
     overlay_mode: OverlayMode,
+    options: &RenderOptions,
 ) -> Result<PathBuf, RenderError> {
-    let preview_dir = std::env::temp_dir().join(format!("ar-edit-preview-{}", doc.name));
-    std::fs::create_dir_all(&preview_dir)?;
-
-    let output_path = preview_dir.join("preview.mp4");
-    render_to_file(doc, project_dir, &output_path, overlay_mode, &RenderOptions::default())?;
+    let output_path = preview_output_path(&doc.name);
+    if let Some(preview_dir) = output_path.parent() {
+        std::fs::create_dir_all(preview_dir)?;
+    }
+    render_to_file(doc, project_dir, &output_path, overlay_mode, options)?;
 
     Ok(output_path)
 }

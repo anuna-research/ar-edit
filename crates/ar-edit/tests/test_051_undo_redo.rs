@@ -33,9 +33,9 @@ fn setup_project(name: &str) -> (TempDir, std::path::PathBuf) {
 /// Build a document with three add_shot ops (head=2).
 fn doc_with_three_shots() -> EditDocument {
     let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
-    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 }).unwrap();
     doc
 }
 
@@ -292,7 +292,7 @@ fn new_op_after_undo_truncates_redo_history() {
     assert_eq!(doc.head, 0);
 
     // Add a new shot — this forks: ops[1] and ops[2] are discarded
-    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 });
+    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
     doc.save(&edit_path).unwrap();
 
     // Verify fork happened

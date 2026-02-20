@@ -113,7 +113,7 @@ fn resolve_words_shot_produces_timestamps() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 1);
@@ -128,7 +128,7 @@ fn resolve_words_shot_has_text_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(
@@ -144,7 +144,7 @@ fn resolve_words_cross_segment() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 });
+    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 }).unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 540);
@@ -163,7 +163,7 @@ fn resolve_scenes_shot_produces_timestamps() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 0);
@@ -177,7 +177,7 @@ fn resolve_scenes_shot_has_scene_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(
@@ -188,15 +188,16 @@ fn resolve_scenes_shot_has_scene_preview() {
 }
 
 #[test]
-fn resolve_scenes_without_descriptions_shows_fallback() {
+fn resolve_scenes_partial_descriptions_only_shows_described() {
     let tmp = TempDir::new().unwrap();
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 1 });
+    // Scenes 1 (no description) and 2 (has description) — only scene 2 contributes
+    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 2 }).unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
-    assert_eq!(resolved[0].scene_preview.as_deref(), Some("scenes 1..1"));
+    assert_eq!(resolved[0].scene_preview.as_deref(), Some("Close-up interview"));
 }
 
 // -- Time resolution ----------------------------------------------------------
@@ -207,7 +208,7 @@ fn resolve_time_shot_is_passthrough() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 10000 });
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 10000 }).unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 5000);
@@ -225,9 +226,9 @@ fn resolve_mixed_shots_from_different_sources() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 });
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 3000 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 3000 }).unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 3);
@@ -245,7 +246,7 @@ fn resolve_preserves_notes() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
     doc.add_note("shot-001", "Great take").unwrap();
     doc.add_note("shot-001", "Use this as opener").unwrap();
 
@@ -275,7 +276,7 @@ fn resolved_shot_has_all_fields() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 });
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     let r = &resolved[0];

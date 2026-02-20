@@ -125,9 +125,9 @@ fn full_playback_resolves_all_shots_in_order() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 });
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 10000, to_ms: 15000 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 10000, to_ms: 15000 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 3);
@@ -148,15 +148,15 @@ fn full_playback_total_duration_is_sum_of_shots() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });     // 0..1200 = 1200ms
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 0 });    // 0..18000 = 18000ms
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 8000 }); // 3000ms
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();     // 0..1200 = 1200ms
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();    // 0..45000 = 45000ms
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 8000 }).unwrap(); // 3000ms
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
 
     let total: u64 = resolved.iter().map(|s| s.duration_ms).sum();
-    assert_eq!(total, 1200 + 18000 + 3000);
-    assert_eq!(total, 22200);
+    assert_eq!(total, 1200 + 45000 + 3000);
+    assert_eq!(total, 49200);
 }
 
 #[test]
@@ -165,9 +165,9 @@ fn full_playback_mixed_range_types() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("mixed-edit");
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 2, to: 2 });
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 500 });
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 2 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 500 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 3);
@@ -177,10 +177,10 @@ fn full_playback_mixed_range_types() {
     assert_eq!(resolved[0].end_ms, 6800);
     assert_eq!(resolved[0].duration_ms, 1570);
 
-    // Scenes: scene 2 (45000..90000)
-    assert_eq!(resolved[1].start_ms, 45000);
+    // Scenes: scenes 1-2 (18000..90000)
+    assert_eq!(resolved[1].start_ms, 18000);
     assert_eq!(resolved[1].end_ms, 90000);
-    assert_eq!(resolved[1].duration_ms, 45000);
+    assert_eq!(resolved[1].duration_ms, 72000);
 
     // Time: direct passthrough
     assert_eq!(resolved[2].start_ms, 0);
@@ -198,8 +198,8 @@ fn full_playback_resolve_preview_returns_shots() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("preview-test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
 
     let resolved = render::resolve_preview(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 2);
@@ -228,9 +228,9 @@ fn full_playback_shot_timings_are_contiguous() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("timeline");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });     // 1200ms
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 0 });    // 18000ms
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 8000 }); // 3000ms
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();     // 1200ms
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();    // 45000ms
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 8000 }).unwrap(); // 3000ms
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
 
@@ -249,8 +249,8 @@ fn full_playback_shot_timings_are_contiguous() {
 
     // Verify contiguous timeline
     assert_eq!(timings[0], ("shot-001".into(), "src-001".into(), 0, 1200));
-    assert_eq!(timings[1], ("shot-002".into(), "src-002".into(), 1200, 19200));
-    assert_eq!(timings[2], ("shot-003".into(), "src-001".into(), 19200, 22200));
+    assert_eq!(timings[1], ("shot-002".into(), "src-002".into(), 1200, 46200));
+    assert_eq!(timings[2], ("shot-003".into(), "src-001".into(), 46200, 49200));
 
     // Each shot starts where the previous one ended
     for i in 1..timings.len() {
@@ -264,8 +264,8 @@ fn full_playback_edit_feedback_finds_correct_shot() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("feedback-test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
 
@@ -385,9 +385,9 @@ fn full_playback_resolved_shots_have_previews() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("preview-test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 3000 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 3000 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
 

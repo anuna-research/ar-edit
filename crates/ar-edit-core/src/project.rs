@@ -52,6 +52,8 @@ pub struct DepStatus {
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_hint: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +145,7 @@ pub fn doctor() -> DoctorResult {
             } else {
                 None
             },
+            install_hint: install_hint_for("vlc"),
         }
     };
 
@@ -306,6 +309,7 @@ fn check_dep(name: &str) -> DepStatus {
                 path: Some(path),
                 version,
                 fallback: None,
+                install_hint: None,
             }
         }
         Err(_) => DepStatus {
@@ -313,7 +317,35 @@ fn check_dep(name: &str) -> DepStatus {
             path: None,
             version: None,
             fallback: None,
+            install_hint: install_hint_for(name),
         },
+    }
+}
+
+/// Return a platform-specific install hint for a missing dependency.
+fn install_hint_for(dep: &str) -> Option<String> {
+    if cfg!(target_os = "macos") {
+        let cmd = match dep {
+            "ffmpeg" => "brew install ffmpeg",
+            "ffprobe" => "brew install ffmpeg",
+            "whisper-cli" => "brew install whisper-cpp",
+            "vlc" => "brew install --cask vlc",
+            "ffplay" => "brew install ffmpeg",
+            _ => return None,
+        };
+        Some(cmd.to_string())
+    } else if cfg!(target_os = "linux") {
+        let cmd = match dep {
+            "ffmpeg" => "sudo apt install ffmpeg",
+            "ffprobe" => "sudo apt install ffmpeg",
+            "whisper-cli" => "see https://github.com/ggerganov/whisper.cpp",
+            "vlc" => "sudo apt install vlc",
+            "ffplay" => "sudo apt install ffmpeg",
+            _ => return None,
+        };
+        Some(cmd.to_string())
+    } else {
+        None
     }
 }
 
@@ -538,24 +570,28 @@ mod tests {
                 path: Some(PathBuf::from("/usr/bin/ffmpeg")),
                 version: Some("6.1".into()),
                 fallback: None,
+                install_hint: None,
             },
             ffprobe: DepStatus {
                 found: true,
                 path: Some(PathBuf::from("/usr/bin/ffprobe")),
                 version: Some("6.1".into()),
                 fallback: None,
+                install_hint: None,
             },
             whisper: DepStatus {
                 found: true,
                 path: Some(PathBuf::from("/usr/local/bin/whisper-cli")),
                 version: Some("1.5.4".into()),
                 fallback: None,
+                install_hint: None,
             },
             vlc: DepStatus {
                 found: false,
                 path: None,
                 version: None,
                 fallback: Some("ffplay".into()),
+                install_hint: Some("brew install --cask vlc".into()),
             },
         };
 
@@ -564,9 +600,11 @@ mod tests {
         assert_eq!(json["ffmpeg"]["version"], "6.1");
         assert_eq!(json["vlc"]["found"], false);
         assert_eq!(json["vlc"]["fallback"], "ffplay");
+        assert_eq!(json["vlc"]["install_hint"], "brew install --cask vlc");
         // Optional fields absent when None
         assert!(json["vlc"].get("path").is_none());
         assert!(json["vlc"].get("version").is_none());
+        assert!(json["ffmpeg"].get("install_hint").is_none());
 
         let back: DoctorResult = serde_json::from_value(json).unwrap();
         assert_eq!(back, result);

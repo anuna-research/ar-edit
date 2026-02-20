@@ -239,6 +239,10 @@ fn parse_scene_timestamps(stderr: &str) -> Result<Vec<u64>, IndexError> {
     Ok(timestamps)
 }
 
+/// Minimum scene duration in milliseconds. Scenes shorter than this are merged
+/// into the previous scene to avoid zero-duration or near-zero-duration entries.
+const MIN_SCENE_DURATION_MS: u64 = 500;
+
 /// Build `Scene` structs from sorted scene-change timestamps.
 ///
 /// Scene boundaries are derived as:
@@ -249,6 +253,9 @@ fn parse_scene_timestamps(stderr: &str) -> Result<Vec<u64>, IndexError> {
 ///
 /// If no scene changes are detected, a single scene spanning the full duration
 /// is returned. Returns an empty vec if `duration_ms` is 0.
+///
+/// Scenes shorter than `MIN_SCENE_DURATION_MS` (500 ms) are merged into the
+/// previous scene by extending its `end_ms`.
 fn build_scenes(timestamps: &[u64], duration_ms: u64) -> Vec<Scene> {
     if duration_ms == 0 {
         return vec![];
@@ -279,7 +286,24 @@ fn build_scenes(timestamps: &[u64], duration_ms: u64) -> Vec<Scene> {
         description: None,
     });
 
-    scenes
+    // Merge sub-threshold scenes into the previous scene.
+    let mut merged: Vec<Scene> = Vec::with_capacity(scenes.len());
+    for scene in scenes {
+        let duration = scene.end_ms - scene.start_ms;
+        if duration < MIN_SCENE_DURATION_MS && !merged.is_empty() {
+            // Extend the previous scene's end to absorb this short scene.
+            merged.last_mut().unwrap().end_ms = scene.end_ms;
+        } else {
+            merged.push(scene);
+        }
+    }
+
+    // Re-index after merging.
+    for (i, scene) in merged.iter_mut().enumerate() {
+        scene.index = i as u32;
+    }
+
+    merged
 }
 
 /// Collect and deduplicate thumbnail timestamps from scene boundaries
@@ -472,6 +496,62 @@ mod tests {
         for (i, scene) in scenes.iter().enumerate() {
             assert_eq!(scene.index, i as u32);
         }
+    }
+
+    #[test]
+    fn build_scenes_merges_zero_duration_scene() {
+        // Two timestamps at the same ms produce a zero-width scene that should be merged.
+        // ts=128100 appears twice — the guard `ts > start` filters the duplicate,
+        // but if two distinct timestamps are <500ms apart, the short scene is merged.
+        let scenes = build_scenes(&[10000, 10200], 60000);
+
+        // 10200 - 10000 = 200ms < 500ms, so the scene [10000, 10200) is merged
+        // into [0, 10200). Then [10200, 60000).
+        assert_eq!(scenes.len(), 2);
+        assert_eq!(scenes[0].start_ms, 0);
+        assert_eq!(scenes[0].end_ms, 10200);
+        assert_eq!(scenes[1].start_ms, 10200);
+        assert_eq!(scenes[1].end_ms, 60000);
+    }
+
+    #[test]
+    fn build_scenes_merges_sub_threshold_final_scene() {
+        // Final scene is shorter than 500ms — merged into the previous one.
+        let scenes = build_scenes(&[59800], 60000);
+
+        // [59800, 60000) = 200ms < 500ms, merged into [0, 60000).
+        assert_eq!(scenes.len(), 1);
+        assert_eq!(scenes[0].start_ms, 0);
+        assert_eq!(scenes[0].end_ms, 60000);
+    }
+
+    #[test]
+    fn build_scenes_keeps_scenes_above_threshold() {
+        // All scenes are >= 500ms, nothing merged.
+        let scenes = build_scenes(&[5000, 10000], 60000);
+
+        assert_eq!(scenes.len(), 3);
+        assert_eq!(scenes[0].end_ms, 5000);
+        assert_eq!(scenes[1].end_ms, 10000);
+        assert_eq!(scenes[2].end_ms, 60000);
+    }
+
+    #[test]
+    fn build_scenes_reindexes_after_merge() {
+        // Multiple sub-threshold scenes get merged; indices should be sequential.
+        let scenes = build_scenes(&[100, 200, 300, 50000], 60000);
+
+        // [0,100)=100ms is first scene so kept, [100,200)=100ms merged into prev,
+        // [200,300)=100ms merged into prev → [0, 300).
+        // Then [300, 50000) and [50000, 60000) are above threshold.
+        assert_eq!(scenes.len(), 3);
+        assert_eq!(scenes[0].index, 0);
+        assert_eq!(scenes[1].index, 1);
+        assert_eq!(scenes[2].index, 2);
+        assert_eq!(scenes[0].start_ms, 0);
+        assert_eq!(scenes[0].end_ms, 300);
+        assert_eq!(scenes[1].start_ms, 300);
+        assert_eq!(scenes[1].end_ms, 50000);
     }
 
     // -- collect_timestamps ---------------------------------------------------

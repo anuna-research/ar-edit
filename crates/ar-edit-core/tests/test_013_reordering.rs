@@ -10,9 +10,9 @@ use tempfile::TempDir;
 /// Helper: create a document with three shots.
 fn three_shot_doc() -> EditDocument {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
-    doc.add_shot("src-003", ShotRange::Time { from_ms: 5000, to_ms: 10000 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-003", ShotRange::Time { from_ms: 5000, to_ms: 10000 }).unwrap();
     doc
 }
 
