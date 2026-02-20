@@ -343,6 +343,43 @@ fn op_summary(kind: &EditOpKind) -> (&str, &str) {
     }
 }
 
+fn fmt_range(range: &ShotRange) -> String {
+    match range {
+        ShotRange::Words { from, to } => format!("words[{}..{}]", from, to),
+        ShotRange::Scenes { from, to } => format!("scenes[{}..{}]", from, to),
+        ShotRange::Time { from_ms, to_ms } => format!("time[{}ms..{}ms]", from_ms, to_ms),
+    }
+}
+
+fn op_detail(kind: &EditOpKind) -> String {
+    match kind {
+        EditOpKind::AddShot { shot } => {
+            format!("{} {}", shot.source, fmt_range(&shot.range))
+        }
+        EditOpKind::RemoveShot { shot, .. } => {
+            format!("{} {}", shot.source, fmt_range(&shot.range))
+        }
+        EditOpKind::MoveShot { from_position, to_position, .. } => {
+            format!("pos {} \u{2192} {}", from_position, to_position)
+        }
+        EditOpKind::TrimShot { old_range, new_range, .. } => {
+            format!("{} \u{2192} {}", fmt_range(old_range), fmt_range(new_range))
+        }
+        EditOpKind::ReplaceRangeType { old_range, new_range, .. } => {
+            format!("{} \u{2192} {}", fmt_range(old_range), fmt_range(new_range))
+        }
+        EditOpKind::AddNote { note, .. } => {
+            let text = &note.text;
+            let truncated: String = text.chars().take(40).collect();
+            if truncated.len() < text.len() {
+                format!("\"{}…\"", truncated)
+            } else {
+                format!("\"{}\"", text)
+            }
+        }
+    }
+}
+
 /// Load an edit document, producing a user-error with hint on failure.
 fn load_edit(edit: &str) -> anyhow::Result<EditDocument> {
     let path = edit_path(edit);
@@ -377,7 +414,8 @@ fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         let (op_type, shot_id) = op_summary(&undone.op);
-        println!("Undone: #{} {} {} (head \u{2192} {})", undone.id, op_type, shot_id, doc.head);
+        let detail = op_detail(&undone.op);
+        println!("Undone: #{} {} {} — {} (head \u{2192} {})", undone.id, op_type, shot_id, detail, doc.head);
     }
     Ok(())
 }
@@ -400,7 +438,8 @@ fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         let (op_type, shot_id) = op_summary(&redone.op);
-        println!("Redone: #{} {} {} (head \u{2192} {})", redone.id, op_type, shot_id, doc.head);
+        let detail = op_detail(&redone.op);
+        println!("Redone: #{} {} {} — {} (head \u{2192} {})", redone.id, op_type, shot_id, detail, doc.head);
     }
     Ok(())
 }
@@ -420,10 +459,11 @@ fn cmd_history(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         } else {
             for (i, op) in doc.ops.iter().enumerate() {
                 let (op_type, shot_id) = op_summary(&op.op);
+                let detail = op_detail(&op.op);
                 let marker = if i as i32 == doc.head { "\u{2192}" } else { " " };
                 let ts = op.ts.format("%Y-%m-%d %H:%M:%S");
                 let suffix = if (i as i32) > doc.head { "  (undone)" } else { "" };
-                println!("{marker} {id:>3}  {op_type:<19} {shot_id:<12} {ts}{suffix}",
+                println!("{marker} {id:>3}  {op_type:<19} {shot_id:<12} {detail:<40} {ts}{suffix}",
                     id = op.id);
             }
         }
