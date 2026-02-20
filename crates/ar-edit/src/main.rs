@@ -171,6 +171,9 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         },
         Commands::Edit { command } => match command {
             EditCommand::Create { name } => {
+                if name.trim().is_empty() {
+                    anyhow::bail!("edit name must not be empty");
+                }
                 let path = edit_path(name);
                 if path.exists() {
                     anyhow::bail!("edit '{}' already exists", name);
@@ -853,6 +856,9 @@ fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
 // ---------------------------------------------------------------------------
 
 fn cmd_note(cli: &Cli, edit: &str, shot: &str, text: &str) -> anyhow::Result<()> {
+    if text.trim().is_empty() {
+        anyhow::bail!("note text must not be empty");
+    }
     let path = edit_path(edit);
     let mut doc = load_edit(edit)?;
 
@@ -928,6 +934,10 @@ fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
     let overlay_mode = ar_edit_core::overlay::OverlayMode::from_flag(args.overlay.as_deref());
 
     if !is_source && args.shot.is_none() {
+        // Warn if seek flags are provided for full edit playback
+        if args.at.is_some() || args.at_word.is_some() || args.at_scene.is_some() {
+            eprintln!("Warning: --at, --at-word, and --at-scene flags are ignored for full edit playback");
+        }
         // Full edit playback (REQ-022): render all shots concatenated, then play
         return cmd_play_full(cli, &project_dir, &args.target, &player, overlay_mode, args.resolution.as_deref());
     }
@@ -1162,6 +1172,17 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
         .transpose()
         .user_err()?;
 
+    if let Some(ref codec) = args.codec {
+        let known = ["h264", "h265", "vp9", "av1", "prores"];
+        let normalized = ar_edit_core::render::normalize_codec(codec);
+        if !known.contains(&normalized) {
+            anyhow::bail!(
+                "unknown video codec '{}' — expected one of: h264, h265, vp9, av1, prores",
+                codec
+            );
+        }
+    }
+
     let render_options = ar_edit_core::render::RenderOptions {
         video_codec: args.codec.clone(),
         resolution,
@@ -1181,8 +1202,11 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
 
     // Ensure parent directory exists for the output file
     if let Some(parent) = args.output.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            anyhow::bail!(
+                "output directory '{}' does not exist",
+                parent.display()
+            );
         }
     }
 
@@ -1362,6 +1386,24 @@ fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
     let range = parse_range(&args.range)?;
     let project_dir = PathBuf::from(".");
 
+    // Eager validation: check range ordering (from <= to) and non-zero duration
+    ar_edit_core::edit::validate_range(&range).user_err()?;
+
+    // Eager validation: check source exists and range is in bounds
+    let manifest = ar_edit_core::project::read_manifest(&project_dir)?;
+    let errors = ar_edit_core::validate::validate_shot_source(
+        &args.source_id, &range, &manifest, &project_dir,
+    );
+    if !errors.is_empty() {
+        let details: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
+        anyhow::bail!("invalid marker:\n{}", details.join("\n"));
+    }
+
+    // Validate label is not empty
+    if args.label.trim().is_empty() {
+        anyhow::bail!("label must not be empty");
+    }
+
     let marker = ar_edit_core::marker::add_marker(
         &project_dir,
         &args.source_id,
@@ -1535,6 +1577,18 @@ fn cmd_index_run(cli: &Cli, args: &cli::IndexRunArgs) -> anyhow::Result<()> {
         .map(|i| i as u32)
         .unwrap_or(manifest.defaults.thumbnail_interval_sec);
 
+    if let Some(interval) = args.interval {
+        if interval <= 0.0 {
+            anyhow::bail!("--interval must be greater than 0");
+        }
+    }
+
+    if let Some(parallel) = args.parallel {
+        if parallel == 0 {
+            anyhow::bail!("--parallel must be greater than 0");
+        }
+    }
+
     let sources: Vec<Source> = if args.all {
         manifest
             .sources
@@ -1567,7 +1621,7 @@ fn cmd_index_run(cli: &Cli, args: &cli::IndexRunArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let parallel = args.parallel.unwrap_or(1).max(1);
+    let parallel = args.parallel.unwrap_or(1);
     let mut indexed = Vec::new();
 
     let index_err = |e: ar_edit_core::index::IndexError| -> anyhow::Error {
@@ -1730,6 +1784,13 @@ fn cmd_index_set_description(
 fn cmd_from_transcript(cli: &Cli, file: &Path, output: Option<&str>) -> anyhow::Result<()> {
     let doc = ar_edit_core::import::from_transcript(file, output)
         .user_err()?;
+
+    if doc.snapshot.shots.is_empty() {
+        anyhow::bail!(
+            "no segments found in '{}' — expected annotated transcript format (ar-edit annotation comments)",
+            file.display()
+        );
+    }
 
     let edits_dir = PathBuf::from("edits");
     std::fs::create_dir_all(&edits_dir)?;

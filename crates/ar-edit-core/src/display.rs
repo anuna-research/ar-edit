@@ -119,23 +119,38 @@ pub fn resolve_markers(
         let transcript = load_transcript_cached(project_dir, source_id, &mut transcripts);
         let index = load_index_cached(project_dir, source_id, &mut indices);
 
-        let (start_ms, end_ms) = resolve::resolve_range(
+        let resolve_result = resolve::resolve_range(
             &marker.range,
             transcript.as_ref(),
             index.as_ref(),
-        )?;
+        );
+
+        // If resolution fails (e.g. transcript/index missing), fall back to
+        // placeholder values so the marker still appears in listings.
+        let (start_ms, end_ms, fallback) = match resolve_result {
+            Ok((s, e)) => (s, e, false),
+            Err(_) => (0, 0, true),
+        };
         let duration_ms = end_ms.saturating_sub(start_ms);
 
         let text_preview = match &marker.range {
             ShotRange::Words { from, to } => {
-                transcript.as_ref().map(|t| extract_text_preview(t, *from, *to))
+                if fallback {
+                    Some(format!("(transcript not available) words {}..{}", from, to))
+                } else {
+                    transcript.as_ref().map(|t| extract_text_preview(t, *from, *to))
+                }
             }
             _ => None,
         };
 
         let scene_preview = match &marker.range {
             ShotRange::Scenes { from, to } => {
-                index.as_ref().map(|idx| extract_scene_preview(idx, *from, *to))
+                if fallback {
+                    Some(format!("(index not available) scenes {}..{}", from, to))
+                } else {
+                    index.as_ref().map(|idx| extract_scene_preview(idx, *from, *to))
+                }
             }
             _ => None,
         };
@@ -816,5 +831,86 @@ mod tests {
 
         let back: InterleavedTranscript = serde_json::from_value(json).unwrap();
         assert_eq!(back.items.len(), 3);
+    }
+
+    // -- resolve_markers: missing transcript (Bug #7) -------------------------
+
+    #[test]
+    fn resolve_markers_word_range_without_transcript() {
+        let tmp = TempDir::new().unwrap();
+        // No transcript file on disk — only create the project dirs
+        std::fs::create_dir_all(tmp.path().join("transcripts")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("index")).unwrap();
+
+        let markers = vec![Marker {
+            id: "mark-001".into(),
+            range: ShotRange::Words { from: 0, to: 10 },
+            label: "select".into(),
+            note: None,
+            created: "2026-02-19T14:00:00Z".parse().unwrap(),
+        }];
+
+        // Previously this would crash with TranscriptRequired error.
+        let resolved = resolve_markers(&markers, "src-missing", tmp.path()).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].id, "mark-001");
+        assert_eq!(resolved[0].start_ms, 0);
+        assert_eq!(resolved[0].end_ms, 0);
+        assert_eq!(resolved[0].duration_ms, 0);
+        assert_eq!(
+            resolved[0].text_preview.as_deref(),
+            Some("(transcript not available) words 0..10")
+        );
+        assert!(resolved[0].scene_preview.is_none());
+    }
+
+    #[test]
+    fn resolve_markers_scene_range_without_index() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("transcripts")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("index")).unwrap();
+
+        let markers = vec![Marker {
+            id: "mark-002".into(),
+            range: ShotRange::Scenes { from: 0, to: 3 },
+            label: "avoid".into(),
+            note: Some("bad lighting".into()),
+            created: "2026-02-19T14:00:00Z".parse().unwrap(),
+        }];
+
+        let resolved = resolve_markers(&markers, "src-missing", tmp.path()).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].id, "mark-002");
+        assert_eq!(resolved[0].start_ms, 0);
+        assert_eq!(resolved[0].end_ms, 0);
+        assert_eq!(
+            resolved[0].scene_preview.as_deref(),
+            Some("(index not available) scenes 0..3")
+        );
+        assert!(resolved[0].text_preview.is_none());
+    }
+
+    #[test]
+    fn resolve_markers_time_range_always_succeeds() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("transcripts")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("index")).unwrap();
+
+        let markers = vec![Marker {
+            id: "mark-003".into(),
+            range: ShotRange::Time { from_ms: 5000, to_ms: 10000 },
+            label: "highlight".into(),
+            note: None,
+            created: "2026-02-19T14:00:00Z".parse().unwrap(),
+        }];
+
+        // Time ranges never need transcript/index, so these should always work
+        let resolved = resolve_markers(&markers, "src-missing", tmp.path()).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].start_ms, 5000);
+        assert_eq!(resolved[0].end_ms, 10000);
+        assert_eq!(resolved[0].duration_ms, 5000);
+        assert!(resolved[0].text_preview.is_none());
+        assert!(resolved[0].scene_preview.is_none());
     }
 }

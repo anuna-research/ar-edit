@@ -882,8 +882,8 @@ where
 
     if !status.success() {
         return Err(RenderError::FfmpegFailed(format!(
-            "segment extraction failed (exit code: {:?})",
-            status.code()
+            "segment extraction failed (exit code: {})",
+            status.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string())
         )));
     }
 

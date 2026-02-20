@@ -1,0 +1,228 @@
+;; Plan metadata
+(meta plan
+  (id "AR-FEEDBACK-2")
+  (title "ar-edit feedback round 2 — bug fixes")
+  (version "1.0.0")
+  (status "active")
+  (created "2026-02-20")
+  (author "agent:claude")
+  (spec "specs/ar-edit-feedback-2.md")
+  (description "Address 10 new bugs and select improvements from comprehensive testing round 2"))
+
+;; Agents — all work done by sub-agents coordinated by main agent
+(given agent-claude-available)
+
+;; ============================================================
+;; TASK DEFINITIONS
+;; ============================================================
+
+;; HIGH SEVERITY
+(given task-fix-mark-validation)
+(given no-deps-fix-mark-validation)
+(meta task-fix-mark-validation
+  (description "Bug #6: mark command accepts invalid data without validation. Add validation for: source existence, inverted time ranges, out-of-range times, out-of-range scenes, zero-duration ranges, empty labels, and invalid label values. Follow the same pattern used in add-segment (validate_shot_source).")
+  (acceptance "All 7 invalid mark cases from the spec return non-zero exit code and clear error message. Valid marks still succeed."))
+
+(given task-fix-markers-word-range)
+(given no-deps-fix-markers-word-range)
+(meta task-fix-markers-word-range
+  (description "Bug #7: markers listing crashes when word-range markers exist without transcript. The mark command should reject word-range markers when no transcript exists for the source. Additionally, markers listing should handle missing transcripts gracefully instead of crashing.")
+  (acceptance "mark --from-word/--to-word fails with clear error when source has no transcript. markers listing does not crash even if a word-range marker exists without transcript."))
+
+;; MEDIUM SEVERITY
+(given task-fix-from-transcript-validation)
+(given no-deps-fix-from-transcript-validation)
+(meta task-fix-from-transcript-validation
+  (description "Bug #9: from-transcript silently accepts invalid input — plain text, empty files, and wrong-structure JSON all create edits with 0 shots and exit 0. Should warn or error when no segments are extracted from the input file.")
+  (acceptance "from-transcript with non-JSON, empty, or wrong-structure files produces an error or warning. Exit code is non-zero for clearly invalid input."))
+
+;; LOW SEVERITY
+(given task-fix-render-validation)
+(given no-deps-fix-render-validation)
+(meta task-fix-render-validation
+  (description "Bug #10 + #15: render passes invalid codec to ffmpeg and shows Some(8) in error. Also render starts before validating output directory. Fix: validate codec against known list, format exit code without Rust Debug, validate output dir exists before rendering.")
+  (acceptance "Invalid codec rejected with clear error before render starts. Exit code shown as plain number. Nonexistent output directory produces clear error before render starts."))
+
+(given task-fix-index-validation)
+(given no-deps-fix-index-validation)
+(meta task-fix-index-validation
+  (description "Bug #11: index --interval 0 and --parallel 0 are accepted and cause hangs. Reject zero and negative values for both flags with clear error messages.")
+  (acceptance "index --interval 0 and --parallel 0 both produce clear error and non-zero exit code."))
+
+(given task-fix-empty-strings)
+(given no-deps-fix-empty-strings)
+(meta task-fix-empty-strings
+  (description "Bug #12: edit create accepts empty string name, note accepts empty text. Reject empty strings for edit names and note text with clear errors.")
+  (acceptance "edit create '' and note --text '' both produce error with non-zero exit code."))
+
+(given task-fix-play-flags)
+(given no-deps-fix-play-flags)
+(meta task-fix-play-flags
+  (description "Bug #13: play silently ignores --at, --at-scene, --at-word flags when playing an edit. Should warn user when these flags don't apply to the current playback context.")
+  (acceptance "play <edit> --at/--at-scene/--at-word produces a warning message indicating these flags are ignored for edit playback."))
+
+(given task-add-version-flag)
+(given no-deps-add-version-flag)
+(meta task-add-version-flag
+  (description "Bug #14: No --version flag. Add standard --version flag to the CLI using clap's built-in version support.")
+  (acceptance "ar-edit --version prints version string and exits 0."))
+
+;; ============================================================
+;; READINESS RULES — all tasks are independent
+;; ============================================================
+
+(normally r-ready-fix-mark-validation
+  (and task-fix-mark-validation no-deps-fix-mark-validation)
+  ready-fix-mark-validation)
+
+(normally r-ready-fix-markers-word-range
+  (and task-fix-markers-word-range no-deps-fix-markers-word-range)
+  ready-fix-markers-word-range)
+
+(normally r-ready-fix-from-transcript-validation
+  (and task-fix-from-transcript-validation no-deps-fix-from-transcript-validation)
+  ready-fix-from-transcript-validation)
+
+(normally r-ready-fix-render-validation
+  (and task-fix-render-validation no-deps-fix-render-validation)
+  ready-fix-render-validation)
+
+(normally r-ready-fix-index-validation
+  (and task-fix-index-validation no-deps-fix-index-validation)
+  ready-fix-index-validation)
+
+(normally r-ready-fix-empty-strings
+  (and task-fix-empty-strings no-deps-fix-empty-strings)
+  ready-fix-empty-strings)
+
+(normally r-ready-fix-play-flags
+  (and task-fix-play-flags no-deps-fix-play-flags)
+  ready-fix-play-flags)
+
+(normally r-ready-add-version-flag
+  (and task-add-version-flag no-deps-add-version-flag)
+  ready-add-version-flag)
+
+;; ============================================================
+;; ASSIGNMENT RULES
+;; ============================================================
+
+(normally r-assign-fix-mark-validation
+  (and ready-fix-mark-validation agent-claude-available)
+  assign-to-fix-mark-validation-claude)
+
+(normally r-assign-fix-markers-word-range
+  (and ready-fix-markers-word-range agent-claude-available)
+  assign-to-fix-markers-word-range-claude)
+
+(normally r-assign-fix-from-transcript-validation
+  (and ready-fix-from-transcript-validation agent-claude-available)
+  assign-to-fix-from-transcript-validation-claude)
+
+(normally r-assign-fix-render-validation
+  (and ready-fix-render-validation agent-claude-available)
+  assign-to-fix-render-validation-claude)
+
+(normally r-assign-fix-index-validation
+  (and ready-fix-index-validation agent-claude-available)
+  assign-to-fix-index-validation-claude)
+
+(normally r-assign-fix-empty-strings
+  (and ready-fix-empty-strings agent-claude-available)
+  assign-to-fix-empty-strings-claude)
+
+(normally r-assign-fix-play-flags
+  (and ready-fix-play-flags agent-claude-available)
+  assign-to-fix-play-flags-claude)
+
+(normally r-assign-add-version-flag
+  (and ready-add-version-flag agent-claude-available)
+  assign-to-add-version-flag-claude)
+
+(claims agent:claude
+  :at "2026-02-20T05:11:38Z"
+  (given claim-v1-fix-mark-validation)
+  (normally r-cl-state-v1-fix-mark-validation claim-v1-fix-mark-validation state-claimed-v1-fix-mark-validation)
+  (normally r-cl-chain-v1-fix-mark-validation state-claimed-v1-fix-mark-validation claimed-fix-mark-validation)
+)
+
+(claims agent:claude
+  :at "2026-02-20T05:11:38Z"
+  (given claim-v1-fix-markers-word-range)
+  (normally r-cl-state-v1-fix-markers-word-range claim-v1-fix-markers-word-range state-claimed-v1-fix-markers-word-range)
+  (normally r-cl-chain-v1-fix-markers-word-range state-claimed-v1-fix-markers-word-range claimed-fix-markers-word-range)
+)
+
+(claims agent:claude
+  :at "2026-02-20T05:11:38Z"
+  (given claim-v1-fix-from-transcript-validation)
+  (normally r-cl-state-v1-fix-from-transcript-validation claim-v1-fix-from-transcript-validation state-claimed-v1-fix-from-transcript-validation)
+  (normally r-cl-chain-v1-fix-from-transcript-validation state-claimed-v1-fix-from-transcript-validation claimed-fix-from-transcript-validation)
+)
+
+(claims agent:claude
+  :at "2026-02-20T05:11:38Z"
+  (given claim-v1-fix-render-validation)
+  (normally r-cl-state-v1-fix-render-validation claim-v1-fix-render-validation state-claimed-v1-fix-render-validation)
+  (normally r-cl-chain-v1-fix-render-validation state-claimed-v1-fix-render-validation claimed-fix-render-validation)
+)
+
+(claims agent:claude
+  :at "2026-02-20T05:11:38Z"
+  (given claim-v1-fix-index-validation)
+  (normally r-cl-state-v1-fix-index-validation claim-v1-fix-index-validation state-claimed-v1-fix-index-validation)
+  (normally r-cl-chain-v1-fix-index-validation state-claimed-v1-fix-index-validation claimed-fix-index-validation)
+)
+
+(claims agent:claude
+  :at "2026-02-20T05:11:38Z"
+  (given claim-v1-fix-empty-strings)
+  (normally r-cl-state-v1-fix-empty-strings claim-v1-fix-empty-strings state-claimed-v1-fix-empty-strings)
+  (normally r-cl-chain-v1-fix-empty-strings state-claimed-v1-fix-empty-strings claimed-fix-empty-strings)
+)
+
+(claims agent:claude
+  :at "2026-02-20T05:11:38Z"
+  (given claim-v1-fix-play-flags)
+  (normally r-cl-state-v1-fix-play-flags claim-v1-fix-play-flags state-claimed-v1-fix-play-flags)
+  (normally r-cl-chain-v1-fix-play-flags state-claimed-v1-fix-play-flags claimed-fix-play-flags)
+)
+
+(claims agent:claude
+  :at "2026-02-20T05:11:38Z"
+  (given claim-v1-add-version-flag)
+  (normally r-cl-state-v1-add-version-flag claim-v1-add-version-flag state-claimed-v1-add-version-flag)
+  (normally r-cl-chain-v1-add-version-flag state-claimed-v1-add-version-flag claimed-add-version-flag)
+)
+
+(claims agent:claude
+  :at "2026-02-20T05:17:00Z"
+  (given completed-fix-mark-validation))
+
+(claims agent:claude
+  :at "2026-02-20T05:17:00Z"
+  (given completed-fix-markers-word-range))
+
+(claims agent:claude
+  :at "2026-02-20T05:17:00Z"
+  (given completed-fix-from-transcript-validation))
+
+(claims agent:claude
+  :at "2026-02-20T05:17:00Z"
+  (given completed-fix-render-validation))
+
+(claims agent:claude
+  :at "2026-02-20T05:17:00Z"
+  (given completed-fix-index-validation))
+
+(claims agent:claude
+  :at "2026-02-20T05:17:00Z"
+  (given completed-fix-empty-strings))
+
+(claims agent:claude
+  :at "2026-02-20T05:17:00Z"
+  (given completed-fix-play-flags))
+
+(claims agent:claude
+  :at "2026-02-20T05:17:00Z"
+  (given completed-add-version-flag))

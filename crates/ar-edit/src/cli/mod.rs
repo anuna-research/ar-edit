@@ -19,7 +19,7 @@ pub mod exit_code {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(name = "ar-edit", about = "Transcript-based video editor")]
+#[command(name = "ar-edit", about = "Transcript-based video editor", version)]
 pub struct Cli {
     /// Output structured JSON instead of human-readable text
     #[arg(long, global = true)]
