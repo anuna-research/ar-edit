@@ -196,10 +196,8 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     &args.source, &range, &manifest, &project_dir,
                 );
                 if !errors.is_empty() {
-                    for err in &errors {
-                        eprintln!("error: {}", err);
-                    }
-                    anyhow::bail!("invalid segment: {} error(s)", errors.len());
+                    let details: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
+                    anyhow::bail!("invalid segment:\n{}", details.join("\n"));
                 }
 
                 let shot = doc.add_shot(&args.source, range)?;
@@ -258,10 +256,8 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     &shot_source, &range, &manifest, &project_dir,
                 );
                 if !errors.is_empty() {
-                    for err in &errors {
-                        eprintln!("error: {}", err);
-                    }
-                    anyhow::bail!("invalid segment: {} error(s)", errors.len());
+                    let details: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
+                    anyhow::bail!("invalid segment:\n{}", details.join("\n"));
                 }
 
                 doc.trim_shot(&args.shot, range)?;
@@ -898,24 +894,18 @@ fn cmd_validate(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else if result.valid {
         println!("Edit '{edit}' is valid.");
-    } else {
-        eprintln!("Edit '{edit}' has {} validation error{}:",
-            result.errors.len(),
-            if result.errors.len() == 1 { "" } else { "s" }
-        );
-        for err in &result.errors {
-            eprintln!("  {}: {}", err.shot_id, err.error);
-        }
     }
 
     if !result.valid {
-        return Err(anyhow::Error::new(
-            CliError::validation(format!(
-                "edit '{edit}' failed validation with {} error{}",
-                result.errors.len(),
-                if result.errors.len() == 1 { "" } else { "s" }
-            ))
-        ));
+        let plural = if result.errors.len() == 1 { "" } else { "s" };
+        let mut msg = format!(
+            "edit '{edit}' failed validation with {} error{plural}:",
+            result.errors.len(),
+        );
+        for err in &result.errors {
+            msg.push_str(&format!("\n  {}: {}", err.shot_id, err.error));
+        }
+        return Err(anyhow::Error::new(CliError::validation(msg)));
     }
 
     Ok(())
@@ -1143,24 +1133,18 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
     })?;
     let validation = ar_edit_core::validate::validate(&doc, &manifest, &project_dir);
     if !validation.valid {
-        if !cli.json {
-            eprintln!("Edit '{}' has {} validation error{}:",
-                args.edit,
-                validation.errors.len(),
-                if validation.errors.len() == 1 { "" } else { "s" }
-            );
-            for err in &validation.errors {
-                eprintln!("  {}: {}", err.shot_id, err.error);
-            }
+        let plural = if validation.errors.len() == 1 { "" } else { "s" };
+        let mut msg = format!(
+            "edit '{}' failed validation with {} error{plural}:",
+            args.edit,
+            validation.errors.len(),
+        );
+        for err in &validation.errors {
+            msg.push_str(&format!("\n  {}: {}", err.shot_id, err.error));
         }
         return Err(anyhow::Error::new(
-            CliError::validation(format!(
-                "edit '{}' failed validation with {} error{}",
-                args.edit,
-                validation.errors.len(),
-                if validation.errors.len() == 1 { "" } else { "s" }
-            ))
-            .with_hint("run `ar-edit validate` to see details"),
+            CliError::validation(msg)
+                .with_hint("run `ar-edit validate` to see details"),
         ));
     }
 

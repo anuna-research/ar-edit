@@ -1,12 +1,12 @@
 {
-  "task_id": "bug-zero-duration-scenes",
+  "task_id": "bug-double-errors",
   "token_budget": 8000,
-  "tokens_used": 333,
+  "tokens_used": 343,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "Scene detection produces scenes with 0.0s duration (e.g. Scene 4: 128.1s - 128.1s). Filter out or merge zero-duration scenes in crates/ar-edit-core/src/index.rs detect_scenes() function. Apply a minimum duration threshold (e.g. 0.5s) — merge sub-threshold scenes with the previous scene by extending its end_ms.",
-      "token_cost": 78,
+      "content": "Every error message is duplicated in stderr. The error is printed both by the subcommand handler and by the top-level main error handler in main.rs. Fix so only one layer prints errors. Key files: crates/ar-edit/src/main.rs (lines 84-106 for top-level handler, subcommand handlers throughout).",
+      "token_cost": 73,
       "priority": "PlanMeta"
     },
     {
@@ -62,8 +62,14 @@
       "content": "Modified 3 files (+55, -24): .hence/context-manifest.json, crates/ar-edit-core/src/render.rs, crates/ar-edit/src/main.rs",
       "token_cost": 30,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-bug-zero-duration-scenes-changes",
+      "content": "Modified 1 files (+81, -1): crates/ar-edit-core/src/index.rs",
+      "token_cost": 15,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-20T02:38:01Z"
+  "constructed_at": "2026-02-20T02:40:23Z"
 }
