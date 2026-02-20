@@ -3,49 +3,23 @@
   "confidence": 1.0,
   "exit_code": 0,
   "diff_summary": {
-    "files_changed": 28,
-    "insertions": 631,
-    "deletions": 373,
+    "files_changed": 2,
+    "insertions": 46,
+    "deletions": 2,
     "file_list": [
-      "crates/ar-edit-core/src/display.rs",
-      "crates/ar-edit-core/src/edit.rs",
-      "crates/ar-edit-core/src/import.rs",
-      "crates/ar-edit-core/src/validate.rs",
-      "crates/ar-edit-core/tests/test_012_segment_addition.rs",
-      "crates/ar-edit-core/tests/test_013_reordering.rs",
-      "crates/ar-edit-core/tests/test_014_removal.rs",
-      "crates/ar-edit-core/tests/test_015_trimming.rs",
-      "crates/ar-edit-core/tests/test_016_display_resolves.rs",
-      "crates/ar-edit-core/tests/test_018_edit_from_transcript.rs",
-      "crates/ar-edit-core/tests/test_021_segment_preview.rs",
-      "crates/ar-edit-core/tests/test_022_full_edit_playback.rs",
-      "crates/ar-edit-core/tests/test_023_overlay.rs",
-      "crates/ar-edit-core/tests/test_025_basic_render.rs",
-      "crates/ar-edit-core/tests/test_043_tui_launch.rs",
-      "crates/ar-edit-core/tests/test_044_timeline_panel.rs",
-      "crates/ar-edit-core/tests/test_045_transcript_highlighting.rs",
-      "crates/ar-edit-core/tests/test_047_playback_integration.rs",
-      "crates/ar-edit-core/tests/test_048_keyboard_ops.rs",
-      "crates/ar-edit-core/tests/test_051_undo.rs",
-      "crates/ar-edit-core/tests/test_052_redo.rs",
-      "crates/ar-edit-core/tests/test_053_fork_behavior.rs",
-      "crates/ar-edit-core/tests/test_053b_history_display.rs",
-      "crates/ar-edit-core/tests/test_056_shot_notes_append.rs",
-      "crates/ar-edit-core/tests/test_058_agent_reads_notes.rs",
-      "crates/ar-edit/src/main.rs",
-      "crates/ar-edit/src/tui/input.rs",
-      "crates/ar-edit/tests/test_051_undo_redo.rs"
+      "crates/ar-edit-core/src/project.rs",
+      "crates/ar-edit/src/main.rs"
     ],
     "dirty_files": 1
   },
   "learnings": [
     {
-      "key": "task-bug-eager-validation-changes",
-      "content": "Modified 28 files (+631, -373): crates/ar-edit-core/src/display.rs, crates/ar-edit-core/src/edit.rs, crates/ar-edit-core/src/import.rs, crates/ar-edit-core/src/validate.rs, crates/ar-edit-core/tests/test_012_segment_addition.rs and 23 more",
+      "key": "task-imp-doctor-hints-changes",
+      "content": "Modified 2 files (+46, -2): crates/ar-edit-core/src/project.rs, crates/ar-edit/src/main.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/bug-eager-validation-v1",
-  "evaluated_at": "2026-02-20T02:16:46Z"
+  "branch_name": "hence/imp-doctor-hints-v1",
+  "evaluated_at": "2026-02-20T02:20:03Z"
 }
