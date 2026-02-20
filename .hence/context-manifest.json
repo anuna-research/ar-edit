@@ -1,15 +1,21 @@
 {
-  "task_id": "imp-play-resolution",
+  "task_id": "bug-eager-validation",
   "token_budget": 8000,
-  "tokens_used": 49,
+  "tokens_used": 107,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "The play command always renders at full resolution for preview. Add --resolution flag and default preview renders to 720p. Key files: cli/mod.rs PlayArgs struct, main.rs cmd_play handler, render.rs.",
-      "token_cost": 49,
+      "content": "add-segment and trim-segment accept invalid data silently (non-existent source, out-of-range times, inverted ranges). Move validation checks from validate.rs into the add_shot/trim_shot code paths in edit.rs so invalid segments are rejected at creation time with a non-zero exit code and clear error message.",
+      "token_cost": 77,
       "priority": "PlanMeta"
+    },
+    {
+      "source": "memory/episodic/task-imp-play-resolution-changes",
+      "content": "Modified 3 files (+23, -4): crates/ar-edit-core/src/render.rs, crates/ar-edit/src/cli/mod.rs, crates/ar-edit/src/main.rs",
+      "token_cost": 30,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-20T01:48:45Z"
+  "constructed_at": "2026-02-20T01:51:50Z"
 }

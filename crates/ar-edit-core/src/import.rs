@@ -15,6 +15,8 @@ use crate::models::{EditDocument, Manifest, ShotRange, Transcript};
 pub enum ImportError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Edit(#[from] crate::edit::EditError),
     #[error("parse errors in annotated transcript:\n{}", format_errors(.0))]
     ParseErrors(Vec<ParseError>),
 }
@@ -105,7 +107,7 @@ pub fn from_transcript_str(content: &str, name: &str) -> Result<EditDocument, Im
                 from: block.from_word,
                 to: block.to_word,
             },
-        );
+        )?;
     }
 
     Ok(doc)
@@ -189,7 +191,7 @@ pub fn from_transcript_str_fuzzy(
                         from: ab.from_word,
                         to: ab.to_word,
                     },
-                );
+                )?;
             }
             ContentBlock::Orphaned(ob) => {
                 if let Some(transcript) = transcripts.get(&ob.source_id) {
@@ -197,7 +199,7 @@ pub fn from_transcript_str_fuzzy(
                         doc.add_shot(
                             &ob.source_id,
                             ShotRange::Words { from, to },
-                        );
+                        )?;
                     } else {
                         match_errors.push(ParseError {
                             line: ob.first_line,

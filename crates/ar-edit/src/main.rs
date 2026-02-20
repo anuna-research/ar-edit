@@ -182,7 +182,21 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 let path = edit_path(&args.edit);
                 let mut doc = EditDocument::load(&path)?;
                 let range = parse_range(&args.range)?;
-                let shot = doc.add_shot(&args.source, range);
+
+                // Eager validation: check source exists and range is in bounds
+                let project_dir = PathBuf::from(".");
+                let manifest = ar_edit_core::project::read_manifest(&project_dir)?;
+                let errors = ar_edit_core::validate::validate_shot_source(
+                    &args.source, &range, &manifest, &project_dir,
+                );
+                if !errors.is_empty() {
+                    for err in &errors {
+                        eprintln!("error: {}", err);
+                    }
+                    anyhow::bail!("invalid segment: {} error(s)", errors.len());
+                }
+
+                let shot = doc.add_shot(&args.source, range)?;
                 let shot_id = shot.id.clone();
                 doc.save(&path)?;
                 if cli.json {
@@ -224,6 +238,26 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 let path = edit_path(&args.edit);
                 let mut doc = EditDocument::load(&path)?;
                 let range = parse_range(&args.range)?;
+
+                // Find the shot's source for validation
+                let shot_source = doc.snapshot.shots.iter()
+                    .find(|s| s.id == args.shot)
+                    .map(|s| s.source.clone())
+                    .ok_or_else(|| anyhow::anyhow!("shot '{}' not found", args.shot))?;
+
+                // Eager validation: check range is in bounds for the source
+                let project_dir = PathBuf::from(".");
+                let manifest = ar_edit_core::project::read_manifest(&project_dir)?;
+                let errors = ar_edit_core::validate::validate_shot_source(
+                    &shot_source, &range, &manifest, &project_dir,
+                );
+                if !errors.is_empty() {
+                    for err in &errors {
+                        eprintln!("error: {}", err);
+                    }
+                    anyhow::bail!("invalid segment: {} error(s)", errors.len());
+                }
+
                 doc.trim_shot(&args.shot, range)?;
                 doc.save(&path)?;
                 if cli.json {

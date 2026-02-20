@@ -150,7 +150,7 @@ fn word_range_preview_matches_selected_words() {
 
     let mut doc = EditDocument::create("test");
     // Select words 2-4: "the", "interview", "today"
-    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 4 });
+    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 4 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     let preview = resolved[0].text_preview.as_deref().unwrap();
@@ -167,7 +167,7 @@ fn single_segment_word_range_timestamps() {
 
     let mut doc = EditDocument::create("test");
     // Words 0-4 are in segment 0
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 0);      // word 0 start
@@ -182,7 +182,7 @@ fn cross_segment_word_range_timestamps() {
 
     let mut doc = EditDocument::create("test");
     // Words 10-14 span segment boundary (mid=12)
-    doc.add_shot("src-001", ShotRange::Words { from: 10, to: 14 });
+    doc.add_shot("src-001", ShotRange::Words { from: 10, to: 14 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 4000);    // word 10: 10*400 = 4000
@@ -198,14 +198,14 @@ fn single_word_range() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 5, to: 5 });
+    doc.add_shot("src-001", ShotRange::Words { from: 5, to: 6 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
-    // Word 5: start=5*400=2000, end=5*400+350=2350
+    // Word 5: start=5*400=2000; Word 6: end=6*400+350=2750
     assert_eq!(resolved[0].start_ms, 2000);
-    assert_eq!(resolved[0].end_ms, 2350);
+    assert_eq!(resolved[0].end_ms, 2750);
     let preview = resolved[0].text_preview.as_deref().unwrap();
-    assert_eq!(preview, "we");
+    assert_eq!(preview, "we are");
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +219,7 @@ fn scene_range_includes_all_scenes() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 0);       // scene 0 start
@@ -236,15 +236,15 @@ fn scene_range_without_descriptions() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    // Scene 1 has no description
-    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 1 });
+    // Scenes 1 (no description) and 2 (has description "Interview medium")
+    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 2 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 30000);
-    assert_eq!(resolved[0].end_ms, 60000);
-    // Preview should still exist but show fallback
+    assert_eq!(resolved[0].end_ms, 90000);
+    // Preview shows only described scenes
     let preview = resolved[0].scene_preview.as_deref().unwrap();
-    assert!(preview.contains("scenes 1..1"));
+    assert!(preview.contains("Interview medium"));
 }
 
 /// A single-scene range has correct timestamps.
@@ -254,12 +254,12 @@ fn single_scene_range_timestamps() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 3, to: 3 });
+    doc.add_shot("src-002", ShotRange::Scenes { from: 2, to: 3 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
-    assert_eq!(resolved[0].start_ms, 90000);
+    assert_eq!(resolved[0].start_ms, 60000);
     assert_eq!(resolved[0].end_ms, 120000);
-    assert_eq!(resolved[0].duration_ms, 30000);
+    assert_eq!(resolved[0].duration_ms, 60000);
 }
 
 // ---------------------------------------------------------------------------
@@ -273,7 +273,7 @@ fn time_range_display_fields() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 15000, to_ms: 45000 });
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 15000, to_ms: 45000 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 15000);
@@ -294,8 +294,8 @@ fn different_sources_load_different_transcripts() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     // First shot: words => text preview from transcript
@@ -314,8 +314,8 @@ fn same_source_different_ranges() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 });
-    doc.add_shot("src-001", ShotRange::Words { from: 14, to: 18 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 14, to: 18 }).unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     let preview1 = resolved[0].text_preview.as_deref().unwrap();
@@ -332,7 +332,7 @@ fn shot_notes_available_for_transcript_panel() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
     doc.add_note("shot-001", "Highlight this section").unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();

@@ -293,8 +293,13 @@ fn do_add_shot(app: &mut App, source: &str, range: ShotRange) {
             app.status_message = "No edit loaded".into();
             return;
         };
-        let shot = doc.add_shot(source, range);
-        shot.id.clone()
+        match doc.add_shot(source, range) {
+            Ok(shot) => shot.id.clone(),
+            Err(e) => {
+                app.status_message = format!("Add failed: {e}");
+                return;
+            }
+        }
     };
 
     if !save_and_refresh(app) {
@@ -666,8 +671,13 @@ fn do_add_result_as_shot(app: &mut App) {
             app.status_message = "No edit loaded".into();
             return;
         };
-        let shot = doc.add_shot(&result.source_id, range);
-        shot.id.clone()
+        match doc.add_shot(&result.source_id, range) {
+            Ok(shot) => shot.id.clone(),
+            Err(e) => {
+                app.status_message = format!("Add failed: {e}");
+                return;
+            }
+        }
     };
 
     if !save_and_refresh(app) {

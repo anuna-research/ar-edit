@@ -164,7 +164,7 @@ fn annotate_then_build_edit_from_markers() {
     let mut doc = EditDocument::create("rough-cut");
     for marker in &markers.markers {
         if marker.label == "select" {
-            let shot_id = doc.add_shot("src-001", marker.range.clone()).id.clone();
+            let shot_id = doc.add_shot("src-001", marker.range.clone()).unwrap().id.clone();
 
             // Transfer marker note as shot note if present
             if let Some(note) = &marker.note {
@@ -232,7 +232,7 @@ fn markers_with_avoid_label_are_excluded() {
     let mut doc = EditDocument::create("filtered-edit");
     for marker in &markers.markers {
         if marker.label == "select" {
-            doc.add_shot("src-001", marker.range.clone());
+            doc.add_shot("src-001", marker.range.clone()).unwrap();
         }
     }
 
@@ -248,9 +248,9 @@ fn edit_from_markers_with_reordering() {
 
     // Build edit from markers, then reorder
     let mut doc = EditDocument::create("reordered");
-    doc.add_shot("src-001", ShotRange::Words { from: 16, to: 21 }); // closing
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 });   // opening
-    doc.add_shot("src-001", ShotRange::Words { from: 8, to: 15 });  // middle
+    doc.add_shot("src-001", ShotRange::Words { from: 16, to: 21 }).unwrap(); // closing
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();   // opening
+    doc.add_shot("src-001", ShotRange::Words { from: 8, to: 15 }).unwrap();  // middle
 
     // Reorder: move opening to front
     doc.move_shot("shot-002", 0).unwrap();
@@ -266,8 +266,8 @@ fn edit_from_markers_roundtrip() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("roundtrip");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 });
-    doc.add_shot("src-001", ShotRange::Words { from: 12, to: 15 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 12, to: 15 }).unwrap();
     doc.add_note("shot-001", "Opening sequence").unwrap();
 
     let path = tmp.path().join("edits/roundtrip.edit.json");

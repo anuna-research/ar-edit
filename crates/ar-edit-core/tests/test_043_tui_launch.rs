@@ -142,9 +142,9 @@ fn setup_full_project(dir: &Path) -> EditDocument {
 
     // Edit document with shots from both sources
     let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 });
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 2000, to_ms: 8000 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 2000, to_ms: 8000 }).unwrap();
     doc.save(&dir.join("edits/rough-cut.edit.json")).unwrap();
 
     doc
@@ -278,7 +278,7 @@ fn project_with_missing_transcript_still_loads() {
 
     // Edit with time range (doesn't need transcript)
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 5000 });
+    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
     doc.save(&dir.join("edits/test.edit.json")).unwrap();
 
     // Should resolve without error because time ranges don't need transcripts

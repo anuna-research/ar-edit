@@ -14,7 +14,7 @@ use tempfile::TempDir;
 #[test]
 fn append_single_note() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
 
     let note = doc.add_note("shot-001", "Good take").unwrap();
     assert_eq!(note.text, "Good take");
@@ -26,7 +26,7 @@ fn append_single_note() {
 #[test]
 fn append_multiple_notes_preserves_order() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
 
     doc.add_note("shot-001", "First observation").unwrap();
     doc.add_note("shot-001", "Second thought").unwrap();
@@ -42,9 +42,9 @@ fn append_multiple_notes_preserves_order() {
 #[test]
 fn notes_on_different_shots() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 30 });
-    doc.add_shot("src-001", ShotRange::Words { from: 31, to: 60 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 30 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 31, to: 60 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
 
     doc.add_note("shot-001", "Trim opening").unwrap();
     doc.add_note("shot-002", "Great content").unwrap();
@@ -60,7 +60,7 @@ fn notes_on_different_shots() {
 #[test]
 fn note_generates_add_note_op() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
     doc.add_note("shot-001", "Review later").unwrap();
 
     assert_eq!(doc.ops.len(), 2);
@@ -76,7 +76,7 @@ fn note_generates_add_note_op() {
 #[test]
 fn note_timestamps_are_monotonic() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
 
     doc.add_note("shot-001", "First").unwrap();
     doc.add_note("shot-001", "Second").unwrap();
@@ -88,7 +88,7 @@ fn note_timestamps_are_monotonic() {
 #[test]
 fn note_on_nonexistent_shot_fails() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
 
     let err = doc.add_note("shot-999", "orphan note").unwrap_err();
     assert!(format!("{err}").contains("shot-999"));
@@ -97,7 +97,7 @@ fn note_on_nonexistent_shot_fails() {
 #[test]
 fn undo_removes_last_note() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
     doc.add_note("shot-001", "Keep this").unwrap();
     doc.add_note("shot-001", "Remove this").unwrap();
 
@@ -111,7 +111,7 @@ fn undo_removes_last_note() {
 #[test]
 fn undo_all_notes_restores_empty() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
     doc.add_note("shot-001", "Note A").unwrap();
     doc.add_note("shot-001", "Note B").unwrap();
 
@@ -124,7 +124,7 @@ fn undo_all_notes_restores_empty() {
 #[test]
 fn redo_restores_note() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
     doc.add_note("shot-001", "Important note").unwrap();
 
     doc.undo().unwrap();
@@ -138,7 +138,7 @@ fn redo_restores_note() {
 #[test]
 fn undo_redo_roundtrip_preserves_notes() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
     doc.add_note("shot-001", "First").unwrap();
     doc.add_note("shot-001", "Second").unwrap();
     doc.add_note("shot-001", "Third").unwrap();
@@ -161,7 +161,7 @@ fn undo_redo_roundtrip_preserves_notes() {
 #[test]
 fn new_op_after_undo_discards_redo_notes() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
     doc.add_note("shot-001", "Original note").unwrap();
 
     doc.undo().unwrap(); // undo note
@@ -181,7 +181,7 @@ fn notes_persist_through_save_load() {
     let path = tmp.path().join("test.edit.json");
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
     doc.add_note("shot-001", "Director's note: perfect delivery").unwrap();
     doc.add_note("shot-001", "Color grade needed").unwrap();
 
@@ -199,8 +199,8 @@ fn notes_persist_through_save_load() {
 #[test]
 fn notes_recompute_matches_snapshot() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
     doc.add_note("shot-001", "Note on shot 1").unwrap();
     doc.add_note("shot-002", "Note on shot 2").unwrap();
     doc.add_note("shot-001", "Another note on shot 1").unwrap();
@@ -217,7 +217,7 @@ fn notes_in_json_structure() {
     let path = tmp.path().join("test.edit.json");
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 });
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 50 }).unwrap();
     doc.add_note("shot-001", "A note").unwrap();
 
     doc.save(&path).unwrap();
