@@ -108,28 +108,49 @@ fn main() {
 fn run(cli: &Cli) -> anyhow::Result<()> {
     match &cli.command {
         Commands::Init { name } => {
-            anyhow::bail!("'init' is not yet implemented (name: {name})")
+            let path = PathBuf::from(name);
+            let manifest = ar_edit_core::project::init(&path)?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&manifest)?);
+            } else {
+                println!("Initialized project '{}' at {}", manifest.name, path.display());
+            }
+            Ok(())
         }
         Commands::Add { files } => {
-            anyhow::bail!(
-                "'add' is not yet implemented ({} file{})",
-                files.len(),
-                if files.len() == 1 { "" } else { "s" }
-            )
+            let added = ar_edit_core::project::add(Path::new("."), files)?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&added)?);
+            } else {
+                for s in &added {
+                    println!("Added source src-{:03}: {}", s.id, s.original_filename);
+                }
+            }
+            Ok(())
         }
         Commands::Doctor => {
-            anyhow::bail!("'doctor' is not yet implemented")
-        }
-        Commands::Transcribe(args) => {
-            let target = if args.all {
-                "all sources".to_string()
-            } else if let Some(ref id) = args.source_id {
-                id.clone()
+            let result = ar_edit_core::project::doctor();
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
-                "none".to_string()
-            };
-            anyhow::bail!("'transcribe' is not yet implemented (target: {target})")
+                let check = |name: &str, dep: &ar_edit_core::project::DepStatus| {
+                    if dep.found {
+                        println!("  {} {}", name, dep.version.as_deref().unwrap_or("found"));
+                    } else if let Some(fb) = &dep.fallback {
+                        println!("  {} missing (fallback: {})", name, fb);
+                    } else {
+                        println!("  {} MISSING", name);
+                    }
+                };
+                println!("Dependencies:");
+                check("ffmpeg", &result.ffmpeg);
+                check("ffprobe", &result.ffprobe);
+                check("whisper-cli", &result.whisper);
+                check("vlc", &result.vlc);
+            }
+            Ok(())
         }
+        Commands::Transcribe(args) => cmd_transcribe(cli, args),
         Commands::Transcripts { command } => match command {
             TranscriptsCommand::List => cmd_transcripts_list(cli),
             TranscriptsCommand::Read { source_id, with_markers } => {
@@ -144,33 +165,73 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         },
         Commands::Edit { command } => match command {
             EditCommand::Create { name } => {
-                anyhow::bail!("'edit create' is not yet implemented (name: {name})")
+                let path = edit_path(name);
+                if path.exists() {
+                    anyhow::bail!("edit '{}' already exists", name);
+                }
+                let doc = EditDocument::create(name);
+                doc.save(&path)?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                } else {
+                    println!("Created edit '{}'", name);
+                }
+                Ok(())
             }
             EditCommand::AddSegment(args) => {
-                anyhow::bail!(
-                    "'edit add-segment' is not yet implemented (edit: {}, source: {})",
-                    args.edit, args.source
-                )
+                let path = edit_path(&args.edit);
+                let mut doc = EditDocument::load(&path)?;
+                let range = parse_range(&args.range)?;
+                let shot = doc.add_shot(&args.source, range);
+                let shot_id = shot.id.clone();
+                doc.save(&path)?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                } else {
+                    println!("Added {} to '{}'", shot_id, args.edit);
+                }
+                Ok(())
             }
             EditCommand::MoveSegment {
                 edit,
                 shot,
                 position,
             } => {
-                anyhow::bail!(
-                    "'edit move-segment' is not yet implemented (edit: {edit}, shot: {shot}, position: {position})"
-                )
+                let path = edit_path(edit);
+                let mut doc = EditDocument::load(&path)?;
+                doc.move_shot(shot, *position as usize)?;
+                doc.save(&path)?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                } else {
+                    println!("Moved {} to position {} in '{}'", shot, position, edit);
+                }
+                Ok(())
             }
             EditCommand::RemoveSegment { edit, shot } => {
-                anyhow::bail!(
-                    "'edit remove-segment' is not yet implemented (edit: {edit}, shot: {shot})"
-                )
+                let path = edit_path(edit);
+                let mut doc = EditDocument::load(&path)?;
+                doc.remove_shot(shot)?;
+                doc.save(&path)?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                } else {
+                    println!("Removed {} from '{}'", shot, edit);
+                }
+                Ok(())
             }
             EditCommand::TrimSegment(args) => {
-                anyhow::bail!(
-                    "'edit trim-segment' is not yet implemented (edit: {}, shot: {})",
-                    args.edit, args.shot
-                )
+                let path = edit_path(&args.edit);
+                let mut doc = EditDocument::load(&path)?;
+                let range = parse_range(&args.range)?;
+                doc.trim_shot(&args.shot, range)?;
+                doc.save(&path)?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                } else {
+                    println!("Trimmed {} in '{}'", args.shot, args.edit);
+                }
+                Ok(())
             }
             EditCommand::Show { edit } => cmd_show(cli, edit),
             EditCommand::History { edit } => cmd_history(cli, edit),
@@ -327,6 +388,145 @@ fn cmd_history(cli: &Cli, edit: &str) -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handler: transcribe (CON-002)
+// ---------------------------------------------------------------------------
+
+fn cmd_transcribe(cli: &Cli, args: &cli::TranscribeArgs) -> anyhow::Result<()> {
+    use ar_edit_core::{project, transcript};
+
+    let project_dir = PathBuf::from(".");
+    let manifest = project::read_manifest(&project_dir)?;
+
+    // Handle --import: import an existing SRT/VTT/JSON file
+    if let Some(ref import_path) = args.import {
+        let source_id = args
+            .source_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("--import requires a source ID argument"))?;
+        let t = transcript::import_transcript(import_path, source_id)?;
+        let out_path = project_dir
+            .join("transcripts")
+            .join(format!("{source_id}.transcript.json"));
+        let json = serde_json::to_string_pretty(&t)?;
+        std::fs::write(&out_path, json)?;
+
+        // Mark source as transcribed in manifest
+        let mut manifest = manifest;
+        if let Some(src) = manifest.sources.iter_mut().find(|s| s.id == source_id) {
+            src.transcribed = true;
+            project::write_manifest(&project_dir, &manifest)?;
+        }
+
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&t)?);
+        } else {
+            println!(
+                "Imported transcript for {} ({} words)",
+                source_id, t.word_count
+            );
+        }
+        return Ok(());
+    }
+
+    let mut manifest = manifest;
+
+    // Collect source IDs to transcribe
+    let source_ids: Vec<String> = if args.all {
+        manifest
+            .sources
+            .iter()
+            .filter(|s| !s.transcribed)
+            .map(|s| s.id.clone())
+            .collect()
+    } else if let Some(ref id) = args.source_id {
+        if !manifest.sources.iter().any(|s| s.id == *id) {
+            anyhow::bail!("source '{}' not found in manifest", id);
+        }
+        vec![id.clone()]
+    } else {
+        anyhow::bail!("provide a source ID or use --all");
+    };
+
+    if source_ids.is_empty() {
+        if cli.json {
+            println!("{{\"transcribed\":[]}}");
+        } else {
+            println!("All sources already transcribed.");
+        }
+        return Ok(());
+    }
+
+    let model_name = args
+        .model
+        .as_deref()
+        .unwrap_or(&manifest.defaults.whisper_model);
+    let model_path = transcript::find_model(model_name)?;
+    let mut results = Vec::new();
+
+    for source_id in &source_ids {
+        let source = manifest
+            .sources
+            .iter()
+            .find(|s| &s.id == source_id)
+            .unwrap();
+
+        if !cli.json {
+            eprintln!("Transcribing {}...", source_id);
+        }
+
+        // Extract audio
+        let audio_path = project_dir
+            .join("sources")
+            .join(format!("{source_id}.wav"));
+        let source_path = project_dir.join(&source.path);
+        transcript::extract_audio(&source_path, &audio_path)?;
+
+        // Run whisper
+        let (t, _progress) =
+            transcript::invoke_whisper(&audio_path, &model_path, source_id)?;
+
+        // Save transcript
+        let out_path = project_dir
+            .join("transcripts")
+            .join(format!("{source_id}.transcript.json"));
+        let json = serde_json::to_string_pretty(&t)?;
+        std::fs::write(&out_path, &json)?;
+
+        // Clean up audio
+        let _ = std::fs::remove_file(&audio_path);
+
+        // Mark transcribed
+        if let Some(src) = manifest.sources.iter_mut().find(|s| &s.id == source_id) {
+            src.transcribed = true;
+        }
+
+        if !cli.json {
+            eprintln!(
+                "  {} words, {}",
+                t.word_count,
+                ar_edit_core::display::format_time(t.duration_ms)
+            );
+        }
+        results.push(t);
+    }
+
+    project::write_manifest(&project_dir, &manifest)?;
+
+    if cli.json {
+        let output = serde_json::json!({ "transcribed": results });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!(
+            "Transcribed {} source{}.",
+            results.len(),
+            if results.len() == 1 { "" } else { "s" }
+        );
+    }
+
     Ok(())
 }
 

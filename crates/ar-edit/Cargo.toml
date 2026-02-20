@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
+default = ["tui"]
 tui = ["dep:ratatui", "dep:crossterm"]
 
 [dependencies]
