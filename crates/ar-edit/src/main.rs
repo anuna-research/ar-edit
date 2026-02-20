@@ -849,7 +849,7 @@ fn cmd_play(cli: &Cli, args: &PlayArgs) -> anyhow::Result<()> {
 
     if !is_source && args.shot.is_none() {
         // Full edit playback (REQ-022): render all shots concatenated, then play
-        return cmd_play_full(cli, &project_dir, &args.target, &player, overlay_mode);
+        return cmd_play_full(cli, &project_dir, &args.target, &player, overlay_mode, args.resolution.as_deref());
     }
 
     // Capture shot/source context for feedback before building the request
@@ -931,8 +931,21 @@ fn cmd_play_full(
     edit_name: &str,
     player: &playback::Player,
     overlay_mode: ar_edit_core::overlay::OverlayMode,
+    resolution_flag: Option<&str>,
 ) -> anyhow::Result<()> {
     let doc = load_edit(edit_name)?;
+
+    // Default preview to 720p; override with --resolution if provided.
+    let resolution = match resolution_flag {
+        Some(s) => Some(ar_edit_core::render::parse_resolution(s).map_err(|e| {
+            anyhow::Error::new(CliError::user(e).with_hint("expected format: WIDTHxHEIGHT, e.g. 1920x1080"))
+        })?),
+        None => Some((1280, 720)),
+    };
+    let render_options = ar_edit_core::render::RenderOptions {
+        resolution,
+        ..Default::default()
+    };
 
     let shot_count = doc.snapshot.shots.len();
     if !cli.json {
@@ -941,14 +954,15 @@ fn cmd_play_full(
             ar_edit_core::overlay::OverlayMode::Full => " [overlay: full]",
             ar_edit_core::overlay::OverlayMode::Minimal => " [overlay: minimal]",
         };
-        println!("Rendering full preview of \"{edit_name}\" ({shot_count} shots){overlay_label}...");
+        let res = resolution.unwrap();
+        println!("Rendering full preview of \"{edit_name}\" ({shot_count} shots) [{}x{}]{overlay_label}...", res.0, res.1);
     }
 
     // Resolve shots for feedback timings before rendering
     let resolved = ar_edit_core::display::resolve_edit(&doc, project_dir)
         .user_err()?;
 
-    let preview_path = ar_edit_core::render::render_preview(&doc, project_dir, overlay_mode)
+    let preview_path = ar_edit_core::render::render_preview(&doc, project_dir, overlay_mode, &render_options)
         .map_err(|e| {
             anyhow::Error::new(
                 CliError::system(e).with_hint("run `ar-edit doctor` to check dependencies"),

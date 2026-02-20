@@ -368,6 +368,10 @@ pub struct PlayArgs {
     /// Start at scene index (source playback)
     #[arg(long)]
     pub at_scene: Option<u32>,
+
+    /// Preview resolution (e.g. "1280x720"); defaults to 720p
+    #[arg(long)]
+    pub resolution: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
