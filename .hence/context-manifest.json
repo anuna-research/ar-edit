@@ -1,12 +1,12 @@
 {
-  "task_id": "imp-play-cache",
+  "task_id": "bug-zero-duration-scenes",
   "token_budget": 8000,
-  "tokens_used": 289,
+  "tokens_used": 333,
   "elements_selected": [
     {
       "source": "plan-meta/description",
-      "content": "ar-edit play re-renders from scratch even when a render already exists. Check for existing render output before re-rendering. Compare edit document modification time against render output. Key file: main.rs cmd_play handler (lines 838-926) and playback.rs.",
-      "token_cost": 64,
+      "content": "Scene detection produces scenes with 0.0s duration (e.g. Scene 4: 128.1s - 128.1s). Filter out or merge zero-duration scenes in crates/ar-edit-core/src/index.rs detect_scenes() function. Apply a minimum duration threshold (e.g. 0.5s) — merge sub-threshold scenes with the previous scene by extending its end_ms.",
+      "token_cost": 78,
       "priority": "PlanMeta"
     },
     {
@@ -56,8 +56,14 @@
       "content": "Modified 3 files (+113, -20): .hence/context-manifest.json, crates/ar-edit/src/cli/mod.rs, crates/ar-edit/src/main.rs",
       "token_cost": 29,
       "priority": "AgentMemory"
+    },
+    {
+      "source": "memory/episodic/task-imp-play-cache-changes",
+      "content": "Modified 3 files (+55, -24): .hence/context-manifest.json, crates/ar-edit-core/src/render.rs, crates/ar-edit/src/main.rs",
+      "token_cost": 30,
+      "priority": "AgentMemory"
     }
   ],
   "elements_excluded": [],
-  "constructed_at": "2026-02-20T02:34:29Z"
+  "constructed_at": "2026-02-20T02:38:01Z"
 }
