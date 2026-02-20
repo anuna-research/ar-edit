@@ -4,21 +4,21 @@
   "exit_code": 0,
   "diff_summary": {
     "files_changed": 1,
-    "insertions": 81,
-    "deletions": 1,
+    "insertions": 22,
+    "deletions": 38,
     "file_list": [
-      "crates/ar-edit-core/src/index.rs"
+      "crates/ar-edit/src/main.rs"
     ],
     "dirty_files": 1
   },
   "learnings": [
     {
-      "key": "task-bug-zero-duration-scenes-changes",
-      "content": "Modified 1 files (+81, -1): crates/ar-edit-core/src/index.rs",
+      "key": "task-bug-double-errors-changes",
+      "content": "Modified 1 files (+22, -38): crates/ar-edit/src/main.rs",
       "memory_type": "episodic",
       "confidence": 0.8
     }
   ],
-  "branch_name": "hence/bug-zero-duration-scenes-v1",
-  "evaluated_at": "2026-02-20T02:40:18Z"
+  "branch_name": "hence/bug-double-errors-v1",
+  "evaluated_at": "2026-02-20T02:42:27Z"
 }
