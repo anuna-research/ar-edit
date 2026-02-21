@@ -518,7 +518,7 @@ fn cmd_transcribe(cli: &Cli, args: &cli::TranscribeArgs) -> anyhow::Result<()> {
         manifest
             .sources
             .iter()
-            .filter(|s| !s.transcribed)
+            .filter(|s| args.force || !s.transcribed)
             .map(|s| s.id.clone())
             .collect()
     } else if let Some(ref id) = args.source_id {

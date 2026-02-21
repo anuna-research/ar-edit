@@ -181,6 +181,10 @@ pub struct TranscribeArgs {
     #[arg(long)]
     pub all: bool,
 
+    /// Re-transcribe even if already transcribed
+    #[arg(long)]
+    pub force: bool,
+
     /// Whisper model name (e.g. tiny, base, small, medium, large)
     #[arg(long)]
     pub model: Option<String>,
