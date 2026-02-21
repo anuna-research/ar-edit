@@ -24,11 +24,13 @@ pub enum TranscriptError {
     WhisperFailed(String),
     #[error("invalid whisper model '{0}': expected one of tiny, base, small, medium, large")]
     InvalidModel(String),
-    #[error("whisper model 'ggml-{model}.bin' not found in: {}\nhint: download with: whisper-cli --download-model {model}", searched.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "))]
+    #[error("whisper model 'ggml-{model}.bin' not found in: {}", searched.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "))]
     ModelNotFound {
         model: String,
         searched: Vec<PathBuf>,
     },
+    #[error("failed to download whisper model 'ggml-{model}.bin': {reason}")]
+    ModelDownloadFailed { model: String, reason: String },
     #[error("whisper JSON output not found at {0}")]
     WhisperOutputMissing(PathBuf),
     #[error("failed to parse whisper JSON at {path}: {source}")]
@@ -125,6 +127,7 @@ pub fn validate_model(model: &str) -> Result<(), TranscriptError> {
 /// 2. `$HOME/.cache/whisper/`
 /// 3. `/usr/local/share/whisper-cpp/models/`
 /// 4. `/opt/homebrew/share/whisper-cpp/models/`
+/// 5. `/opt/homebrew/share/whisper-cpp/`
 pub fn find_model(model: &str) -> Result<PathBuf, TranscriptError> {
     validate_model(model)?;
 
@@ -146,6 +149,7 @@ pub fn find_model(model: &str) -> Result<PathBuf, TranscriptError> {
         home.map(|h| h.join(".cache/whisper")),
         Some(PathBuf::from("/usr/local/share/whisper-cpp/models")),
         Some(PathBuf::from("/opt/homebrew/share/whisper-cpp/models")),
+        Some(PathBuf::from("/opt/homebrew/share/whisper-cpp")),
     ]
     .into_iter()
     .flatten()
@@ -163,6 +167,53 @@ pub fn find_model(model: &str) -> Result<PathBuf, TranscriptError> {
         model: model.to_string(),
         searched,
     })
+}
+
+/// Download a whisper model from Hugging Face to `~/.cache/whisper/`.
+///
+/// Uses `curl` to fetch `ggml-{model}.bin` from the ggerganov/whisper.cpp
+/// repository on Hugging Face. Returns the path to the downloaded model file.
+pub fn download_model(model: &str) -> Result<PathBuf, TranscriptError> {
+    validate_model(model)?;
+
+    let cache_dir = std::env::var("HOME")
+        .map(|h| PathBuf::from(h).join(".cache/whisper"))
+        .map_err(|_| TranscriptError::ModelDownloadFailed {
+            model: model.to_string(),
+            reason: "HOME environment variable not set".to_string(),
+        })?;
+
+    std::fs::create_dir_all(&cache_dir).map_err(|e| TranscriptError::ModelDownloadFailed {
+        model: model.to_string(),
+        reason: format!("failed to create {}: {e}", cache_dir.display()),
+    })?;
+
+    let filename = format!("ggml-{model}.bin");
+    let dest = cache_dir.join(&filename);
+    let url = format!(
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{filename}"
+    );
+
+    let result = Command::new("curl")
+        .args(["-fSL", "-o"])
+        .arg(&dest)
+        .arg(&url)
+        .output()
+        .map_err(|e| TranscriptError::ModelDownloadFailed {
+            model: model.to_string(),
+            reason: format!("curl not found: {e}"),
+        })?;
+
+    if !result.status.success() {
+        let _ = std::fs::remove_file(&dest);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(TranscriptError::ModelDownloadFailed {
+            model: model.to_string(),
+            reason: stderr.trim().to_string(),
+        });
+    }
+
+    Ok(dest)
 }
 
 /// Invoke whisper-cli to transcribe an audio file.

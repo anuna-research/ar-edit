@@ -543,7 +543,19 @@ fn cmd_transcribe(cli: &Cli, args: &cli::TranscribeArgs) -> anyhow::Result<()> {
         .model
         .as_deref()
         .unwrap_or(&manifest.defaults.whisper_model);
-    let model_path = transcript::find_model(model_name)?;
+    let model_path = match transcript::find_model(model_name) {
+        Ok(path) => path,
+        Err(transcript::TranscriptError::ModelNotFound { .. }) => {
+            if !cli.json {
+                eprintln!(
+                    "Whisper model '{}' not found locally, downloading...",
+                    model_name
+                );
+            }
+            transcript::download_model(model_name)?
+        }
+        Err(e) => return Err(e.into()),
+    };
     let mut results = Vec::new();
 
     for source_id in &source_ids {
