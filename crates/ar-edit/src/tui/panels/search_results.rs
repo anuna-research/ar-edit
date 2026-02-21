@@ -1,5 +1,5 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
 use ar_edit_core::display;
 use ar_edit_core::search::{ResultType, SearchResult, TypeFilter};
