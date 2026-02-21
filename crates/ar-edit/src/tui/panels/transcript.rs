@@ -65,7 +65,7 @@ pub fn draw(
             build_scene_list(shot, *from, *to, project_dir)
         }
         ShotRange::Time { from_ms, to_ms } => {
-            build_time_view(shot, *from_ms, *to_ms)
+            build_time_view(shot, *from_ms, *to_ms, project_dir)
         }
     };
 
@@ -382,11 +382,12 @@ fn build_scene_list(
 // Time-based view (no transcript/index to display)
 // ---------------------------------------------------------------------------
 
-/// Build a simple time-range view when neither transcript nor scenes apply.
+/// Build a time-range view, loading the transcript to show segments in range.
 fn build_time_view(
     shot: &ResolvedShot,
     from_ms: u64,
     to_ms: u64,
+    project_dir: &Path,
 ) -> (Vec<Line<'static>>, u16) {
     let mut lines = Vec::new();
 
@@ -417,22 +418,56 @@ fn build_time_view(
     ]));
     lines.push(Line::from(""));
 
-    if let Some(ref preview) = shot.text_preview {
-        lines.push(Line::from(Span::styled(
-            "Text:",
-            Style::default().add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(preview.clone()));
-        lines.push(Line::from(""));
-    }
+    // Try to load the transcript and show segments within the time range.
+    let transcript_path = project_dir
+        .join("transcripts")
+        .join(format!("{}.transcript.json", shot.source));
 
-    if let Some(ref preview) = shot.scene_preview {
-        lines.push(Line::from(Span::styled(
-            "Scenes:",
-            Style::default().add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(preview.clone()));
-        lines.push(Line::from(""));
+    let transcript: Option<Transcript> = std::fs::read_to_string(&transcript_path)
+        .ok()
+        .and_then(|data| serde_json::from_str(&data).ok());
+
+    if let Some(transcript) = transcript {
+        for segment in &transcript.segments {
+            // Show segments that overlap with the time range.
+            if segment.end_ms <= from_ms || segment.start_ms >= to_ms {
+                continue;
+            }
+
+            let time_str = format!(
+                "[{} \u{2192} {}]",
+                display::format_time(segment.start_ms),
+                display::format_time(segment.end_ms),
+            );
+            lines.push(Line::from(Span::styled(
+                time_str,
+                Style::default().fg(Color::DarkGray),
+            )));
+
+            if !segment.words.is_empty() {
+                let mut spans: Vec<Span<'static>> = Vec::new();
+                for word in &segment.words {
+                    let in_range = word.start_ms >= from_ms && word.end_ms <= to_ms;
+                    let style = if in_range {
+                        Style::default().fg(Color::White)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+                    if !spans.is_empty() {
+                        spans.push(Span::raw(" "));
+                    }
+                    spans.push(Span::styled(word.text.clone(), style));
+                }
+                lines.push(Line::from(spans));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    segment.text.clone(),
+                    Style::default().fg(Color::White),
+                )));
+            }
+
+            lines.push(Line::from(""));
+        }
     }
 
     // Notes
@@ -680,9 +715,11 @@ mod tests {
 
     #[test]
     fn time_view_shows_range() {
+        let tmp = TempDir::new().unwrap();
+        setup_project(tmp.path());
         let shot = make_time_shot();
 
-        let (lines, _) = build_time_view(&shot, 5000, 10000);
+        let (lines, _) = build_time_view(&shot, 5000, 10000, tmp.path());
         let all_text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter())
@@ -694,13 +731,14 @@ mod tests {
 
     #[test]
     fn time_view_shows_notes() {
+        let tmp = TempDir::new().unwrap();
         let mut shot = make_time_shot();
         shot.notes.push(ShotNote {
             text: "Great take".into(),
             created: "2026-02-19T15:00:00Z".parse().unwrap(),
         });
 
-        let (lines, _) = build_time_view(&shot, 5000, 10000);
+        let (lines, _) = build_time_view(&shot, 5000, 10000, tmp.path());
         let all_text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter())
