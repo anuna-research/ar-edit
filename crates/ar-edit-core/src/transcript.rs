@@ -218,7 +218,7 @@ pub fn download_model(model: &str) -> Result<PathBuf, TranscriptError> {
 
 /// Invoke whisper-cli to transcribe an audio file.
 ///
-/// Runs: `whisper-cli -m <model_path> -f <audio> --output-json --print-progress`
+/// Runs: `whisper-cli -m <model_path> -f <audio> --output-json-full --print-progress`
 ///
 /// The JSON output file is written by whisper-cli alongside the audio file
 /// (as `<audio_filename>.json`). It is parsed into a [`Transcript`] and then
@@ -235,7 +235,7 @@ pub fn invoke_whisper(
         .arg(model_path)
         .arg("-f")
         .arg(audio)
-        .args(["--output-json", "--print-progress"])
+        .args(["--output-json-full", "--print-progress"])
         .output()
         .map_err(TranscriptError::WhisperNotFound)?;
 
