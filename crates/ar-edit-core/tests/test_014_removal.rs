@@ -12,8 +12,10 @@ use tempfile::TempDir;
 #[test]
 fn remove_shot_decreases_snapshot_count() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
 
     doc.remove_shot("shot-001").unwrap();
 
@@ -24,7 +26,8 @@ fn remove_shot_decreases_snapshot_count() {
 #[test]
 fn remove_shot_returns_full_shot_data() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
 
     let removed = doc.remove_shot("shot-001").unwrap();
     assert_eq!(removed.id, "shot-001");
@@ -35,7 +38,8 @@ fn remove_shot_returns_full_shot_data() {
 #[test]
 fn remove_preserves_shot_data_in_op() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
     doc.remove_shot("shot-001").unwrap();
 
     match &doc.ops[1].op {
@@ -53,9 +57,18 @@ fn remove_preserves_shot_data_in_op() {
 #[test]
 fn remove_all_shots_leaves_empty_snapshot() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
-    doc.add_shot("src-003", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
+    doc.add_shot(
+        "src-003",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 5000,
+        },
+    )
+    .unwrap();
 
     doc.remove_shot("shot-001").unwrap();
     doc.remove_shot("shot-002").unwrap();
@@ -68,9 +81,12 @@ fn remove_all_shots_leaves_empty_snapshot() {
 #[test]
 fn remove_middle_preserves_order_of_remaining() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 10 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Words { from: 11, to: 20 }).unwrap();
-    doc.add_shot("src-003", ShotRange::Words { from: 21, to: 30 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 10 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Words { from: 11, to: 20 })
+        .unwrap();
+    doc.add_shot("src-003", ShotRange::Words { from: 21, to: 30 })
+        .unwrap();
 
     doc.remove_shot("shot-002").unwrap();
 
@@ -91,7 +107,8 @@ fn remove_nonexistent_shot_errors() {
 #[test]
 fn remove_same_shot_twice_errors() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
 
     doc.remove_shot("shot-001").unwrap();
     let err = doc.remove_shot("shot-001").unwrap_err();
@@ -103,7 +120,8 @@ fn remove_same_shot_twice_errors() {
 #[test]
 fn head_advances_after_remove() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
     assert_eq!(doc.head, 0);
 
     doc.remove_shot("shot-001").unwrap();
@@ -118,8 +136,10 @@ fn save_load_roundtrip_after_removal() {
     let path = tmp.path().join("removed.edit.json");
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
     doc.remove_shot("shot-001").unwrap();
     doc.save(&path).unwrap();
 
@@ -138,7 +158,8 @@ fn removed_shot_data_survives_persistence() {
     let path = tmp.path().join("removed-data.edit.json");
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
     doc.remove_shot("shot-001").unwrap();
     doc.save(&path).unwrap();
 

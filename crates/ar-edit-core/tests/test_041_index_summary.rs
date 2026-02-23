@@ -183,13 +183,7 @@ fn summary_updates_after_adding_description() {
     assert_eq!(summary_before.described_scenes, 0);
 
     // Add description to scene 0
-    ar_edit_core::index::set_scene_description(
-        tmp.path(),
-        "src-003",
-        0,
-        "Opening shot",
-    )
-    .unwrap();
+    ar_edit_core::index::set_scene_description(tmp.path(), "src-003", 0, "Opening shot").unwrap();
 
     let updated = load_index(tmp.path(), "src-003").unwrap();
     let summary_after = summarize(&updated);

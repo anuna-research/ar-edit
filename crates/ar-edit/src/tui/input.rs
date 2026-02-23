@@ -64,7 +64,9 @@ fn handle_normal_timeline(app: &mut App, key: KeyEvent) {
         KeyCode::Char('j') | KeyCode::Down => app.select_next(),
         KeyCode::Char('k') | KeyCode::Up => app.select_previous(),
         KeyCode::Char('{') => super::panels::transcript::scroll_up(&mut app.transcript_scroll),
-        KeyCode::Char('}') => super::panels::transcript::scroll_down(&mut app.transcript_scroll, u16::MAX),
+        KeyCode::Char('}') => {
+            super::panels::transcript::scroll_down(&mut app.transcript_scroll, u16::MAX)
+        }
         KeyCode::Char('J') => do_move_shot_down(app),
         KeyCode::Char('K') => do_move_shot_up(app),
         KeyCode::Char('d') => do_delete_shot(app),
@@ -543,7 +545,12 @@ fn do_search(app: &mut App, query: &str) {
         return;
     }
 
-    match search::search(&app.project_dir, query, None, app.search_type_filter.as_ref()) {
+    match search::search(
+        &app.project_dir,
+        query,
+        None,
+        app.search_type_filter.as_ref(),
+    ) {
         Ok(results) => {
             let count = results.len();
             app.search_query = query.to_string();
@@ -638,8 +645,7 @@ fn do_jump_to_result(app: &mut App) {
         app.search_results.clear();
         app.status_message = format!(
             "Jumped to {} ({})",
-            app.resolved_shots[idx].id,
-            result.source_id,
+            app.resolved_shots[idx].id, result.source_id,
         );
     } else {
         // No matching shot — stay in results but show info about the result.
@@ -762,9 +768,7 @@ fn parse_range_input(input: &str) -> Result<ShotRange, String> {
 
 /// Default status bar message showing available key bindings.
 pub fn default_status() -> String {
-    String::from(
-        "a:add d:del J/K:move t:trim p:play n:note m:mark /:search ^z/^y:undo/redo q:quit",
-    )
+    String::from("a:add d:del J/K:move t:trim p:play n:note m:mark /:search ^z/^y:undo/redo q:quit")
 }
 
 // ---------------------------------------------------------------------------

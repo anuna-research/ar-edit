@@ -242,9 +242,18 @@ fn same_codec_detected_across_aliases() {
 /// When source and target codecs differ, re-encoding is needed.
 #[test]
 fn different_codecs_detected() {
-    assert_ne!(render::normalize_codec("h264"), render::normalize_codec("h265"));
-    assert_ne!(render::normalize_codec("h264"), render::normalize_codec("vp9"));
-    assert_ne!(render::normalize_codec("h265"), render::normalize_codec("av1"));
+    assert_ne!(
+        render::normalize_codec("h264"),
+        render::normalize_codec("h265")
+    );
+    assert_ne!(
+        render::normalize_codec("h264"),
+        render::normalize_codec("vp9")
+    );
+    assert_ne!(
+        render::normalize_codec("h265"),
+        render::normalize_codec("av1")
+    );
 }
 
 /// HEVC aliases all normalise consistently.
@@ -361,7 +370,10 @@ fn codec_to_encoder_chain_h264() {
     for alias in &["h264", "avc", "libx264"] {
         let normalized = render::normalize_codec(alias);
         let encoder = render::ffmpeg_video_encoder(normalized);
-        assert_eq!(encoder, "libx264", "alias {alias} should resolve to libx264");
+        assert_eq!(
+            encoder, "libx264",
+            "alias {alias} should resolve to libx264"
+        );
     }
 }
 
@@ -370,7 +382,10 @@ fn codec_to_encoder_chain_h265() {
     for alias in &["h265", "hevc", "libx265"] {
         let normalized = render::normalize_codec(alias);
         let encoder = render::ffmpeg_video_encoder(normalized);
-        assert_eq!(encoder, "libx265", "alias {alias} should resolve to libx265");
+        assert_eq!(
+            encoder, "libx265",
+            "alias {alias} should resolve to libx265"
+        );
     }
 }
 
@@ -379,7 +394,10 @@ fn codec_to_encoder_chain_vp9() {
     for alias in &["vp9", "libvpx-vp9"] {
         let normalized = render::normalize_codec(alias);
         let encoder = render::ffmpeg_video_encoder(normalized);
-        assert_eq!(encoder, "libvpx-vp9", "alias {alias} should resolve to libvpx-vp9");
+        assert_eq!(
+            encoder, "libvpx-vp9",
+            "alias {alias} should resolve to libvpx-vp9"
+        );
     }
 }
 
@@ -388,7 +406,10 @@ fn codec_to_encoder_chain_av1() {
     for alias in &["av1", "libaom-av1", "libsvtav1"] {
         let normalized = render::normalize_codec(alias);
         let encoder = render::ffmpeg_video_encoder(normalized);
-        assert_eq!(encoder, "libsvtav1", "alias {alias} should resolve to libsvtav1");
+        assert_eq!(
+            encoder, "libsvtav1",
+            "alias {alias} should resolve to libsvtav1"
+        );
     }
 }
 

@@ -128,15 +128,10 @@ impl App {
         if edits_dir.is_dir() {
             if let Some(entry) = std::fs::read_dir(&edits_dir)?
                 .filter_map(|e| e.ok())
-                .find(|e| {
-                    e.path()
-                        .extension()
-                        .is_some_and(|ext| ext == "json")
-                })
+                .find(|e| e.path().extension().is_some_and(|ext| ext == "json"))
             {
                 let path = entry.path();
-                let doc =
-                    EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
+                let doc = EditDocument::load(&path).map_err(|e| anyhow::anyhow!("{e}"))?;
                 self.status_message = format!("Loaded edit: {}", doc.name);
                 self.edit = Some(doc);
                 self.edit_path = Some(path);
@@ -287,10 +282,7 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
     let mut last_tick = Instant::now();
 
     // Start watching the edit document for external changes.
-    let mut watcher = app
-        .edit_path
-        .as_deref()
-        .and_then(events::FileWatcher::new);
+    let mut watcher = app.edit_path.as_deref().and_then(events::FileWatcher::new);
 
     loop {
         terminal.draw(|f| ui(f, app))?;
@@ -329,8 +321,7 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
                     *terminal = setup_terminal()?;
                 }
                 Err(_) => {
-                    app.status_message =
-                        "No video player found (install VLC or ffplay)".into();
+                    app.status_message = "No video player found (install VLC or ffplay)".into();
                 }
             }
         }
@@ -426,12 +417,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     }
 
     // --- Sources panel (REQ-041) ---
-    panels::sources::draw(
-        f,
-        &app.sources,
-        &mut app.selected_source,
-        sources_area,
-    );
+    panels::sources::draw(f, &app.sources, &mut app.selected_source, sources_area);
 
     // --- Status bar (REQ-044) ---
     let edit_name = app.edit.as_ref().map(|e| e.name.as_str());

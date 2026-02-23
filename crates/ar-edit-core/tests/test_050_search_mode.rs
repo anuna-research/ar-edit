@@ -69,7 +69,11 @@ fn make_transcript(source_id: &str, words: &[(&str, u64, u64)]) -> Transcript {
         })
         .collect();
 
-    let text = w.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
+    let text = w
+        .iter()
+        .map(|w| w.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
     let start_ms = words.first().map_or(0, |w| w.1);
     let end_ms = words.last().map_or(0, |w| w.2);
 
@@ -167,9 +171,14 @@ fn setup_project(
 fn search_finds_transcript_word() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", true, false)]);
-    let transcript = make_transcript("src-001", &[
-        ("The", 0, 200), ("climate", 200, 600), ("debate", 600, 1000),
-    ]);
+    let transcript = make_transcript(
+        "src-001",
+        &[
+            ("The", 0, 200),
+            ("climate", 200, 600),
+            ("debate", 600, 1000),
+        ],
+    );
     setup_project(tmp.path(), &manifest, &[transcript], &[], &[]);
 
     let results = search::search(tmp.path(), "climate", None, None).unwrap();
@@ -184,10 +193,13 @@ fn search_finds_transcript_word() {
 fn search_finds_scene_description() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", false, true)]);
-    let index = make_index("src-001", vec![
-        make_scene(0, 0, 30000, Some("Wide establishing shot")),
-        make_scene(1, 30000, 60000, Some("Close-up interview")),
-    ]);
+    let index = make_index(
+        "src-001",
+        vec![
+            make_scene(0, 0, 30000, Some("Wide establishing shot")),
+            make_scene(1, 30000, 60000, Some("Close-up interview")),
+        ],
+    );
     setup_project(tmp.path(), &manifest, &[], &[index], &[]);
 
     let results = search::search(tmp.path(), "interview", None, None).unwrap();
@@ -206,7 +218,10 @@ fn search_finds_marker_label() {
         source_id: "src-001".into(),
         markers: vec![Marker {
             id: "mark-001".into(),
-            range: ShotRange::Time { from_ms: 5000, to_ms: 10000 },
+            range: ShotRange::Time {
+                from_ms: 5000,
+                to_ms: 10000,
+            },
             label: "hero-shot".into(),
             note: Some("Best take".into()),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
@@ -229,7 +244,10 @@ fn search_finds_marker_note() {
         source_id: "src-001".into(),
         markers: vec![Marker {
             id: "mark-001".into(),
-            range: ShotRange::Time { from_ms: 5000, to_ms: 10000 },
+            range: ShotRange::Time {
+                from_ms: 5000,
+                to_ms: 10000,
+            },
             label: "select".into(),
             note: Some("Great performance here".into()),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
@@ -252,17 +270,22 @@ fn search_finds_marker_note() {
 fn search_unified_across_all_types() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", true, true)]);
-    let transcript = make_transcript("src-001", &[
-        ("The", 0, 200), ("office", 200, 600), ("scene", 600, 1000),
-    ]);
-    let index = make_index("src-001", vec![
-        make_scene(0, 0, 30000, Some("Interior office wide")),
-    ]);
+    let transcript = make_transcript(
+        "src-001",
+        &[("The", 0, 200), ("office", 200, 600), ("scene", 600, 1000)],
+    );
+    let index = make_index(
+        "src-001",
+        vec![make_scene(0, 0, 30000, Some("Interior office wide"))],
+    );
     let markers = SourceMarkers {
         source_id: "src-001".into(),
         markers: vec![Marker {
             id: "mark-001".into(),
-            range: ShotRange::Time { from_ms: 0, to_ms: 5000 },
+            range: ShotRange::Time {
+                from_ms: 0,
+                to_ms: 5000,
+            },
             label: "office-best".into(),
             note: None,
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
@@ -289,14 +312,14 @@ fn filter_transcript_only() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", true, true)]);
     let transcript = make_transcript("src-001", &[("office", 0, 400)]);
-    let index = make_index("src-001", vec![
-        make_scene(0, 0, 30000, Some("office shot")),
-    ]);
+    let index = make_index(
+        "src-001",
+        vec![make_scene(0, 0, 30000, Some("office shot"))],
+    );
     setup_project(tmp.path(), &manifest, &[transcript], &[index], &[]);
 
-    let results = search::search(
-        tmp.path(), "office", None, Some(&TypeFilter::Transcript),
-    ).unwrap();
+    let results =
+        search::search(tmp.path(), "office", None, Some(&TypeFilter::Transcript)).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].result_type, ResultType::Transcript);
 }
@@ -307,14 +330,13 @@ fn filter_scene_only() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", true, true)]);
     let transcript = make_transcript("src-001", &[("office", 0, 400)]);
-    let index = make_index("src-001", vec![
-        make_scene(0, 0, 30000, Some("office shot")),
-    ]);
+    let index = make_index(
+        "src-001",
+        vec![make_scene(0, 0, 30000, Some("office shot"))],
+    );
     setup_project(tmp.path(), &manifest, &[transcript], &[index], &[]);
 
-    let results = search::search(
-        tmp.path(), "office", None, Some(&TypeFilter::Scene),
-    ).unwrap();
+    let results = search::search(tmp.path(), "office", None, Some(&TypeFilter::Scene)).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].result_type, ResultType::Scene);
 }
@@ -325,14 +347,18 @@ fn filter_metadata_only() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", true, true)]);
     let transcript = make_transcript("src-001", &[("office", 0, 400)]);
-    let index = make_index("src-001", vec![
-        make_scene(0, 0, 30000, Some("office shot")),
-    ]);
+    let index = make_index(
+        "src-001",
+        vec![make_scene(0, 0, 30000, Some("office shot"))],
+    );
     let markers = SourceMarkers {
         source_id: "src-001".into(),
         markers: vec![Marker {
             id: "mark-001".into(),
-            range: ShotRange::Time { from_ms: 0, to_ms: 5000 },
+            range: ShotRange::Time {
+                from_ms: 0,
+                to_ms: 5000,
+            },
             label: "office-select".into(),
             note: None,
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
@@ -340,9 +366,7 @@ fn filter_metadata_only() {
     };
     setup_project(tmp.path(), &manifest, &[transcript], &[index], &[markers]);
 
-    let results = search::search(
-        tmp.path(), "office", None, Some(&TypeFilter::Metadata),
-    ).unwrap();
+    let results = search::search(tmp.path(), "office", None, Some(&TypeFilter::Metadata)).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].result_type, ResultType::Metadata);
 }
@@ -383,9 +407,7 @@ fn search_with_source_filter() {
     let t2 = make_transcript("src-002", &[("interview", 0, 400)]);
     setup_project(tmp.path(), &manifest, &[t1, t2], &[], &[]);
 
-    let results = search::search(
-        tmp.path(), "interview", Some("src-002"), None,
-    ).unwrap();
+    let results = search::search(tmp.path(), "interview", Some("src-002"), None).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].source_id, "src-002");
 }
@@ -422,9 +444,10 @@ fn search_no_matches() {
 fn search_case_insensitive() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", false, true)]);
-    let index = make_index("src-001", vec![
-        make_scene(0, 0, 30000, Some("Interior OFFICE Scene")),
-    ]);
+    let index = make_index(
+        "src-001",
+        vec![make_scene(0, 0, 30000, Some("Interior OFFICE Scene"))],
+    );
     setup_project(tmp.path(), &manifest, &[], &[index], &[]);
 
     let results = search::search(tmp.path(), "office", None, None).unwrap();
@@ -451,10 +474,16 @@ fn search_invalid_regex_error() {
 fn result_has_all_display_fields() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", true, false)]);
-    let transcript = make_transcript("src-001", &[
-        ("The", 0, 200), ("big", 200, 400), ("climate", 400, 800),
-        ("debate", 800, 1200), ("begins", 1200, 1600),
-    ]);
+    let transcript = make_transcript(
+        "src-001",
+        &[
+            ("The", 0, 200),
+            ("big", 200, 400),
+            ("climate", 400, 800),
+            ("debate", 800, 1200),
+            ("begins", 1200, 1600),
+        ],
+    );
     setup_project(tmp.path(), &manifest, &[transcript], &[], &[]);
 
     let results = search::search(tmp.path(), "climate", None, None).unwrap();
@@ -472,10 +501,16 @@ fn result_has_all_display_fields() {
 fn transcript_result_context_has_surrounding_words() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", true, false)]);
-    let transcript = make_transcript("src-001", &[
-        ("The", 0, 200), ("big", 200, 400), ("climate", 400, 800),
-        ("policy", 800, 1200), ("debate", 1200, 1600),
-    ]);
+    let transcript = make_transcript(
+        "src-001",
+        &[
+            ("The", 0, 200),
+            ("big", 200, 400),
+            ("climate", 400, 800),
+            ("policy", 800, 1200),
+            ("debate", 1200, 1600),
+        ],
+    );
     setup_project(tmp.path(), &manifest, &[transcript], &[], &[]);
 
     let results = search::search(tmp.path(), "climate", None, None).unwrap();
@@ -490,10 +525,13 @@ fn transcript_result_context_has_surrounding_words() {
 fn scene_result_context_has_scene_index() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", false, true)]);
-    let index = make_index("src-001", vec![
-        make_scene(0, 0, 30000, Some("Wide shot")),
-        make_scene(1, 30000, 60000, Some("Interview close-up")),
-    ]);
+    let index = make_index(
+        "src-001",
+        vec![
+            make_scene(0, 0, 30000, Some("Wide shot")),
+            make_scene(1, 30000, 60000, Some("Interview close-up")),
+        ],
+    );
     setup_project(tmp.path(), &manifest, &[], &[index], &[]);
 
     let results = search::search(tmp.path(), "interview", None, None).unwrap();
@@ -509,7 +547,10 @@ fn marker_result_context_has_id_and_label() {
         source_id: "src-001".into(),
         markers: vec![Marker {
             id: "mark-001".into(),
-            range: ShotRange::Time { from_ms: 0, to_ms: 5000 },
+            range: ShotRange::Time {
+                from_ms: 0,
+                to_ms: 5000,
+            },
             label: "hero".into(),
             note: Some("Best take".into()),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),

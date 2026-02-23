@@ -16,10 +16,7 @@ mod tests {
     fn schema_is_valid_json() {
         let schema_str = edit_document_schema();
         let value: serde_json::Value = serde_json::from_str(&schema_str).unwrap();
-        assert_eq!(
-            value["$schema"],
-            "http://json-schema.org/draft-07/schema#"
-        );
+        assert_eq!(value["$schema"], "http://json-schema.org/draft-07/schema#");
         assert_eq!(value["title"], "EditDocument");
     }
 
@@ -105,7 +102,11 @@ mod tests {
         });
 
         let result = compiled.validate(&example);
-        assert!(result.is_ok(), "spec example failed validation: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "spec example failed validation: {:?}",
+            result.err()
+        );
     }
 
     /// Validate a minimal edit document (empty ops, head -1).
@@ -125,7 +126,11 @@ mod tests {
         });
 
         let result = compiled.validate(&minimal);
-        assert!(result.is_ok(), "minimal doc failed validation: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "minimal doc failed validation: {:?}",
+            result.err()
+        );
     }
 
     /// Validate that an edit document with notes passes schema validation.
@@ -180,7 +185,11 @@ mod tests {
         });
 
         let result = compiled.validate(&doc);
-        assert!(result.is_ok(), "annotated doc failed validation: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "annotated doc failed validation: {:?}",
+            result.err()
+        );
     }
 
     /// Validate a document with all range types (words, scenes, time).
@@ -222,7 +231,11 @@ mod tests {
         });
 
         let result = compiled.validate(&doc);
-        assert!(result.is_ok(), "mixed-ranges doc failed validation: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "mixed-ranges doc failed validation: {:?}",
+            result.err()
+        );
     }
 
     /// Validate that all operation types are accepted by the schema.
@@ -284,6 +297,10 @@ mod tests {
         });
 
         let result = compiled.validate(&doc);
-        assert!(result.is_ok(), "all-ops doc failed validation: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "all-ops doc failed validation: {:?}",
+            result.err()
+        );
     }
 }

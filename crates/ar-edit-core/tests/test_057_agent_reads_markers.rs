@@ -30,13 +30,55 @@ fn make_transcript() -> Transcript {
                 end_ms: 10000,
                 text: "Welcome to the interview about climate policy".into(),
                 words: vec![
-                    Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 500, confidence: 0.95 },
-                    Word { index: 1, text: "to".into(), start_ms: 500, end_ms: 700, confidence: 0.97 },
-                    Word { index: 2, text: "the".into(), start_ms: 700, end_ms: 900, confidence: 0.98 },
-                    Word { index: 3, text: "interview".into(), start_ms: 900, end_ms: 1500, confidence: 0.96 },
-                    Word { index: 4, text: "about".into(), start_ms: 1500, end_ms: 2000, confidence: 0.94 },
-                    Word { index: 5, text: "climate".into(), start_ms: 2000, end_ms: 2600, confidence: 0.93 },
-                    Word { index: 6, text: "policy".into(), start_ms: 2600, end_ms: 3200, confidence: 0.95 },
+                    Word {
+                        index: 0,
+                        text: "Welcome".into(),
+                        start_ms: 0,
+                        end_ms: 500,
+                        confidence: 0.95,
+                    },
+                    Word {
+                        index: 1,
+                        text: "to".into(),
+                        start_ms: 500,
+                        end_ms: 700,
+                        confidence: 0.97,
+                    },
+                    Word {
+                        index: 2,
+                        text: "the".into(),
+                        start_ms: 700,
+                        end_ms: 900,
+                        confidence: 0.98,
+                    },
+                    Word {
+                        index: 3,
+                        text: "interview".into(),
+                        start_ms: 900,
+                        end_ms: 1500,
+                        confidence: 0.96,
+                    },
+                    Word {
+                        index: 4,
+                        text: "about".into(),
+                        start_ms: 1500,
+                        end_ms: 2000,
+                        confidence: 0.94,
+                    },
+                    Word {
+                        index: 5,
+                        text: "climate".into(),
+                        start_ms: 2000,
+                        end_ms: 2600,
+                        confidence: 0.93,
+                    },
+                    Word {
+                        index: 6,
+                        text: "policy".into(),
+                        start_ms: 2600,
+                        end_ms: 3200,
+                        confidence: 0.95,
+                    },
                 ],
             },
             TranscriptSegment {
@@ -45,12 +87,48 @@ fn make_transcript() -> Transcript {
                 end_ms: 20000,
                 text: "Today we discuss renewable energy solutions".into(),
                 words: vec![
-                    Word { index: 7, text: "Today".into(), start_ms: 10000, end_ms: 10500, confidence: 0.94 },
-                    Word { index: 8, text: "we".into(), start_ms: 10500, end_ms: 10700, confidence: 0.99 },
-                    Word { index: 9, text: "discuss".into(), start_ms: 10700, end_ms: 11200, confidence: 0.93 },
-                    Word { index: 10, text: "renewable".into(), start_ms: 11200, end_ms: 11800, confidence: 0.91 },
-                    Word { index: 11, text: "energy".into(), start_ms: 11800, end_ms: 12300, confidence: 0.92 },
-                    Word { index: 12, text: "solutions".into(), start_ms: 12300, end_ms: 13000, confidence: 0.90 },
+                    Word {
+                        index: 7,
+                        text: "Today".into(),
+                        start_ms: 10000,
+                        end_ms: 10500,
+                        confidence: 0.94,
+                    },
+                    Word {
+                        index: 8,
+                        text: "we".into(),
+                        start_ms: 10500,
+                        end_ms: 10700,
+                        confidence: 0.99,
+                    },
+                    Word {
+                        index: 9,
+                        text: "discuss".into(),
+                        start_ms: 10700,
+                        end_ms: 11200,
+                        confidence: 0.93,
+                    },
+                    Word {
+                        index: 10,
+                        text: "renewable".into(),
+                        start_ms: 11200,
+                        end_ms: 11800,
+                        confidence: 0.91,
+                    },
+                    Word {
+                        index: 11,
+                        text: "energy".into(),
+                        start_ms: 11800,
+                        end_ms: 12300,
+                        confidence: 0.92,
+                    },
+                    Word {
+                        index: 12,
+                        text: "solutions".into(),
+                        start_ms: 12300,
+                        end_ms: 13000,
+                        confidence: 0.90,
+                    },
                 ],
             },
             TranscriptSegment {
@@ -59,10 +137,34 @@ fn make_transcript() -> Transcript {
                 end_ms: 30000,
                 text: "Thank you for watching".into(),
                 words: vec![
-                    Word { index: 13, text: "Thank".into(), start_ms: 20000, end_ms: 20500, confidence: 0.96 },
-                    Word { index: 14, text: "you".into(), start_ms: 20500, end_ms: 20800, confidence: 0.97 },
-                    Word { index: 15, text: "for".into(), start_ms: 20800, end_ms: 21000, confidence: 0.98 },
-                    Word { index: 16, text: "watching".into(), start_ms: 21000, end_ms: 21600, confidence: 0.95 },
+                    Word {
+                        index: 13,
+                        text: "Thank".into(),
+                        start_ms: 20000,
+                        end_ms: 20500,
+                        confidence: 0.96,
+                    },
+                    Word {
+                        index: 14,
+                        text: "you".into(),
+                        start_ms: 20500,
+                        end_ms: 20800,
+                        confidence: 0.97,
+                    },
+                    Word {
+                        index: 15,
+                        text: "for".into(),
+                        start_ms: 20800,
+                        end_ms: 21000,
+                        confidence: 0.98,
+                    },
+                    Word {
+                        index: 16,
+                        text: "watching".into(),
+                        start_ms: 21000,
+                        end_ms: 21600,
+                        confidence: 0.95,
+                    },
                 ],
             },
         ],
@@ -87,7 +189,10 @@ fn make_resolved_marker(id: &str, label: &str, start_ms: u64, end_ms: u64) -> Re
     ResolvedMarker {
         id: id.into(),
         source_id: "src-001".into(),
-        range: ShotRange::Time { from_ms: start_ms, to_ms: end_ms },
+        range: ShotRange::Time {
+            from_ms: start_ms,
+            to_ms: end_ms,
+        },
         label: label.into(),
         note: None,
         created: "2026-02-19T14:00:00Z".parse().unwrap(),
@@ -106,9 +211,7 @@ fn make_resolved_marker(id: &str, label: &str, start_ms: u64, end_ms: u64) -> Re
 #[test]
 fn interleave_places_marker_between_segments() {
     let t = make_transcript();
-    let markers = vec![
-        make_resolved_marker("mark-001", "select", 5000, 8000),
-    ];
+    let markers = vec![make_resolved_marker("mark-001", "select", 5000, 8000)];
 
     let result = interleave_transcript_with_markers(&t, &markers);
     assert_eq!(result.items.len(), 4); // 3 segments + 1 marker
@@ -148,9 +251,7 @@ fn interleave_multiple_markers_chronological() {
 fn interleave_segment_before_marker_at_same_time() {
     let t = make_transcript();
     // Marker at exactly the same start_ms as segment 1 (10000ms)
-    let markers = vec![
-        make_resolved_marker("mark-001", "review", 10000, 12000),
-    ];
+    let markers = vec![make_resolved_marker("mark-001", "review", 10000, 12000)];
 
     let result = interleave_transcript_with_markers(&t, &markers);
     assert_eq!(result.items.len(), 4);
@@ -177,9 +278,7 @@ fn interleave_no_markers_returns_segments_only() {
 #[test]
 fn interleave_preserves_metadata() {
     let t = make_transcript();
-    let markers = vec![
-        make_resolved_marker("mark-001", "select", 5000, 8000),
-    ];
+    let markers = vec![make_resolved_marker("mark-001", "select", 5000, 8000)];
 
     let result = interleave_transcript_with_markers(&t, &markers);
     assert_eq!(result.source_id, "src-001");
@@ -191,9 +290,7 @@ fn interleave_preserves_metadata() {
 #[test]
 fn interleave_json_has_type_tag() {
     let t = make_transcript();
-    let markers = vec![
-        make_resolved_marker("mark-001", "select", 5000, 8000),
-    ];
+    let markers = vec![make_resolved_marker("mark-001", "select", 5000, 8000)];
 
     let result = interleave_transcript_with_markers(&t, &markers);
     let json = serde_json::to_value(&result).unwrap();
@@ -320,7 +417,10 @@ fn resolved_marker_includes_note() {
     let loaded = list_markers(tmp.path(), "src-001").unwrap();
     let resolved = resolve_markers(&loaded.markers, "src-001", tmp.path()).unwrap();
 
-    assert_eq!(resolved[0].note.as_deref(), Some("Best take of the opening"));
+    assert_eq!(
+        resolved[0].note.as_deref(),
+        Some("Best take of the opening")
+    );
 }
 
 #[test]

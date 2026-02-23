@@ -25,10 +25,34 @@ fn make_transcript() -> Transcript {
                 end_ms: 5230,
                 text: "Welcome to the interview".into(),
                 words: vec![
-                    Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                    Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                    Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                    Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
+                    Word {
+                        index: 0,
+                        text: "Welcome".into(),
+                        start_ms: 0,
+                        end_ms: 420,
+                        confidence: 0.95,
+                    },
+                    Word {
+                        index: 1,
+                        text: "to".into(),
+                        start_ms: 420,
+                        end_ms: 540,
+                        confidence: 0.97,
+                    },
+                    Word {
+                        index: 2,
+                        text: "the".into(),
+                        start_ms: 540,
+                        end_ms: 650,
+                        confidence: 0.98,
+                    },
+                    Word {
+                        index: 3,
+                        text: "interview".into(),
+                        start_ms: 650,
+                        end_ms: 1200,
+                        confidence: 0.96,
+                    },
                 ],
             },
             TranscriptSegment {
@@ -37,10 +61,34 @@ fn make_transcript() -> Transcript {
                 end_ms: 12400,
                 text: "Today we discuss climate".into(),
                 words: vec![
-                    Word { index: 4, text: "Today".into(), start_ms: 5230, end_ms: 5600, confidence: 0.94 },
-                    Word { index: 5, text: "we".into(), start_ms: 5600, end_ms: 5750, confidence: 0.99 },
-                    Word { index: 6, text: "discuss".into(), start_ms: 5750, end_ms: 6200, confidence: 0.93 },
-                    Word { index: 7, text: "climate".into(), start_ms: 6200, end_ms: 6800, confidence: 0.91 },
+                    Word {
+                        index: 4,
+                        text: "Today".into(),
+                        start_ms: 5230,
+                        end_ms: 5600,
+                        confidence: 0.94,
+                    },
+                    Word {
+                        index: 5,
+                        text: "we".into(),
+                        start_ms: 5600,
+                        end_ms: 5750,
+                        confidence: 0.99,
+                    },
+                    Word {
+                        index: 6,
+                        text: "discuss".into(),
+                        start_ms: 5750,
+                        end_ms: 6200,
+                        confidence: 0.93,
+                    },
+                    Word {
+                        index: 7,
+                        text: "climate".into(),
+                        start_ms: 6200,
+                        end_ms: 6800,
+                        confidence: 0.91,
+                    },
                 ],
             },
         ],
@@ -113,7 +161,8 @@ fn resolve_words_shot_produces_timestamps() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 1);
@@ -128,7 +177,8 @@ fn resolve_words_shot_has_text_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(
@@ -144,7 +194,8 @@ fn resolve_words_cross_segment() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 })
+        .unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 540);
@@ -163,7 +214,8 @@ fn resolve_scenes_shot_produces_timestamps() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 0);
@@ -177,7 +229,8 @@ fn resolve_scenes_shot_has_scene_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(
@@ -194,10 +247,14 @@ fn resolve_scenes_partial_descriptions_only_shows_described() {
 
     let mut doc = EditDocument::create("test");
     // Scenes 1 (no description) and 2 (has description) — only scene 2 contributes
-    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 2 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 2 })
+        .unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
-    assert_eq!(resolved[0].scene_preview.as_deref(), Some("Close-up interview"));
+    assert_eq!(
+        resolved[0].scene_preview.as_deref(),
+        Some("Close-up interview")
+    );
 }
 
 // -- Time resolution ----------------------------------------------------------
@@ -208,7 +265,14 @@ fn resolve_time_shot_is_passthrough() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 10000 }).unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 5000,
+            to_ms: 10000,
+        },
+    )
+    .unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 5000);
@@ -226,9 +290,18 @@ fn resolve_mixed_shots_from_different_sources() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 3000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 })
+        .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 1000,
+            to_ms: 3000,
+        },
+    )
+    .unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 3);
@@ -246,7 +319,8 @@ fn resolve_preserves_notes() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
     doc.add_note("shot-001", "Great take").unwrap();
     doc.add_note("shot-001", "Use this as opener").unwrap();
 
@@ -276,7 +350,8 @@ fn resolved_shot_has_all_fields() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 })
+        .unwrap();
 
     let resolved = resolve_edit(&doc, tmp.path()).unwrap();
     let r = &resolved[0];

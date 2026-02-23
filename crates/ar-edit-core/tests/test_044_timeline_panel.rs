@@ -49,11 +49,41 @@ fn make_transcript() -> Transcript {
                 end_ms: 5230,
                 text: "Welcome to the interview today".into(),
                 words: vec![
-                    Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                    Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                    Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                    Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
-                    Word { index: 4, text: "today".into(), start_ms: 1200, end_ms: 1800, confidence: 0.94 },
+                    Word {
+                        index: 0,
+                        text: "Welcome".into(),
+                        start_ms: 0,
+                        end_ms: 420,
+                        confidence: 0.95,
+                    },
+                    Word {
+                        index: 1,
+                        text: "to".into(),
+                        start_ms: 420,
+                        end_ms: 540,
+                        confidence: 0.97,
+                    },
+                    Word {
+                        index: 2,
+                        text: "the".into(),
+                        start_ms: 540,
+                        end_ms: 650,
+                        confidence: 0.98,
+                    },
+                    Word {
+                        index: 3,
+                        text: "interview".into(),
+                        start_ms: 650,
+                        end_ms: 1200,
+                        confidence: 0.96,
+                    },
+                    Word {
+                        index: 4,
+                        text: "today".into(),
+                        start_ms: 1200,
+                        end_ms: 1800,
+                        confidence: 0.94,
+                    },
                 ],
             },
             TranscriptSegment {
@@ -62,11 +92,41 @@ fn make_transcript() -> Transcript {
                 end_ms: 12400,
                 text: "We discuss climate policy changes".into(),
                 words: vec![
-                    Word { index: 5, text: "We".into(), start_ms: 5230, end_ms: 5500, confidence: 0.99 },
-                    Word { index: 6, text: "discuss".into(), start_ms: 5500, end_ms: 6000, confidence: 0.93 },
-                    Word { index: 7, text: "climate".into(), start_ms: 6000, end_ms: 6500, confidence: 0.91 },
-                    Word { index: 8, text: "policy".into(), start_ms: 6500, end_ms: 7000, confidence: 0.90 },
-                    Word { index: 9, text: "changes".into(), start_ms: 7000, end_ms: 7800, confidence: 0.88 },
+                    Word {
+                        index: 5,
+                        text: "We".into(),
+                        start_ms: 5230,
+                        end_ms: 5500,
+                        confidence: 0.99,
+                    },
+                    Word {
+                        index: 6,
+                        text: "discuss".into(),
+                        start_ms: 5500,
+                        end_ms: 6000,
+                        confidence: 0.93,
+                    },
+                    Word {
+                        index: 7,
+                        text: "climate".into(),
+                        start_ms: 6000,
+                        end_ms: 6500,
+                        confidence: 0.91,
+                    },
+                    Word {
+                        index: 8,
+                        text: "policy".into(),
+                        start_ms: 6500,
+                        end_ms: 7000,
+                        confidence: 0.90,
+                    },
+                    Word {
+                        index: 9,
+                        text: "changes".into(),
+                        start_ms: 7000,
+                        end_ms: 7800,
+                        confidence: 0.88,
+                    },
                 ],
             },
         ],
@@ -163,9 +223,18 @@ fn resolved_shots_have_valid_ids() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 5000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 1000,
+            to_ms: 5000,
+        },
+    )
+    .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].id, "shot-001");
@@ -180,8 +249,10 @@ fn resolved_shots_have_correct_sources() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].source, "src-001");
@@ -195,7 +266,8 @@ fn word_range_shot_has_correct_duration() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     // words 0..4: start=0 (word 0), end=1800 (word 4)
@@ -211,7 +283,8 @@ fn scene_range_shot_has_correct_duration() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     // scenes 0..2: start=0, end=90000
@@ -227,7 +300,14 @@ fn time_range_shot_passthrough() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 3500, to_ms: 9200 }).unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 3500,
+            to_ms: 9200,
+        },
+    )
+    .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved[0].start_ms, 3500);
@@ -246,7 +326,8 @@ fn word_shot_has_text_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     let preview = resolved[0].text_preview.as_deref().unwrap();
@@ -261,7 +342,8 @@ fn scene_shot_has_scene_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     let preview = resolved[0].scene_preview.as_deref().unwrap();
@@ -277,7 +359,14 @@ fn time_shot_has_no_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 5000,
+        },
+    )
+    .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert!(resolved[0].text_preview.is_none());
@@ -324,14 +413,35 @@ fn resolved_shots_preserve_range_type() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 2 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 100, to_ms: 200 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 2 })
+        .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 100,
+            to_ms: 200,
+        },
+    )
+    .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
-    assert!(matches!(resolved[0].range, ShotRange::Words { from: 0, to: 3 }));
-    assert!(matches!(resolved[1].range, ShotRange::Scenes { from: 1, to: 2 }));
-    assert!(matches!(resolved[2].range, ShotRange::Time { from_ms: 100, to_ms: 200 }));
+    assert!(matches!(
+        resolved[0].range,
+        ShotRange::Words { from: 0, to: 3 }
+    ));
+    assert!(matches!(
+        resolved[1].range,
+        ShotRange::Scenes { from: 1, to: 2 }
+    ));
+    assert!(matches!(
+        resolved[2].range,
+        ShotRange::Time {
+            from_ms: 100,
+            to_ms: 200
+        }
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -345,10 +455,20 @@ fn resolved_shots_maintain_order() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 5, to: 9 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 1000 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 5, to: 9 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 })
+        .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 1000,
+        },
+    )
+    .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 4);
@@ -365,9 +485,18 @@ fn resolved_shots_reflect_move() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 5, to: 9 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 1000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 5, to: 9 })
+        .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 1000,
+        },
+    )
+    .unwrap();
 
     // Move shot-003 to position 0
     doc.move_shot("shot-003", 0).unwrap();
@@ -385,7 +514,8 @@ fn resolved_shots_include_notes() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
     doc.add_note("shot-001", "Great take").unwrap();
     doc.add_note("shot-001", "Use this").unwrap();
 
@@ -403,7 +533,8 @@ fn cross_segment_word_range_preview() {
 
     let mut doc = EditDocument::create("test");
     // Words 3-7 span across segments
-    doc.add_shot("src-001", ShotRange::Words { from: 3, to: 7 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 3, to: 7 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     let preview = resolved[0].text_preview.as_deref().unwrap();

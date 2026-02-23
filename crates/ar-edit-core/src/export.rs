@@ -35,10 +35,7 @@ pub fn export_editable(project_dir: &Path) -> Result<String, TranscriptOpsError>
             continue;
         }
 
-        let path = project_dir.join(format!(
-            "transcripts/{}.transcript.json",
-            source.id
-        ));
+        let path = project_dir.join(format!("transcripts/{}.transcript.json", source.id));
         let transcript = match load_transcript(&path) {
             Ok(t) => t,
             Err(_) => continue,
@@ -87,10 +84,7 @@ pub fn export_editable(project_dir: &Path) -> Result<String, TranscriptOpsError>
 fn load_manifest(project_dir: &Path) -> Result<Manifest, TranscriptOpsError> {
     let path = project_dir.join("manifest.json");
     let data = std::fs::read_to_string(&path)?;
-    serde_json::from_str(&data).map_err(|e| TranscriptOpsError::Json {
-        path,
-        source: e,
-    })
+    serde_json::from_str(&data).map_err(|e| TranscriptOpsError::Json { path, source: e })
 }
 
 fn load_transcript(path: &Path) -> Result<Transcript, TranscriptOpsError> {
@@ -214,11 +208,10 @@ mod tests {
     #[test]
     fn export_single_source_single_segment() {
         let tmp = TempDir::new().unwrap();
-        let manifest = make_manifest(vec![
-            make_source("src-001", true, "interview-alice.mp4"),
-        ]);
-        let transcript = make_transcript_with_segments("src-001", vec![
-            (
+        let manifest = make_manifest(vec![make_source("src-001", true, "interview-alice.mp4")]);
+        let transcript = make_transcript_with_segments(
+            "src-001",
+            vec![(
                 vec![
                     ("Welcome", 0, 420),
                     ("to", 420, 540),
@@ -226,8 +219,8 @@ mod tests {
                     ("interview", 650, 1200),
                 ],
                 "Welcome to the interview",
-            ),
-        ]);
+            )],
+        );
         setup_project(tmp.path(), &manifest, &[transcript]);
 
         let result = export_editable(tmp.path()).unwrap();
@@ -241,28 +234,29 @@ mod tests {
     #[test]
     fn export_single_source_multiple_segments() {
         let tmp = TempDir::new().unwrap();
-        let manifest = make_manifest(vec![
-            make_source("src-001", true, "interview-alice.mp4"),
-        ]);
-        let transcript = make_transcript_with_segments("src-001", vec![
-            (
-                vec![
-                    ("Welcome", 0, 420),
-                    ("to", 420, 540),
-                    ("the", 540, 650),
-                    ("interview", 650, 5230),
-                ],
-                "Welcome to the interview",
-            ),
-            (
-                vec![
-                    ("today", 5230, 5800),
-                    ("we", 5800, 6200),
-                    ("talk", 6200, 6800),
-                ],
-                "today we talk",
-            ),
-        ]);
+        let manifest = make_manifest(vec![make_source("src-001", true, "interview-alice.mp4")]);
+        let transcript = make_transcript_with_segments(
+            "src-001",
+            vec![
+                (
+                    vec![
+                        ("Welcome", 0, 420),
+                        ("to", 420, 540),
+                        ("the", 540, 650),
+                        ("interview", 650, 5230),
+                    ],
+                    "Welcome to the interview",
+                ),
+                (
+                    vec![
+                        ("today", 5230, 5800),
+                        ("we", 5800, 6200),
+                        ("talk", 6200, 6800),
+                    ],
+                    "today we talk",
+                ),
+            ],
+        );
         setup_project(tmp.path(), &manifest, &[transcript]);
 
         let result = export_editable(tmp.path()).unwrap();
@@ -282,18 +276,14 @@ mod tests {
             make_source("src-001", true, "interview-alice.mp4"),
             make_source("src-002", true, "interview-bob.mp4"),
         ]);
-        let t1 = make_transcript_with_segments("src-001", vec![
-            (
-                vec![("Hello", 0, 500), ("world", 500, 1000)],
-                "Hello world",
-            ),
-        ]);
-        let t2 = make_transcript_with_segments("src-002", vec![
-            (
-                vec![("So", 0, 300), ("the", 300, 600)],
-                "So the",
-            ),
-        ]);
+        let t1 = make_transcript_with_segments(
+            "src-001",
+            vec![(vec![("Hello", 0, 500), ("world", 500, 1000)], "Hello world")],
+        );
+        let t2 = make_transcript_with_segments(
+            "src-002",
+            vec![(vec![("So", 0, 300), ("the", 300, 600)], "So the")],
+        );
         setup_project(tmp.path(), &manifest, &[t1, t2]);
 
         let result = export_editable(tmp.path()).unwrap();
@@ -315,12 +305,7 @@ mod tests {
             make_source("src-001", true, "interview-alice.mp4"),
             make_source("src-002", false, "b-roll.mp4"),
         ]);
-        let t1 = make_transcript_with_segments("src-001", vec![
-            (
-                vec![("Hello", 0, 500)],
-                "Hello",
-            ),
-        ]);
+        let t1 = make_transcript_with_segments("src-001", vec![(vec![("Hello", 0, 500)], "Hello")]);
         setup_project(tmp.path(), &manifest, &[t1]);
 
         let result = export_editable(tmp.path()).unwrap();
@@ -344,38 +329,39 @@ mod tests {
     fn export_word_indices_are_global() {
         // Verify that word indices in annotations are global (not per-segment)
         let tmp = TempDir::new().unwrap();
-        let manifest = make_manifest(vec![
-            make_source("src-001", true, "test.mp4"),
-        ]);
-        let transcript = make_transcript_with_segments("src-001", vec![
-            (
-                vec![
-                    ("Welcome", 0, 420),
-                    ("to", 420, 540),
-                    ("the", 540, 650),
-                    ("interview", 650, 5230),
-                    ("today", 5230, 5800),
-                    ("we're", 5800, 6200),
-                    ("going", 6200, 6800),
-                    ("to", 6800, 7000),
-                    ("talk", 7000, 7400),
-                ],
-                "Welcome to the interview today we're going to talk",
-            ),
-            (
-                vec![
-                    ("the", 7400, 7800),
-                    ("impact", 7800, 8200),
-                    ("of", 8200, 8600),
-                    ("climate", 8600, 9000),
-                    ("policy", 9000, 9400),
-                    ("on", 9400, 9800),
-                    ("regional", 9800, 10200),
-                    ("communities", 10200, 11800),
-                ],
-                "the impact of climate policy on regional communities",
-            ),
-        ]);
+        let manifest = make_manifest(vec![make_source("src-001", true, "test.mp4")]);
+        let transcript = make_transcript_with_segments(
+            "src-001",
+            vec![
+                (
+                    vec![
+                        ("Welcome", 0, 420),
+                        ("to", 420, 540),
+                        ("the", 540, 650),
+                        ("interview", 650, 5230),
+                        ("today", 5230, 5800),
+                        ("we're", 5800, 6200),
+                        ("going", 6200, 6800),
+                        ("to", 6800, 7000),
+                        ("talk", 7000, 7400),
+                    ],
+                    "Welcome to the interview today we're going to talk",
+                ),
+                (
+                    vec![
+                        ("the", 7400, 7800),
+                        ("impact", 7800, 8200),
+                        ("of", 8200, 8600),
+                        ("climate", 8600, 9000),
+                        ("policy", 9000, 9400),
+                        ("on", 9400, 9800),
+                        ("regional", 9800, 10200),
+                        ("communities", 10200, 11800),
+                    ],
+                    "the impact of climate policy on regional communities",
+                ),
+            ],
+        );
         setup_project(tmp.path(), &manifest, &[transcript]);
 
         let result = export_editable(tmp.path()).unwrap();
@@ -390,23 +376,17 @@ mod tests {
     fn export_annotations_survive_text_roundtrip() {
         // Verify annotations parse back to the correct source/word pairs
         let tmp = TempDir::new().unwrap();
-        let manifest = make_manifest(vec![
-            make_source("src-001", true, "test.mp4"),
-        ]);
-        let transcript = make_transcript_with_segments("src-001", vec![
-            (
-                vec![("Hello", 0, 500), ("world", 500, 1000)],
-                "Hello world",
-            ),
-        ]);
+        let manifest = make_manifest(vec![make_source("src-001", true, "test.mp4")]);
+        let transcript = make_transcript_with_segments(
+            "src-001",
+            vec![(vec![("Hello", 0, 500), ("world", 500, 1000)], "Hello world")],
+        );
         setup_project(tmp.path(), &manifest, &[transcript]);
 
         let result = export_editable(tmp.path()).unwrap();
 
         // Parse annotations back
-        let re = regex::Regex::new(
-            r"<!-- ar-edit:([^:]+):w(\d+)-w(\d+) -->"
-        ).unwrap();
+        let re = regex::Regex::new(r"<!-- ar-edit:([^:]+):w(\d+)-w(\d+) -->").unwrap();
         let caps: Vec<_> = re.captures_iter(&result).collect();
         assert_eq!(caps.len(), 1);
         assert_eq!(&caps[0][1], "src-001");
@@ -418,15 +398,10 @@ mod tests {
     fn export_skips_sources_with_missing_transcript_file() {
         let tmp = TempDir::new().unwrap();
         let manifest = make_manifest(vec![
-            make_source("src-001", true, "test.mp4"),     // transcribed but no file
+            make_source("src-001", true, "test.mp4"), // transcribed but no file
             make_source("src-002", true, "test2.mp4"),
         ]);
-        let t2 = make_transcript_with_segments("src-002", vec![
-            (
-                vec![("Hello", 0, 500)],
-                "Hello",
-            ),
-        ]);
+        let t2 = make_transcript_with_segments("src-002", vec![(vec![("Hello", 0, 500)], "Hello")]);
         setup_project(tmp.path(), &manifest, &[t2]);
 
         let result = export_editable(tmp.path()).unwrap();

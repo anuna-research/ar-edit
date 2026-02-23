@@ -33,9 +33,12 @@ fn setup_project(name: &str) -> (TempDir, std::path::PathBuf) {
 /// Build a document with three add_shot ops (head=2).
 fn doc_with_three_shots() -> EditDocument {
     let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
-    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
+    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 })
+        .unwrap();
     doc
 }
 
@@ -149,10 +152,7 @@ fn undo_nothing_to_undo_json() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     let json: serde_json::Value = serde_json::from_str(stderr.trim()).unwrap();
-    assert_contains(
-        json["error"].as_str().unwrap(),
-        "nothing to undo",
-    );
+    assert_contains(json["error"].as_str().unwrap(), "nothing to undo");
 }
 
 #[test]
@@ -292,7 +292,14 @@ fn new_op_after_undo_truncates_redo_history() {
     assert_eq!(doc.head, 0);
 
     // Add a new shot — this forks: ops[1] and ops[2] are discarded
-    doc.add_shot("src-004", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
+    doc.add_shot(
+        "src-004",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 5000,
+        },
+    )
+    .unwrap();
     doc.save(&edit_path).unwrap();
 
     // Verify fork happened
@@ -410,7 +417,8 @@ fn history_shows_mixed_op_types() {
     let (tmp, edit_path) = setup_project("rough-cut");
     let mut doc = doc_with_three_shots();
     doc.move_shot("shot-003", 0).unwrap();
-    doc.trim_shot("shot-001", ShotRange::Words { from: 5, to: 45 }).unwrap();
+    doc.trim_shot("shot-001", ShotRange::Words { from: 5, to: 45 })
+        .unwrap();
     doc.save(&edit_path).unwrap();
 
     let output = ar_edit()

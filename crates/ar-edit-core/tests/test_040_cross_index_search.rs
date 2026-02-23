@@ -162,11 +162,14 @@ fn search_finds_scene_from_fixture_index() {
 fn search_finds_transcript_and_scene_for_same_query() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", true, true)]);
-    let transcript = make_transcript("src-001", &[
-        ("The", 0, 200),
-        ("interview", 200, 600),
-        ("begins", 600, 1000),
-    ]);
+    let transcript = make_transcript(
+        "src-001",
+        &[
+            ("The", 0, 200),
+            ("interview", 200, 600),
+            ("begins", 600, 1000),
+        ],
+    );
     let idx = fixture_index("src-001.index.json");
     setup_project(tmp.path(), &manifest, &[transcript], &[idx], &[]);
 
@@ -182,17 +185,23 @@ fn search_finds_transcript_and_scene_for_same_query() {
 fn search_finds_all_three_types() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", true, true)]);
-    let transcript = make_transcript("src-001", &[
-        ("The", 0, 200),
-        ("interview", 200, 600),
-        ("scene", 600, 1000),
-    ]);
+    let transcript = make_transcript(
+        "src-001",
+        &[
+            ("The", 0, 200),
+            ("interview", 200, 600),
+            ("scene", 600, 1000),
+        ],
+    );
     let idx = fixture_index("src-001.index.json");
     let markers = SourceMarkers {
         source_id: "src-001".into(),
         markers: vec![Marker {
             id: "mark-001".into(),
-            range: ShotRange::Time { from_ms: 0, to_ms: 5000 },
+            range: ShotRange::Time {
+                from_ms: 0,
+                to_ms: 5000,
+            },
             label: "select".into(),
             note: Some("Best interview take".into()),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),

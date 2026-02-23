@@ -8,9 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use ar_edit_core::display::{self, ResolvedShot};
-use ar_edit_core::models::{
-    Defaults, EditDocument, Manifest, ShotRange, Source,
-};
+use ar_edit_core::models::{Defaults, EditDocument, Manifest, ShotRange, Source};
 use ar_edit_core::playback::{self, PlayRequest, PlayerKind};
 use tempfile::TempDir;
 
@@ -146,7 +144,10 @@ fn play_request_from_time_shot() {
     let shot = ResolvedShot {
         id: "shot-001".into(),
         source: "src-001".into(),
-        range: ShotRange::Time { from_ms: 5000, to_ms: 15000 },
+        range: ShotRange::Time {
+            from_ms: 5000,
+            to_ms: 15000,
+        },
         start_ms: 5000,
         end_ms: 15000,
         duration_ms: 10000,
@@ -256,7 +257,14 @@ fn full_playback_flow_simulation() {
 
     // 1. Load edit with a time-range shot
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 3000, to_ms: 8000 }).unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 3000,
+            to_ms: 8000,
+        },
+    )
+    .unwrap();
 
     // 2. Resolve the shot (time ranges don't need transcript)
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();

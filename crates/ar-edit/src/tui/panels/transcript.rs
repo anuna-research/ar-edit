@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+};
 
 use ar_edit_core::display::{self, ResolvedShot};
 use ar_edit_core::models::{ShotRange, SourceIndex, Transcript};
@@ -40,9 +42,7 @@ pub fn draw(
     scroll: &mut TranscriptScroll,
     area: Rect,
 ) {
-    let block = Block::default()
-        .title(" Transcript ")
-        .borders(Borders::ALL);
+    let block = Block::default().title(" Transcript ").borders(Borders::ALL);
 
     let Some(shot) = shot else {
         let paragraph = Paragraph::new("Select a shot to view its transcript")
@@ -54,19 +54,13 @@ pub fn draw(
 
     // Inner area (inside block borders) determines visible height.
     let inner = block.inner(area);
-    let visible_height = inner.height as u16;
+    let visible_height = inner.height;
 
     // Build styled lines based on the shot's range type.
     let (lines, highlight_line) = match &shot.range {
-        ShotRange::Words { from, to } => {
-            build_word_transcript(shot, *from, *to, project_dir)
-        }
-        ShotRange::Scenes { from, to } => {
-            build_scene_list(shot, *from, *to, project_dir)
-        }
-        ShotRange::Time { from_ms, to_ms } => {
-            build_time_view(shot, *from_ms, *to_ms, project_dir)
-        }
+        ShotRange::Words { from, to } => build_word_transcript(shot, *from, *to, project_dir),
+        ShotRange::Scenes { from, to } => build_scene_list(shot, *from, *to, project_dir),
+        ShotRange::Time { from_ms, to_ms } => build_time_view(shot, *from_ms, *to_ms, project_dir),
     };
 
     let total_lines = lines.len() as u16;
@@ -91,8 +85,8 @@ pub fn draw(
 
     // Scrollbar
     if total_lines > visible_height {
-        let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
-            .position(scroll.offset as usize);
+        let mut scrollbar_state =
+            ScrollbarState::new(max_scroll as usize).position(scroll.offset as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(None)
             .end_symbol(None);
@@ -302,16 +296,15 @@ fn build_scene_list(
             display::format_time(scene.end_ms),
         );
 
-        let description = scene
-            .description
-            .as_deref()
-            .unwrap_or("(no description)");
+        let description = scene.description.as_deref().unwrap_or("(no description)");
 
         if in_range {
             // Highlighted scene
             let marker = Span::styled(
                 "\u{25b6} ",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             );
             let idx_span = Span::styled(
                 format!("Scene {} ", scene.index),
@@ -351,7 +344,9 @@ fn build_scene_list(
                 Span::raw("  "),
                 Span::styled(
                     description.to_string(),
-                    Style::default().fg(Color::White).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
                 ),
             ]));
         }
@@ -512,10 +507,34 @@ mod tests {
                     end_ms: 5230,
                     text: "Welcome to the interview".into(),
                     words: vec![
-                        Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                        Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                        Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                        Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
+                        Word {
+                            index: 0,
+                            text: "Welcome".into(),
+                            start_ms: 0,
+                            end_ms: 420,
+                            confidence: 0.95,
+                        },
+                        Word {
+                            index: 1,
+                            text: "to".into(),
+                            start_ms: 420,
+                            end_ms: 540,
+                            confidence: 0.97,
+                        },
+                        Word {
+                            index: 2,
+                            text: "the".into(),
+                            start_ms: 540,
+                            end_ms: 650,
+                            confidence: 0.98,
+                        },
+                        Word {
+                            index: 3,
+                            text: "interview".into(),
+                            start_ms: 650,
+                            end_ms: 1200,
+                            confidence: 0.96,
+                        },
                     ],
                 },
                 TranscriptSegment {
@@ -524,10 +543,34 @@ mod tests {
                     end_ms: 12400,
                     text: "Today we discuss climate".into(),
                     words: vec![
-                        Word { index: 4, text: "Today".into(), start_ms: 5230, end_ms: 5600, confidence: 0.94 },
-                        Word { index: 5, text: "we".into(), start_ms: 5600, end_ms: 5750, confidence: 0.99 },
-                        Word { index: 6, text: "discuss".into(), start_ms: 5750, end_ms: 6200, confidence: 0.93 },
-                        Word { index: 7, text: "climate".into(), start_ms: 6200, end_ms: 6800, confidence: 0.91 },
+                        Word {
+                            index: 4,
+                            text: "Today".into(),
+                            start_ms: 5230,
+                            end_ms: 5600,
+                            confidence: 0.94,
+                        },
+                        Word {
+                            index: 5,
+                            text: "we".into(),
+                            start_ms: 5600,
+                            end_ms: 5750,
+                            confidence: 0.99,
+                        },
+                        Word {
+                            index: 6,
+                            text: "discuss".into(),
+                            start_ms: 5750,
+                            end_ms: 6200,
+                            confidence: 0.93,
+                        },
+                        Word {
+                            index: 7,
+                            text: "climate".into(),
+                            start_ms: 6200,
+                            end_ms: 6800,
+                            confidence: 0.91,
+                        },
                     ],
                 },
             ],

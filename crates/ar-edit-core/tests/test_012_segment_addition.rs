@@ -11,7 +11,9 @@ use tempfile::TempDir;
 #[test]
 fn add_shot_words_range() {
     let mut doc = EditDocument::create("test");
-    let shot = doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    let shot = doc
+        .add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
 
     assert_eq!(shot.id, "shot-001");
     assert_eq!(shot.source, "src-001");
@@ -28,7 +30,9 @@ fn add_shot_words_range() {
 #[test]
 fn add_shot_scenes_range() {
     let mut doc = EditDocument::create("test");
-    let shot = doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 3 }).unwrap();
+    let shot = doc
+        .add_shot("src-002", ShotRange::Scenes { from: 0, to: 3 })
+        .unwrap();
 
     assert_eq!(shot.id, "shot-001");
     assert_eq!(shot.source, "src-002");
@@ -40,11 +44,25 @@ fn add_shot_scenes_range() {
 #[test]
 fn add_shot_time_range() {
     let mut doc = EditDocument::create("test");
-    let shot = doc.add_shot("src-003", ShotRange::Time { from_ms: 15000, to_ms: 22000 }).unwrap();
+    let shot = doc
+        .add_shot(
+            "src-003",
+            ShotRange::Time {
+                from_ms: 15000,
+                to_ms: 22000,
+            },
+        )
+        .unwrap();
 
     assert_eq!(shot.id, "shot-001");
     assert_eq!(shot.source, "src-003");
-    assert_eq!(shot.range, ShotRange::Time { from_ms: 15000, to_ms: 22000 });
+    assert_eq!(
+        shot.range,
+        ShotRange::Time {
+            from_ms: 15000,
+            to_ms: 22000
+        }
+    );
 }
 
 // -- Mixed types in one document ----------------------------------------------
@@ -52,14 +70,35 @@ fn add_shot_time_range() {
 #[test]
 fn add_shots_all_three_types() {
     let mut doc = EditDocument::create("mixed");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 10000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 5000,
+            to_ms: 10000,
+        },
+    )
+    .unwrap();
 
     assert_eq!(doc.snapshot.shots.len(), 3);
-    assert_eq!(doc.snapshot.shots[0].range, ShotRange::Words { from: 0, to: 52 });
-    assert_eq!(doc.snapshot.shots[1].range, ShotRange::Scenes { from: 0, to: 2 });
-    assert_eq!(doc.snapshot.shots[2].range, ShotRange::Time { from_ms: 5000, to_ms: 10000 });
+    assert_eq!(
+        doc.snapshot.shots[0].range,
+        ShotRange::Words { from: 0, to: 52 }
+    );
+    assert_eq!(
+        doc.snapshot.shots[1].range,
+        ShotRange::Scenes { from: 0, to: 2 }
+    );
+    assert_eq!(
+        doc.snapshot.shots[2].range,
+        ShotRange::Time {
+            from_ms: 5000,
+            to_ms: 10000
+        }
+    );
 }
 
 // -- Sequential ID assignment -------------------------------------------------
@@ -67,9 +106,12 @@ fn add_shots_all_three_types() {
 #[test]
 fn shot_ids_increment_sequentially() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 10 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 11, to: 20 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 21, to: 30 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 10 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 11, to: 20 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 21, to: 30 })
+        .unwrap();
 
     assert_eq!(doc.snapshot.shots[0].id, "shot-001");
     assert_eq!(doc.snapshot.shots[1].id, "shot-002");
@@ -82,7 +124,8 @@ fn shot_ids_increment_sequentially() {
 #[test]
 fn add_shot_creates_add_shot_op() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
 
     assert_eq!(doc.ops.len(), 1);
     assert_eq!(doc.ops[0].id, 0);
@@ -98,9 +141,18 @@ fn add_shot_creates_add_shot_op() {
 #[test]
 fn op_ids_are_sequential_across_adds() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 10 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
-    doc.add_shot("src-003", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 10 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 })
+        .unwrap();
+    doc.add_shot(
+        "src-003",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 5000,
+        },
+    )
+    .unwrap();
 
     let ids: Vec<u32> = doc.ops.iter().map(|op| op.id).collect();
     assert_eq!(ids, vec![0, 1, 2]);
@@ -113,13 +165,16 @@ fn head_advances_with_each_add() {
     let mut doc = EditDocument::create("test");
     assert_eq!(doc.head, -1);
 
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 10 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 10 })
+        .unwrap();
     assert_eq!(doc.head, 0);
 
-    doc.add_shot("src-001", ShotRange::Words { from: 11, to: 20 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 11, to: 20 })
+        .unwrap();
     assert_eq!(doc.head, 1);
 
-    doc.add_shot("src-001", ShotRange::Words { from: 21, to: 30 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 21, to: 30 })
+        .unwrap();
     assert_eq!(doc.head, 2);
 }
 
@@ -131,9 +186,18 @@ fn save_load_roundtrip_all_range_types() {
     let path = tmp.path().join("mixed.edit.json");
 
     let mut doc = EditDocument::create("mixed");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
-    doc.add_shot("src-003", ShotRange::Time { from_ms: 15000, to_ms: 22000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
+    doc.add_shot(
+        "src-003",
+        ShotRange::Time {
+            from_ms: 15000,
+            to_ms: 22000,
+        },
+    )
+    .unwrap();
     doc.save(&path).unwrap();
 
     let loaded = EditDocument::load(&path).unwrap();
@@ -148,9 +212,18 @@ fn save_load_roundtrip_all_range_types() {
 #[test]
 fn recompute_matches_snapshot_after_adds() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
-    doc.add_shot("src-003", ShotRange::Time { from_ms: 5000, to_ms: 10000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
+    doc.add_shot(
+        "src-003",
+        ShotRange::Time {
+            from_ms: 5000,
+            to_ms: 10000,
+        },
+    )
+    .unwrap();
 
     let recomputed = EditDocument::recompute_snapshot(&doc.ops, doc.head);
     assert_eq!(recomputed, doc.snapshot);

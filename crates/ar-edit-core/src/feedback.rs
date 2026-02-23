@@ -88,9 +88,9 @@ pub fn build_edit_feedback(
     project_dir: &Path,
 ) -> PlaybackFeedback {
     // Find which shot contains last_position_ms in the timeline
-    let hit = shot_timings.iter().find(|(_, _, start, end)| {
-        last_position_ms >= *start && last_position_ms < *end
-    });
+    let hit = shot_timings
+        .iter()
+        .find(|(_, _, start, end)| last_position_ms >= *start && last_position_ms < *end);
 
     // Fall back to the last shot if position is past all shots
     let hit = hit.or_else(|| shot_timings.last());
@@ -212,10 +212,34 @@ mod tests {
                     end_ms: 5230,
                     text: "Welcome to the interview".into(),
                     words: vec![
-                        Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                        Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                        Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                        Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
+                        Word {
+                            index: 0,
+                            text: "Welcome".into(),
+                            start_ms: 0,
+                            end_ms: 420,
+                            confidence: 0.95,
+                        },
+                        Word {
+                            index: 1,
+                            text: "to".into(),
+                            start_ms: 420,
+                            end_ms: 540,
+                            confidence: 0.97,
+                        },
+                        Word {
+                            index: 2,
+                            text: "the".into(),
+                            start_ms: 540,
+                            end_ms: 650,
+                            confidence: 0.98,
+                        },
+                        Word {
+                            index: 3,
+                            text: "interview".into(),
+                            start_ms: 650,
+                            end_ms: 1200,
+                            confidence: 0.96,
+                        },
                     ],
                 },
                 TranscriptSegment {
@@ -224,10 +248,34 @@ mod tests {
                     end_ms: 12400,
                     text: "Today we discuss climate".into(),
                     words: vec![
-                        Word { index: 4, text: "Today".into(), start_ms: 5230, end_ms: 5600, confidence: 0.94 },
-                        Word { index: 5, text: "we".into(), start_ms: 5600, end_ms: 5750, confidence: 0.99 },
-                        Word { index: 6, text: "discuss".into(), start_ms: 5750, end_ms: 6200, confidence: 0.93 },
-                        Word { index: 7, text: "climate".into(), start_ms: 6200, end_ms: 6800, confidence: 0.91 },
+                        Word {
+                            index: 4,
+                            text: "Today".into(),
+                            start_ms: 5230,
+                            end_ms: 5600,
+                            confidence: 0.94,
+                        },
+                        Word {
+                            index: 5,
+                            text: "we".into(),
+                            start_ms: 5600,
+                            end_ms: 5750,
+                            confidence: 0.99,
+                        },
+                        Word {
+                            index: 6,
+                            text: "discuss".into(),
+                            start_ms: 5750,
+                            end_ms: 6200,
+                            confidence: 0.93,
+                        },
+                        Word {
+                            index: 7,
+                            text: "climate".into(),
+                            start_ms: 6200,
+                            end_ms: 6800,
+                            confidence: 0.91,
+                        },
                     ],
                 },
             ],
@@ -473,9 +521,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         setup_project(tmp.path());
 
-        let timings = vec![
-            ("shot-001".into(), "src-001".into(), 0u64, 5000u64),
-        ];
+        let timings = vec![("shot-001".into(), "src-001".into(), 0u64, 5000u64)];
 
         let fb = build_edit_feedback(50000, &timings, tmp.path());
         assert_eq!(fb.shot_id.as_deref(), Some("shot-001"));

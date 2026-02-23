@@ -143,7 +143,11 @@ fn read_matches_stored_json() {
     let manifest = make_manifest(vec![make_source("src-001", true)]);
     let t = make_transcript(
         "src-001",
-        &[("Hello", 0, 500), ("world", 500, 1000), ("test", 1000, 1500)],
+        &[
+            ("Hello", 0, 500),
+            ("world", 500, 1000),
+            ("test", 1000, 1500),
+        ],
     );
     setup_project(tmp.path(), &manifest, &[t.clone()]);
 
@@ -219,11 +223,7 @@ fn search_finds_climate_in_two_sources() {
     );
     let t2 = make_transcript(
         "src-002",
-        &[
-            ("No", 0, 200),
-            ("match", 200, 500),
-            ("here", 500, 800),
-        ],
+        &[("No", 0, 200), ("match", 200, 500), ("here", 500, 800)],
     );
     let t3 = make_transcript(
         "src-003",
@@ -314,10 +314,7 @@ fn search_is_case_insensitive() {
     let tmp = TempDir::new().unwrap();
 
     let manifest = make_manifest(vec![make_source("src-001", true)]);
-    let t = make_transcript(
-        "src-001",
-        &[("Climate", 0, 400), ("change", 400, 800)],
-    );
+    let t = make_transcript("src-001", &[("Climate", 0, 400), ("change", 400, 800)]);
     setup_project(tmp.path(), &manifest, &[t]);
 
     let results = transcript_ops::search(tmp.path(), "climate", None).unwrap();
@@ -330,10 +327,7 @@ fn search_no_matches_returns_empty() {
     let tmp = TempDir::new().unwrap();
 
     let manifest = make_manifest(vec![make_source("src-001", true)]);
-    let t = make_transcript(
-        "src-001",
-        &[("Hello", 0, 400), ("world", 400, 800)],
-    );
+    let t = make_transcript("src-001", &[("Hello", 0, 400), ("world", 400, 800)]);
     setup_project(tmp.path(), &manifest, &[t]);
 
     let results = transcript_ops::search(tmp.path(), "nonexistent", None).unwrap();
@@ -419,7 +413,8 @@ fn fixture_transcripts_are_searchable() {
 
     // Copy fixture files to temp project
     for id in &["src-001", "src-002", "src-003"] {
-        let fixture = workspace_root.join(format!("tests/fixtures/transcripts/{id}.transcript.json"));
+        let fixture =
+            workspace_root.join(format!("tests/fixtures/transcripts/{id}.transcript.json"));
         let dest = tmp.path().join(format!("transcripts/{id}.transcript.json"));
         std::fs::copy(&fixture, &dest).unwrap();
     }
@@ -459,7 +454,8 @@ fn fixture_transcripts_are_listable() {
     .unwrap();
 
     for id in &["src-001", "src-002", "src-003"] {
-        let fixture = workspace_root.join(format!("tests/fixtures/transcripts/{id}.transcript.json"));
+        let fixture =
+            workspace_root.join(format!("tests/fixtures/transcripts/{id}.transcript.json"));
         let dest = tmp.path().join(format!("transcripts/{id}.transcript.json"));
         std::fs::copy(&fixture, &dest).unwrap();
     }

@@ -32,7 +32,17 @@ fn make_transcript() -> Transcript {
                 words: (0..8)
                     .map(|i| Word {
                         index: i,
-                        text: ["Welcome", "to", "the", "demonstration", "video", "for", "the", "project"][i as usize].into(),
+                        text: [
+                            "Welcome",
+                            "to",
+                            "the",
+                            "demonstration",
+                            "video",
+                            "for",
+                            "the",
+                            "project",
+                        ][i as usize]
+                            .into(),
                         start_ms: (i as u64) * 1200,
                         end_ms: (i as u64) * 1200 + 1000,
                         confidence: 0.95,
@@ -47,7 +57,9 @@ fn make_transcript() -> Transcript {
                 words: (8..16)
                     .map(|i| Word {
                         index: i,
-                        text: ["Here", "we", "show", "the", "main", "features", "of", "the"][i as usize - 8].into(),
+                        text: ["Here", "we", "show", "the", "main", "features", "of", "the"]
+                            [i as usize - 8]
+                            .into(),
                         start_ms: (i as u64) * 1200,
                         end_ms: (i as u64) * 1200 + 1000,
                         confidence: 0.93,
@@ -62,7 +74,9 @@ fn make_transcript() -> Transcript {
                 words: (16..22)
                     .map(|i| Word {
                         index: i,
-                        text: ["Thank", "you", "for", "watching", "this", "overview"][i as usize - 16].into(),
+                        text: ["Thank", "you", "for", "watching", "this", "overview"]
+                            [i as usize - 16]
+                            .into(),
                         start_ms: (i as u64) * 1200,
                         end_ms: (i as u64) * 1200 + 1000,
                         confidence: 0.96,
@@ -164,7 +178,11 @@ fn annotate_then_build_edit_from_markers() {
     let mut doc = EditDocument::create("rough-cut");
     for marker in &markers.markers {
         if marker.label == "select" {
-            let shot_id = doc.add_shot("src-001", marker.range.clone()).unwrap().id.clone();
+            let shot_id = doc
+                .add_shot("src-001", marker.range.clone())
+                .unwrap()
+                .id
+                .clone();
 
             // Transfer marker note as shot note if present
             if let Some(note) = &marker.note {
@@ -175,9 +193,18 @@ fn annotate_then_build_edit_from_markers() {
 
     // Step 3: Verify the edit structure
     assert_eq!(doc.snapshot.shots.len(), 3);
-    assert_eq!(doc.snapshot.shots[0].range, ShotRange::Words { from: 0, to: 7 });
-    assert_eq!(doc.snapshot.shots[1].range, ShotRange::Words { from: 12, to: 15 });
-    assert_eq!(doc.snapshot.shots[2].range, ShotRange::Words { from: 16, to: 21 });
+    assert_eq!(
+        doc.snapshot.shots[0].range,
+        ShotRange::Words { from: 0, to: 7 }
+    );
+    assert_eq!(
+        doc.snapshot.shots[1].range,
+        ShotRange::Words { from: 12, to: 15 }
+    );
+    assert_eq!(
+        doc.snapshot.shots[2].range,
+        ShotRange::Words { from: 16, to: 21 }
+    );
     assert_eq!(doc.snapshot.shots[0].notes.len(), 1);
     assert_eq!(doc.snapshot.shots[0].notes[0].text, "Good opening");
     assert_eq!(doc.snapshot.shots[2].notes.len(), 0);
@@ -237,8 +264,14 @@ fn markers_with_avoid_label_are_excluded() {
     }
 
     assert_eq!(doc.snapshot.shots.len(), 2);
-    assert_eq!(doc.snapshot.shots[0].range, ShotRange::Words { from: 0, to: 7 });
-    assert_eq!(doc.snapshot.shots[1].range, ShotRange::Words { from: 16, to: 21 });
+    assert_eq!(
+        doc.snapshot.shots[0].range,
+        ShotRange::Words { from: 0, to: 7 }
+    );
+    assert_eq!(
+        doc.snapshot.shots[1].range,
+        ShotRange::Words { from: 16, to: 21 }
+    );
 }
 
 #[test]
@@ -248,16 +281,28 @@ fn edit_from_markers_with_reordering() {
 
     // Build edit from markers, then reorder
     let mut doc = EditDocument::create("reordered");
-    doc.add_shot("src-001", ShotRange::Words { from: 16, to: 21 }).unwrap(); // closing
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();   // opening
-    doc.add_shot("src-001", ShotRange::Words { from: 8, to: 15 }).unwrap();  // middle
+    doc.add_shot("src-001", ShotRange::Words { from: 16, to: 21 })
+        .unwrap(); // closing
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 })
+        .unwrap(); // opening
+    doc.add_shot("src-001", ShotRange::Words { from: 8, to: 15 })
+        .unwrap(); // middle
 
     // Reorder: move opening to front
     doc.move_shot("shot-002", 0).unwrap();
 
-    assert_eq!(doc.snapshot.shots[0].range, ShotRange::Words { from: 0, to: 7 });
-    assert_eq!(doc.snapshot.shots[1].range, ShotRange::Words { from: 16, to: 21 });
-    assert_eq!(doc.snapshot.shots[2].range, ShotRange::Words { from: 8, to: 15 });
+    assert_eq!(
+        doc.snapshot.shots[0].range,
+        ShotRange::Words { from: 0, to: 7 }
+    );
+    assert_eq!(
+        doc.snapshot.shots[1].range,
+        ShotRange::Words { from: 16, to: 21 }
+    );
+    assert_eq!(
+        doc.snapshot.shots[2].range,
+        ShotRange::Words { from: 8, to: 15 }
+    );
 }
 
 #[test]
@@ -266,8 +311,10 @@ fn edit_from_markers_roundtrip() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("roundtrip");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 12, to: 15 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 12, to: 15 })
+        .unwrap();
     doc.add_note("shot-001", "Opening sequence").unwrap();
 
     let path = tmp.path().join("edits/roundtrip.edit.json");
@@ -299,8 +346,7 @@ fn make_transcript_src002() -> Transcript {
                 .map(|i| Word {
                     index: i,
                     text: [
-                        "The", "economy", "has", "shown", "strong", "growth",
-                        "this", "quarter",
+                        "The", "economy", "has", "shown", "strong", "growth", "this", "quarter",
                     ][i as usize]
                         .into(),
                     start_ms: (i as u64) * 1200,

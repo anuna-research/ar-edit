@@ -200,22 +200,14 @@ fn roundtrip_multiple_sources() {
     let t1 = make_transcript_with_segments(
         "src-001",
         vec![(
-            vec![
-                ("Hello", 0, 500),
-                ("from", 500, 800),
-                ("Alice", 800, 1200),
-            ],
+            vec![("Hello", 0, 500), ("from", 500, 800), ("Alice", 800, 1200)],
             "Hello from Alice",
         )],
     );
     let t2 = make_transcript_with_segments(
         "src-002",
         vec![(
-            vec![
-                ("Hi", 0, 300),
-                ("from", 300, 600),
-                ("Bob", 600, 900),
-            ],
+            vec![("Hi", 0, 300), ("from", 300, 600), ("Bob", 600, 900)],
             "Hi from Bob",
         )],
     );
@@ -271,11 +263,7 @@ fn roundtrip_is_idempotent() {
     let t2 = make_transcript_with_segments(
         "src-002",
         vec![(
-            vec![
-                ("The", 0, 300),
-                ("economy", 300, 700),
-                ("grew", 700, 1000),
-            ],
+            vec![("The", 0, 300), ("economy", 300, 700), ("grew", 700, 1000)],
             "The economy grew",
         )],
     );
@@ -348,10 +336,7 @@ fn roundtrip_survives_save_and_load() {
     ]);
     let t1 = make_transcript_with_segments(
         "src-001",
-        vec![(
-            vec![("Hello", 0, 500), ("world", 500, 1000)],
-            "Hello world",
-        )],
+        vec![(vec![("Hello", 0, 500), ("world", 500, 1000)], "Hello world")],
     );
     let t2 = make_transcript_with_segments(
         "src-002",

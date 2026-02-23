@@ -184,7 +184,14 @@ pub fn write_manifest(project_dir: &Path, manifest: &Manifest) -> Result<(), Pro
 /// (readable video container with at least one audio stream).
 fn run_ffprobe(file: &Path) -> Result<ProbeResult, ProjectError> {
     let output = Command::new("ffprobe")
-        .args(["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams"])
+        .args([
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+        ])
         .arg(file)
         .output()
         .map_err(|e| ProjectError::FfprobeFailed(format!("failed to run ffprobe: {e}")))?;
@@ -259,10 +266,7 @@ fn register_source(
     manifest.next_source_id += 1;
     let id = format!("src-{:03}", id_num);
 
-    let ext = file
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("mp4");
+    let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
 
     let dest_name = format!("{id}.{ext}");
     let dest_path = project_dir.join("sources").join(&dest_name);

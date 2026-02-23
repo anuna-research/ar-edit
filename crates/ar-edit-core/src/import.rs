@@ -196,10 +196,7 @@ pub fn from_transcript_str_fuzzy(
             ContentBlock::Orphaned(ob) => {
                 if let Some(transcript) = transcripts.get(&ob.source_id) {
                     if let Some((from, to)) = fuzzy::match_text(&ob.text, transcript) {
-                        doc.add_shot(
-                            &ob.source_id,
-                            ShotRange::Words { from, to },
-                        )?;
+                        doc.add_shot(&ob.source_id, ShotRange::Words { from, to })?;
                     } else {
                         match_errors.push(ParseError {
                             line: ob.first_line,
@@ -213,10 +210,7 @@ pub fn from_transcript_str_fuzzy(
                 } else {
                     match_errors.push(ParseError {
                         line: ob.first_line,
-                        message: format!(
-                            "no transcript available for source '{}'",
-                            ob.source_id,
-                        ),
+                        message: format!("no transcript available for source '{}'", ob.source_id,),
                     });
                 }
             }
@@ -243,16 +237,13 @@ fn load_project_transcripts(
 ) -> Result<HashMap<String, Transcript>, ImportError> {
     let manifest_path = project_dir.join("manifest.json");
     let manifest_data = std::fs::read_to_string(&manifest_path)?;
-    let manifest: Manifest =
-        serde_json::from_str(&manifest_data).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
+    let manifest: Manifest = serde_json::from_str(&manifest_data)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
     let mut transcripts = HashMap::new();
     for source in &manifest.sources {
         if source.transcribed {
-            let t_path = project_dir
-                .join(format!("transcripts/{}.transcript.json", source.id));
+            let t_path = project_dir.join(format!("transcripts/{}.transcript.json", source.id));
             if let Ok(data) = std::fs::read_to_string(&t_path) {
                 if let Ok(t) = serde_json::from_str::<Transcript>(&data) {
                     transcripts.insert(source.id.clone(), t);
@@ -271,8 +262,7 @@ fn load_project_transcripts(
 /// Parse the annotated markdown content, extracting annotation blocks and
 /// collecting any parse errors with line numbers.
 fn parse_annotations(content: &str) -> (Vec<AnnotationBlock>, Vec<ParseError>) {
-    let open_re =
-        Regex::new(r"^<!--\s*ar-edit:([^:]+):w(\d+)-w(\d+)\s*-->$").unwrap();
+    let open_re = Regex::new(r"^<!--\s*ar-edit:([^:]+):w(\d+)-w(\d+)\s*-->$").unwrap();
     let close_re = Regex::new(r"^<!--\s*/ar-edit:([^>]+?)\s*-->$").unwrap();
 
     let mut blocks = Vec::new();
@@ -291,10 +281,7 @@ fn parse_annotations(content: &str) -> (Vec<AnnotationBlock>, Vec<ParseError>) {
             if let Some(prev) = pending.take() {
                 errors.push(ParseError {
                     line: prev.open_line,
-                    message: format!(
-                        "unclosed annotation block for source '{}'",
-                        prev.source_id
-                    ),
+                    message: format!("unclosed annotation block for source '{}'", prev.source_id),
                 });
             }
 
@@ -323,9 +310,7 @@ fn parse_annotations(content: &str) -> (Vec<AnnotationBlock>, Vec<ParseError>) {
             if from_word > to_word {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!(
-                        "from-word ({from_word}) is greater than to-word ({to_word})"
-                    ),
+                    message: format!("from-word ({from_word}) is greater than to-word ({to_word})"),
                 });
                 continue;
             }
@@ -398,8 +383,7 @@ fn parse_annotations(content: &str) -> (Vec<AnnotationBlock>, Vec<ParseError>) {
 /// Source context is tracked via `# Source: <id> — …` headers.  Orphaned text
 /// inherits the most recent source header.
 fn parse_content_blocks(content: &str) -> (Vec<ContentBlock>, Vec<ParseError>) {
-    let open_re =
-        Regex::new(r"^<!--\s*ar-edit:([^:]+):w(\d+)-w(\d+)\s*-->$").unwrap();
+    let open_re = Regex::new(r"^<!--\s*ar-edit:([^:]+):w(\d+)-w(\d+)\s*-->$").unwrap();
     let close_re = Regex::new(r"^<!--\s*/ar-edit:([^>]+?)\s*-->$").unwrap();
     let source_re = Regex::new(r"^#\s+Source:\s+(\S+)\s+—").unwrap();
 
@@ -434,8 +418,7 @@ fn parse_content_blocks(content: &str) -> (Vec<ContentBlock>, Vec<ParseError>) {
         } else {
             errors.push(ParseError {
                 line: first_line,
-                message: "text outside any source section cannot be matched"
-                    .into(),
+                message: "text outside any source section cannot be matched".into(),
             });
         }
     };
@@ -482,10 +465,7 @@ fn parse_content_blocks(content: &str) -> (Vec<ContentBlock>, Vec<ParseError>) {
             if let Some(prev) = pending.take() {
                 errors.push(ParseError {
                     line: prev.open_line,
-                    message: format!(
-                        "unclosed annotation block for source '{}'",
-                        prev.source_id
-                    ),
+                    message: format!("unclosed annotation block for source '{}'", prev.source_id),
                 });
             }
 
@@ -495,10 +475,7 @@ fn parse_content_blocks(content: &str) -> (Vec<ContentBlock>, Vec<ParseError>) {
                 Err(_) => {
                     errors.push(ParseError {
                         line: line_no,
-                        message: format!(
-                            "invalid from-word index: '{}'",
-                            &caps[2]
-                        ),
+                        message: format!("invalid from-word index: '{}'", &caps[2]),
                     });
                     continue;
                 }
@@ -508,10 +485,7 @@ fn parse_content_blocks(content: &str) -> (Vec<ContentBlock>, Vec<ParseError>) {
                 Err(_) => {
                     errors.push(ParseError {
                         line: line_no,
-                        message: format!(
-                            "invalid to-word index: '{}'",
-                            &caps[3]
-                        ),
+                        message: format!("invalid to-word index: '{}'", &caps[3]),
                     });
                     continue;
                 }
@@ -520,9 +494,7 @@ fn parse_content_blocks(content: &str) -> (Vec<ContentBlock>, Vec<ParseError>) {
             if from_word > to_word {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!(
-                        "from-word ({from_word}) is greater than to-word ({to_word})"
-                    ),
+                    message: format!("from-word ({from_word}) is greater than to-word ({to_word})"),
                 });
                 continue;
             }
@@ -953,7 +925,9 @@ Welcome to the interview
         let (blocks, errors) = parse_content_blocks(input);
         assert!(errors.is_empty(), "errors: {errors:?}");
         assert_eq!(blocks.len(), 1);
-        assert!(matches!(&blocks[0], ContentBlock::Annotated(a) if a.from_word == 0 && a.to_word == 3));
+        assert!(
+            matches!(&blocks[0], ContentBlock::Annotated(a) if a.from_word == 0 && a.to_word == 3)
+        );
     }
 
     #[test]
@@ -966,7 +940,9 @@ Welcome to the interview
         let (blocks, errors) = parse_content_blocks(input);
         assert!(errors.is_empty(), "errors: {errors:?}");
         assert_eq!(blocks.len(), 1);
-        assert!(matches!(&blocks[0], ContentBlock::Orphaned(o) if o.text == "Welcome to the interview" && o.source_id == "src-001"));
+        assert!(
+            matches!(&blocks[0], ContentBlock::Orphaned(o) if o.text == "Welcome to the interview" && o.source_id == "src-001")
+        );
     }
 
     #[test]
@@ -1039,7 +1015,9 @@ today we talk
         let (blocks, errors) = parse_content_blocks(input);
         assert!(errors.is_empty());
         assert_eq!(blocks.len(), 2);
-        assert!(matches!(&blocks[0], ContentBlock::Orphaned(o) if o.text == "Welcome to the interview"));
+        assert!(
+            matches!(&blocks[0], ContentBlock::Orphaned(o) if o.text == "Welcome to the interview")
+        );
         assert!(matches!(&blocks[1], ContentBlock::Orphaned(o) if o.text == "today we talk"));
     }
 
@@ -1073,10 +1051,7 @@ other text here
 
     // -- from_transcript_str_fuzzy (integration) ------------------------------
 
-    fn make_transcript(
-        source_id: &str,
-        words: &[&str],
-    ) -> Transcript {
+    fn make_transcript(source_id: &str, words: &[&str]) -> Transcript {
         use crate::models::{TranscriptSegment, Word};
         let words_vec: Vec<Word> = words
             .iter()
@@ -1107,9 +1082,7 @@ other text here
     }
 
     fn make_transcripts(ts: Vec<Transcript>) -> HashMap<String, Transcript> {
-        ts.into_iter()
-            .map(|t| (t.source_id.clone(), t))
-            .collect()
+        ts.into_iter().map(|t| (t.source_id.clone(), t)).collect()
     }
 
     #[test]
@@ -1124,14 +1097,22 @@ Welcome to the interview
 
 today we talk about
 ";
-        let t = make_transcript("src-001", &[
-            "Welcome", "to", "the", "interview", "today", "we", "talk", "about",
-        ]);
+        let t = make_transcript(
+            "src-001",
+            &[
+                "Welcome",
+                "to",
+                "the",
+                "interview",
+                "today",
+                "we",
+                "talk",
+                "about",
+            ],
+        );
         let transcripts = make_transcripts(vec![t]);
 
-        let doc =
-            from_transcript_str_fuzzy(input, "split-test", &transcripts)
-                .unwrap();
+        let doc = from_transcript_str_fuzzy(input, "split-test", &transcripts).unwrap();
         assert_eq!(doc.snapshot.shots.len(), 2);
         assert_eq!(
             doc.snapshot.shots[0].range,
@@ -1151,14 +1132,22 @@ today we talk about
 
 Welcome to the interview today we talk about
 ";
-        let t = make_transcript("src-001", &[
-            "Welcome", "to", "the", "interview", "today", "we", "talk", "about",
-        ]);
+        let t = make_transcript(
+            "src-001",
+            &[
+                "Welcome",
+                "to",
+                "the",
+                "interview",
+                "today",
+                "we",
+                "talk",
+                "about",
+            ],
+        );
         let transcripts = make_transcripts(vec![t]);
 
-        let doc =
-            from_transcript_str_fuzzy(input, "merged-test", &transcripts)
-                .unwrap();
+        let doc = from_transcript_str_fuzzy(input, "merged-test", &transcripts).unwrap();
         assert_eq!(doc.snapshot.shots.len(), 1);
         assert_eq!(
             doc.snapshot.shots[0].range,
@@ -1181,14 +1170,22 @@ Welcome to the interview
 today we talk about
 <!-- /ar-edit:src-001 -->
 ";
-        let t = make_transcript("src-001", &[
-            "Welcome", "to", "the", "interview", "today", "we", "talk", "about",
-        ]);
+        let t = make_transcript(
+            "src-001",
+            &[
+                "Welcome",
+                "to",
+                "the",
+                "interview",
+                "today",
+                "we",
+                "talk",
+                "about",
+            ],
+        );
         let transcripts = make_transcripts(vec![t]);
 
-        let doc =
-            from_transcript_str_fuzzy(input, "annotated", &transcripts)
-                .unwrap();
+        let doc = from_transcript_str_fuzzy(input, "annotated", &transcripts).unwrap();
         assert_eq!(doc.snapshot.shots.len(), 2);
         assert_eq!(
             doc.snapshot.shots[0].range,
@@ -1207,14 +1204,10 @@ today we talk about
 
 This text does not exist in the transcript
 ";
-        let t = make_transcript("src-001", &[
-            "Welcome", "to", "the", "interview",
-        ]);
+        let t = make_transcript("src-001", &["Welcome", "to", "the", "interview"]);
         let transcripts = make_transcripts(vec![t]);
 
-        let err =
-            from_transcript_str_fuzzy(input, "bad", &transcripts)
-                .unwrap_err();
+        let err = from_transcript_str_fuzzy(input, "bad", &transcripts).unwrap_err();
         if let ImportError::ParseErrors(errors) = err {
             assert_eq!(errors.len(), 1);
             assert_eq!(errors[0].line, 3);
@@ -1233,9 +1226,7 @@ some orphaned text
 ";
         let transcripts: HashMap<String, Transcript> = HashMap::new();
 
-        let err =
-            from_transcript_str_fuzzy(input, "no-transcript", &transcripts)
-                .unwrap_err();
+        let err = from_transcript_str_fuzzy(input, "no-transcript", &transcripts).unwrap_err();
         if let ImportError::ParseErrors(errors) = err {
             assert_eq!(errors.len(), 1);
             assert!(errors[0].message.contains("no transcript"));
@@ -1261,16 +1252,11 @@ So the
 
 thing is
 ";
-        let t1 = make_transcript("src-001", &[
-            "Welcome", "to", "the", "interview",
-        ]);
-        let t2 = make_transcript("src-002", &[
-            "So", "the", "thing", "is",
-        ]);
+        let t1 = make_transcript("src-001", &["Welcome", "to", "the", "interview"]);
+        let t2 = make_transcript("src-002", &["So", "the", "thing", "is"]);
         let transcripts = make_transcripts(vec![t1, t2]);
 
-        let doc =
-            from_transcript_str_fuzzy(input, "multi", &transcripts).unwrap();
+        let doc = from_transcript_str_fuzzy(input, "multi", &transcripts).unwrap();
         assert_eq!(doc.snapshot.shots.len(), 3);
         // src-001 orphaned → w0-w3
         assert_eq!(doc.snapshot.shots[0].source, "src-001");
@@ -1295,8 +1281,7 @@ thing is
     #[test]
     fn fuzzy_empty_input() {
         let transcripts: HashMap<String, Transcript> = HashMap::new();
-        let doc =
-            from_transcript_str_fuzzy("", "empty", &transcripts).unwrap();
+        let doc = from_transcript_str_fuzzy("", "empty", &transcripts).unwrap();
         assert_eq!(doc.snapshot.shots.len(), 0);
     }
 
@@ -1307,13 +1292,13 @@ thing is
 
 Welcome to the intervew today
 ";
-        let t = make_transcript("src-001", &[
-            "Welcome", "to", "the", "interview", "today", "we", "talk",
-        ]);
+        let t = make_transcript(
+            "src-001",
+            &["Welcome", "to", "the", "interview", "today", "we", "talk"],
+        );
         let transcripts = make_transcripts(vec![t]);
 
-        let doc =
-            from_transcript_str_fuzzy(input, "typo", &transcripts).unwrap();
+        let doc = from_transcript_str_fuzzy(input, "typo", &transcripts).unwrap();
         assert_eq!(doc.snapshot.shots.len(), 1);
         assert_eq!(
             doc.snapshot.shots[0].range,

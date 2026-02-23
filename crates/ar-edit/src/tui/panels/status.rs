@@ -33,6 +33,7 @@ pub struct RenderProgress {
 ///
 /// When a render is in progress the middle section shows a progress bar:
 ///   [MODE]  Rendering 3/5 [████░░░░] 48%  ETA 00:32  | <status_message>
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     f: &mut Frame,
     mode: Mode,
@@ -61,10 +62,7 @@ pub fn draw(
     let mut spans: Vec<Span> = Vec::new();
 
     // Mode badge
-    spans.push(Span::styled(
-        format!(" {mode_label} "),
-        mode_style,
-    ));
+    spans.push(Span::styled(format!(" {mode_label} "), mode_style));
     spans.push(Span::raw("  "));
 
     // Middle section
@@ -77,8 +75,7 @@ pub fn draw(
     }
 
     let line = Line::from(spans);
-    let bar = Paragraph::new(line)
-        .style(Style::default().bg(Color::DarkGray).fg(Color::White));
+    let bar = Paragraph::new(line).style(Style::default().bg(Color::DarkGray).fg(Color::White));
     f.render_widget(bar, area);
 }
 
@@ -204,8 +201,8 @@ fn render_progress_text(rp: &RenderProgress, width: u16) -> Vec<Span<'static>> {
 
     let bar_str = format!(
         "[{}{}]",
-        "\u{2588}".repeat(filled),   // █ (full block)
-        "\u{2591}".repeat(empty),     // ░ (light shade)
+        "\u{2588}".repeat(filled), // █ (full block)
+        "\u{2591}".repeat(empty),  // ░ (light shade)
     );
     spans.push(Span::styled(bar_str, Style::default().fg(Color::Green)));
 

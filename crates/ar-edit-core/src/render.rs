@@ -108,7 +108,10 @@ pub fn parse_ffmpeg_progress(line: &str) -> Option<FfmpegProgress> {
     }
 
     // Parse time=HH:MM:SS.ss
-    if let Some(caps) = Regex::new(r"time=(\d+):(\d+):(\d+\.\d+)").ok()?.captures(line) {
+    if let Some(caps) = Regex::new(r"time=(\d+):(\d+):(\d+\.\d+)")
+        .ok()?
+        .captures(line)
+    {
         let h: f64 = caps.get(1)?.as_str().parse().ok()?;
         let m: f64 = caps.get(2)?.as_str().parse().ok()?;
         let s: f64 = caps.get(3)?.as_str().parse().ok()?;
@@ -239,17 +242,20 @@ pub fn render_to_file(
     }
 
     // Use a work directory next to the output file for intermediate segments
-    let work_dir = output
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(format!(
-            ".ar-edit-render-{}",
-            output.file_stem().and_then(|s| s.to_str()).unwrap_or("out")
-        ));
+    let work_dir = output.parent().unwrap_or(Path::new(".")).join(format!(
+        ".ar-edit-render-{}",
+        output.file_stem().and_then(|s| s.to_str()).unwrap_or("out")
+    ));
     std::fs::create_dir_all(&work_dir)?;
 
     let result = render_segments_and_concat(
-        &resolved, doc, project_dir, &work_dir, output, overlay_mode, options,
+        &resolved,
+        doc,
+        project_dir,
+        &work_dir,
+        output,
+        overlay_mode,
+        options,
     );
 
     // Clean up work directory regardless of success/failure
@@ -285,17 +291,21 @@ where
         return Err(RenderError::EmptyEdit);
     }
 
-    let work_dir = output
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(format!(
-            ".ar-edit-render-{}",
-            output.file_stem().and_then(|s| s.to_str()).unwrap_or("out")
-        ));
+    let work_dir = output.parent().unwrap_or(Path::new(".")).join(format!(
+        ".ar-edit-render-{}",
+        output.file_stem().and_then(|s| s.to_str()).unwrap_or("out")
+    ));
     std::fs::create_dir_all(&work_dir)?;
 
     let result = render_segments_and_concat_with_progress(
-        &resolved, doc, project_dir, &work_dir, output, overlay_mode, options, &on_progress,
+        &resolved,
+        doc,
+        project_dir,
+        &work_dir,
+        output,
+        overlay_mode,
+        options,
+        &on_progress,
     );
 
     let _ = std::fs::remove_dir_all(&work_dir);
@@ -311,6 +321,7 @@ where
 }
 
 /// Internal: extract segments with progress callbacks, write filelist.txt, and concatenate.
+#[allow(clippy::too_many_arguments)]
 fn render_segments_and_concat_with_progress<F>(
     resolved: &[ResolvedShot],
     _doc: &EditDocument,
@@ -654,7 +665,9 @@ fn resolve_encode_params(
     } else if !source_info.is_empty() {
         // Check if all sources share the same codec — if so, no re-encode needed
         let first = normalize_codec(&source_info[0].video_codec);
-        let all_same = source_info.iter().all(|s| normalize_codec(&s.video_codec) == first);
+        let all_same = source_info
+            .iter()
+            .all(|s| normalize_codec(&s.video_codec) == first);
         if all_same {
             None // all match, stream copy
         } else {
@@ -812,6 +825,7 @@ fn write_concat_list(segment_paths: &[PathBuf], output: &Path) -> Result<(), Ren
 ///
 /// When `video_encoder` is `Some`, re-encodes; when `None`, uses stream copy.
 /// Reads ffmpeg stderr line-by-line and calls `on_progress` with updated status.
+#[allow(clippy::too_many_arguments)]
 fn extract_segment_with_progress<F>(
     source: &Path,
     start_ms: u64,
@@ -833,9 +847,16 @@ where
     let duration_secs = end_ms.saturating_sub(start_ms) as f64 / 1000.0;
 
     let mut cmd = Command::new("ffmpeg");
-    cmd.args(["-y", "-progress", "pipe:2", "-ss", &format!("{start_secs:.3}"), "-i"])
-        .arg(source)
-        .args(["-t", &format!("{duration_secs:.3}")]);
+    cmd.args([
+        "-y",
+        "-progress",
+        "pipe:2",
+        "-ss",
+        &format!("{start_secs:.3}"),
+        "-i",
+    ])
+    .arg(source)
+    .args(["-t", &format!("{duration_secs:.3}")]);
 
     if let Some(vf) = video_filter {
         cmd.args(["-vf", vf]);
@@ -883,7 +904,10 @@ where
     if !status.success() {
         return Err(RenderError::FfmpegFailed(format!(
             "segment extraction failed (exit code: {})",
-            status.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string())
+            status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
         )));
     }
 
@@ -1157,7 +1181,11 @@ mod tests {
         let doc = EditDocument::create("test");
         let output = tmp.path().join("output.mp4");
         let result = render_to_file(
-            &doc, tmp.path(), &output, OverlayMode::Clean, &RenderOptions::default(),
+            &doc,
+            tmp.path(),
+            &output,
+            OverlayMode::Clean,
+            &RenderOptions::default(),
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("no shots"));
@@ -1188,9 +1216,7 @@ mod tests {
     #[test]
     fn write_concat_list_handles_paths_with_spaces() {
         let tmp = TempDir::new().unwrap();
-        let segments = vec![
-            PathBuf::from("/my videos/segment 001.mp4"),
-        ];
+        let segments = vec![PathBuf::from("/my videos/segment 001.mp4")];
         let list_path = tmp.path().join("filelist.txt");
         write_concat_list(&segments, &list_path).unwrap();
 
@@ -1204,12 +1230,7 @@ mod tests {
     fn extract_segment_nonexistent_source() {
         let tmp = TempDir::new().unwrap();
         let output = tmp.path().join("out.mp4");
-        let result = extract_segment(
-            &PathBuf::from("/nonexistent/video.mp4"),
-            0,
-            5000,
-            &output,
-        );
+        let result = extract_segment(&PathBuf::from("/nonexistent/video.mp4"), 0, 5000, &output);
         assert!(result.is_err());
     }
 

@@ -63,14 +63,23 @@ fn create_marker_with_time_range() {
     let marker = add_marker(
         tmp.path(),
         "src-001",
-        ShotRange::Time { from_ms: 5000, to_ms: 12000 },
+        ShotRange::Time {
+            from_ms: 5000,
+            to_ms: 12000,
+        },
         "avoid",
         Some("Bad audio"),
     )
     .unwrap();
 
     assert_eq!(marker.id, "mark-001");
-    assert_eq!(marker.range, ShotRange::Time { from_ms: 5000, to_ms: 12000 });
+    assert_eq!(
+        marker.range,
+        ShotRange::Time {
+            from_ms: 5000,
+            to_ms: 12000
+        }
+    );
     assert_eq!(marker.label, "avoid");
     assert_eq!(marker.note.as_deref(), Some("Bad audio"));
 }
@@ -91,7 +100,10 @@ fn sequential_ids_across_multiple_markers() {
     let m2 = add_marker(
         tmp.path(),
         "src-001",
-        ShotRange::Time { from_ms: 5000, to_ms: 8000 },
+        ShotRange::Time {
+            from_ms: 5000,
+            to_ms: 8000,
+        },
         "avoid",
         Some("Background noise"),
     )
@@ -131,7 +143,10 @@ fn marker_persisted_to_disk() {
     assert_eq!(loaded.markers[0].id, "mark-001");
     assert_eq!(loaded.markers[0].label, "select");
     assert_eq!(loaded.markers[0].note.as_deref(), Some("Great intro"));
-    assert_eq!(loaded.markers[0].range, ShotRange::Words { from: 0, to: 50 });
+    assert_eq!(
+        loaded.markers[0].range,
+        ShotRange::Words { from: 0, to: 50 }
+    );
 }
 
 #[test]

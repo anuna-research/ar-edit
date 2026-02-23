@@ -32,9 +32,7 @@ pub fn draw(
         filter_label,
     );
 
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL);
+    let block = Block::default().title(title).borders(Borders::ALL);
 
     if results.is_empty() {
         let msg = if query.is_empty() {
@@ -91,10 +89,7 @@ fn format_result_item(index: usize, result: &SearchResult) -> ListItem<'static> 
             Style::default().fg(type_tag.1).add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
-        Span::styled(
-            result.source_id.clone(),
-            Style::default().fg(Color::Yellow),
-        ),
+        Span::styled(result.source_id.clone(), Style::default().fg(Color::Yellow)),
         Span::raw("  "),
         Span::styled(time_range, Style::default().fg(Color::Green)),
     ]);
@@ -105,7 +100,9 @@ fn format_result_item(index: usize, result: &SearchResult) -> ListItem<'static> 
         Span::raw("      "),
         Span::styled(
             context,
-            Style::default().fg(Color::White).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::DIM),
         ),
     ]);
 

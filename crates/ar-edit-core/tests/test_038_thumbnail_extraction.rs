@@ -88,10 +88,18 @@ fn thumbnail_filename_encodes_timestamp() {
     let t_00m00s = idx.thumbnails.iter().find(|t| t.timestamp_ms == 0).unwrap();
     assert!(t_00m00s.path.to_string_lossy().contains("00m00s"));
 
-    let t_00m18s = idx.thumbnails.iter().find(|t| t.timestamp_ms == 18000).unwrap();
+    let t_00m18s = idx
+        .thumbnails
+        .iter()
+        .find(|t| t.timestamp_ms == 18000)
+        .unwrap();
     assert!(t_00m18s.path.to_string_lossy().contains("00m18s"));
 
-    let t_01m27s = idx.thumbnails.iter().find(|t| t.timestamp_ms == 87000).unwrap();
+    let t_01m27s = idx
+        .thumbnails
+        .iter()
+        .find(|t| t.timestamp_ms == 87000)
+        .unwrap();
     assert!(t_01m27s.path.to_string_lossy().contains("01m27s"));
 }
 
@@ -176,11 +184,25 @@ fn interval_thumbnails_at_10s_boundaries() {
 fn thumbnail_description_is_optional() {
     let idx = fixture_index("src-001.index.json");
 
-    let with_desc = idx.thumbnails.iter().filter(|t| t.description.is_some()).count();
-    let without_desc = idx.thumbnails.iter().filter(|t| t.description.is_none()).count();
+    let with_desc = idx
+        .thumbnails
+        .iter()
+        .filter(|t| t.description.is_some())
+        .count();
+    let without_desc = idx
+        .thumbnails
+        .iter()
+        .filter(|t| t.description.is_none())
+        .count();
 
-    assert!(with_desc > 0, "fixture should have at least one thumbnail with description");
-    assert!(without_desc > 0, "fixture should have at least one thumbnail without description");
+    assert!(
+        with_desc > 0,
+        "fixture should have at least one thumbnail with description"
+    );
+    assert!(
+        without_desc > 0,
+        "fixture should have at least one thumbnail without description"
+    );
 }
 
 // -- Thumbnail count combines scenes + intervals (merged, deduped) ------------

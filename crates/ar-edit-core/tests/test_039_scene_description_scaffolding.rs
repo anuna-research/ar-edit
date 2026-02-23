@@ -36,13 +36,7 @@ fn set_description_on_scene_without_one() {
     // Scene 2 has no description in the fixture
     assert_eq!(idx.scenes[2].description, None);
 
-    let (updated, old) = set_scene_description(
-        tmp.path(),
-        "src-001",
-        2,
-        "B-roll montage",
-    )
-    .unwrap();
+    let (updated, old) = set_scene_description(tmp.path(), "src-001", 2, "B-roll montage").unwrap();
 
     assert_eq!(old, None);
     assert_eq!(
@@ -65,13 +59,8 @@ fn overwrite_existing_description_returns_old_value() {
         Some("Interior office, wide shot")
     );
 
-    let (updated, old) = set_scene_description(
-        tmp.path(),
-        "src-001",
-        0,
-        "Lobby establishing shot",
-    )
-    .unwrap();
+    let (updated, old) =
+        set_scene_description(tmp.path(), "src-001", 0, "Lobby establishing shot").unwrap();
 
     assert_eq!(old.as_deref(), Some("Interior office, wide shot"));
     assert_eq!(
@@ -110,13 +99,7 @@ fn setting_one_scene_does_not_affect_others() {
     let idx = fixture_index("src-001.index.json");
     setup_index(&tmp, &idx);
 
-    let (updated, _) = set_scene_description(
-        tmp.path(),
-        "src-001",
-        1,
-        "Updated scene 1",
-    )
-    .unwrap();
+    let (updated, _) = set_scene_description(tmp.path(), "src-001", 1, "Updated scene 1").unwrap();
 
     // Scene 0 unchanged
     assert_eq!(updated.scenes[0].description, idx.scenes[0].description);
@@ -181,13 +164,8 @@ fn last_valid_scene_index_succeeds() {
     setup_index(&tmp, &idx);
 
     // scene_count is 4, so index 3 is valid
-    let (updated, _) = set_scene_description(
-        tmp.path(),
-        "src-001",
-        3,
-        "Updated last scene",
-    )
-    .unwrap();
+    let (updated, _) =
+        set_scene_description(tmp.path(), "src-001", 3, "Updated last scene").unwrap();
     assert_eq!(
         updated.scenes[3].description.as_deref(),
         Some("Updated last scene")
@@ -214,13 +192,7 @@ fn metadata_preserved_after_description_update() {
     let idx = fixture_index("src-001.index.json");
     setup_index(&tmp, &idx);
 
-    let (updated, _) = set_scene_description(
-        tmp.path(),
-        "src-001",
-        0,
-        "New description",
-    )
-    .unwrap();
+    let (updated, _) = set_scene_description(tmp.path(), "src-001", 0, "New description").unwrap();
 
     assert_eq!(updated.metadata, idx.metadata);
     assert_eq!(updated.source_id, idx.source_id);
@@ -236,13 +208,7 @@ fn scene_timing_preserved_after_description_update() {
     let idx = fixture_index("src-001.index.json");
     setup_index(&tmp, &idx);
 
-    let (updated, _) = set_scene_description(
-        tmp.path(),
-        "src-001",
-        1,
-        "New desc",
-    )
-    .unwrap();
+    let (updated, _) = set_scene_description(tmp.path(), "src-001", 1, "New desc").unwrap();
 
     // Timing and thumbnail unchanged
     assert_eq!(updated.scenes[1].start_ms, idx.scenes[1].start_ms);

@@ -122,11 +122,7 @@ pub fn validate_shot_source(
 /// 6. Time in bounds
 /// 7. Range order (from <= to)
 /// 8. Non-zero duration (from < to)
-pub fn validate(
-    doc: &EditDocument,
-    manifest: &Manifest,
-    project_dir: &Path,
-) -> ValidationResult {
+pub fn validate(doc: &EditDocument, manifest: &Manifest, project_dir: &Path) -> ValidationResult {
     let mut errors = Vec::new();
 
     // Cache loaded transcripts and indexes to avoid re-reading per shot.
@@ -152,10 +148,7 @@ pub fn validate(
                 if from > to {
                     errors.push(ValidationError {
                         shot_id: shot.id.clone(),
-                        error: format!(
-                            "from ({}) must be <= to ({}) in {}",
-                            from, to, shot.id
-                        ),
+                        error: format!("from ({}) must be <= to ({}) in {}", from, to, shot.id),
                     });
                 } else if from == to {
                     errors.push(ValidationError {
@@ -168,10 +161,7 @@ pub fn validate(
                 if from > to {
                     errors.push(ValidationError {
                         shot_id: shot.id.clone(),
-                        error: format!(
-                            "from ({}) must be <= to ({}) in {}",
-                            from, to, shot.id
-                        ),
+                        error: format!("from ({}) must be <= to ({}) in {}", from, to, shot.id),
                     });
                 } else if from == to {
                     errors.push(ValidationError {
@@ -543,9 +533,7 @@ mod tests {
         let result = validate(&doc, &manifest, tmp.path());
         assert!(!result.valid);
         let errors: Vec<&str> = result.errors.iter().map(|e| e.error.as_str()).collect();
-        assert!(errors.contains(
-            &"source 'src-001' has no transcript; cannot use word range"
-        ));
+        assert!(errors.contains(&"source 'src-001' has no transcript; cannot use word range"));
     }
 
     // -- Check 3: index exists ------------------------------------------------
@@ -565,9 +553,7 @@ mod tests {
         let result = validate(&doc, &manifest, tmp.path());
         assert!(!result.valid);
         let errors: Vec<&str> = result.errors.iter().map(|e| e.error.as_str()).collect();
-        assert!(
-            errors.contains(&"source 'src-001' has no scene index; cannot use scene range")
-        );
+        assert!(errors.contains(&"source 'src-001' has no scene index; cannot use scene range"));
     }
 
     // -- Check 4: word index in bounds ----------------------------------------
@@ -590,9 +576,7 @@ mod tests {
         let result = validate(&doc, &manifest, tmp.path());
         assert!(!result.valid);
         let errors: Vec<&str> = result.errors.iter().map(|e| e.error.as_str()).collect();
-        assert!(
-            errors.contains(&"word index 500 exceeds word_count 487 for src-001")
-        );
+        assert!(errors.contains(&"word index 500 exceeds word_count 487 for src-001"));
     }
 
     #[test]
@@ -614,9 +598,7 @@ mod tests {
         let result = validate(&doc, &manifest, tmp.path());
         assert!(!result.valid);
         let errors: Vec<&str> = result.errors.iter().map(|e| e.error.as_str()).collect();
-        assert!(
-            errors.contains(&"word index 375 exceeds word_count 375 for src-001")
-        );
+        assert!(errors.contains(&"word index 375 exceeds word_count 375 for src-001"));
     }
 
     #[test]
@@ -689,9 +671,7 @@ mod tests {
         let result = validate(&doc, &manifest, tmp.path());
         assert!(!result.valid);
         let errors: Vec<&str> = result.errors.iter().map(|e| e.error.as_str()).collect();
-        assert!(
-            errors.contains(&"time 200000ms exceeds duration 124500ms for src-001")
-        );
+        assert!(errors.contains(&"time 200000ms exceeds duration 124500ms for src-001"));
     }
 
     #[test]

@@ -175,9 +175,8 @@ pub fn resolve_source_path(
     source_id: &str,
     project_dir: &Path,
 ) -> Result<(PathBuf, crate::models::Source), PlaybackError> {
-    let manifest = crate::project::read_manifest(project_dir).map_err(|e| {
-        PlaybackError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-    })?;
+    let manifest = crate::project::read_manifest(project_dir)
+        .map_err(|e| PlaybackError::Io(std::io::Error::other(e.to_string())))?;
 
     let source = manifest
         .sources
@@ -323,7 +322,11 @@ mod tests {
         let duration_secs = req.end_ms.unwrap().saturating_sub(req.start_ms) as f64 / 1000.0;
         assert!((duration_secs - 4.5).abs() < 0.001);
 
-        let prog = Command::new(&player.path).get_program().to_str().unwrap().to_string();
+        let prog = Command::new(&player.path)
+            .get_program()
+            .to_str()
+            .unwrap()
+            .to_string();
         assert_eq!(prog, "/usr/bin/ffplay");
     }
 

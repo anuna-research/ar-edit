@@ -43,7 +43,10 @@ fn all_valid_models_accepted() {
 fn invalid_model_rejected_with_descriptive_error() {
     let err = validate_model("huge").unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("huge"), "error should mention the invalid model");
+    assert!(
+        msg.contains("huge"),
+        "error should mention the invalid model"
+    );
     assert!(
         msg.contains("tiny") && msg.contains("base") && msg.contains("small"),
         "error should list valid options"

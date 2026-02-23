@@ -47,10 +47,7 @@ pub fn add_marker(
 }
 
 /// Load all markers for a source. Returns an empty SourceMarkers if the file doesn't exist.
-pub fn list_markers(
-    project_dir: &Path,
-    source_id: &str,
-) -> Result<SourceMarkers, MarkerError> {
+pub fn list_markers(project_dir: &Path, source_id: &str) -> Result<SourceMarkers, MarkerError> {
     let path = markers_path(project_dir, source_id);
     load_or_create(source_id, &path)
 }
@@ -178,7 +175,10 @@ mod tests {
         add_marker(
             tmp.path(),
             "src-001",
-            ShotRange::Time { from_ms: 62000, to_ms: 68000 },
+            ShotRange::Time {
+                from_ms: 62000,
+                to_ms: 68000,
+            },
             "avoid",
             Some("Bad audio"),
         )
@@ -206,7 +206,10 @@ mod tests {
         let marker = add_marker(
             tmp.path(),
             "src-001",
-            ShotRange::Time { from_ms: 1000, to_ms: 2000 },
+            ShotRange::Time {
+                from_ms: 1000,
+                to_ms: 2000,
+            },
             "maybe",
             None,
         )
@@ -272,7 +275,10 @@ mod tests {
         add_marker(
             tmp.path(),
             "src-001",
-            ShotRange::Time { from_ms: 62000, to_ms: 68000 },
+            ShotRange::Time {
+                from_ms: 62000,
+                to_ms: 68000,
+            },
             "avoid",
             None,
         )

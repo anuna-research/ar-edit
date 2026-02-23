@@ -33,10 +33,34 @@ fn make_transcript() -> Transcript {
                 end_ms: 5230,
                 text: "Welcome to the interview".into(),
                 words: vec![
-                    Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                    Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                    Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                    Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
+                    Word {
+                        index: 0,
+                        text: "Welcome".into(),
+                        start_ms: 0,
+                        end_ms: 420,
+                        confidence: 0.95,
+                    },
+                    Word {
+                        index: 1,
+                        text: "to".into(),
+                        start_ms: 420,
+                        end_ms: 540,
+                        confidence: 0.97,
+                    },
+                    Word {
+                        index: 2,
+                        text: "the".into(),
+                        start_ms: 540,
+                        end_ms: 650,
+                        confidence: 0.98,
+                    },
+                    Word {
+                        index: 3,
+                        text: "interview".into(),
+                        start_ms: 650,
+                        end_ms: 1200,
+                        confidence: 0.96,
+                    },
                 ],
             },
             TranscriptSegment {
@@ -45,10 +69,34 @@ fn make_transcript() -> Transcript {
                 end_ms: 12400,
                 text: "Today we discuss climate".into(),
                 words: vec![
-                    Word { index: 4, text: "Today".into(), start_ms: 5230, end_ms: 5600, confidence: 0.94 },
-                    Word { index: 5, text: "we".into(), start_ms: 5600, end_ms: 5750, confidence: 0.99 },
-                    Word { index: 6, text: "discuss".into(), start_ms: 5750, end_ms: 6200, confidence: 0.93 },
-                    Word { index: 7, text: "climate".into(), start_ms: 6200, end_ms: 6800, confidence: 0.91 },
+                    Word {
+                        index: 4,
+                        text: "Today".into(),
+                        start_ms: 5230,
+                        end_ms: 5600,
+                        confidence: 0.94,
+                    },
+                    Word {
+                        index: 5,
+                        text: "we".into(),
+                        start_ms: 5600,
+                        end_ms: 5750,
+                        confidence: 0.99,
+                    },
+                    Word {
+                        index: 6,
+                        text: "discuss".into(),
+                        start_ms: 5750,
+                        end_ms: 6200,
+                        confidence: 0.93,
+                    },
+                    Word {
+                        index: 7,
+                        text: "climate".into(),
+                        start_ms: 6200,
+                        end_ms: 6800,
+                        confidence: 0.91,
+                    },
                 ],
             },
         ],
@@ -194,8 +242,8 @@ fn source_playback_at_word_cross_segment() {
     // Word 3 ("interview") is in segment 0, word 4 ("Today") is in segment 1
     let range = ShotRange::Words { from: 3, to: 4 };
     let (start_ms, end_ms) = resolve::resolve_range(&range, Some(&transcript), None).unwrap();
-    assert_eq!(start_ms, 650);   // word 3 start
-    assert_eq!(end_ms, 5600);    // word 4 end
+    assert_eq!(start_ms, 650); // word 3 start
+    assert_eq!(end_ms, 5600); // word 4 end
 }
 
 // ---------------------------------------------------------------------------
@@ -347,15 +395,12 @@ fn source_playback_resolve_word_from_dir() {
     setup_project(tmp.path());
 
     let range = ShotRange::Words { from: 5, to: 5 };
-    let (start_ms, end_ms) = resolve::resolve_range_from_dir(
-        &range,
-        "src-001",
-        &tmp.path().join("transcripts"),
-    )
-    .unwrap();
+    let (start_ms, end_ms) =
+        resolve::resolve_range_from_dir(&range, "src-001", &tmp.path().join("transcripts"))
+            .unwrap();
 
-    assert_eq!(start_ms, 5600);  // word 5 ("we") start
-    assert_eq!(end_ms, 5750);    // word 5 ("we") end
+    assert_eq!(start_ms, 5600); // word 5 ("we") start
+    assert_eq!(end_ms, 5750); // word 5 ("we") end
 }
 
 #[test]
@@ -364,12 +409,8 @@ fn source_playback_resolve_scene_from_dir() {
     setup_project(tmp.path());
 
     let range = ShotRange::Scenes { from: 2, to: 2 };
-    let (start_ms, end_ms) = resolve::resolve_range_from_dir(
-        &range,
-        "src-001",
-        &tmp.path().join("index"),
-    )
-    .unwrap();
+    let (start_ms, end_ms) =
+        resolve::resolve_range_from_dir(&range, "src-001", &tmp.path().join("index")).unwrap();
 
     assert_eq!(start_ms, 45000);
     assert_eq!(end_ms, 90000);

@@ -81,8 +81,22 @@ fn setup_project(dir: &Path, manifest: &Manifest) {
 fn source_list_shows_all_sources() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![
-        make_source("src-001", "interview-alice.mp4", 124500, (1920, 1080), true, true),
-        make_source("src-002", "broll-city.mp4", 45000, (3840, 2160), false, false),
+        make_source(
+            "src-001",
+            "interview-alice.mp4",
+            124500,
+            (1920, 1080),
+            true,
+            true,
+        ),
+        make_source(
+            "src-002",
+            "broll-city.mp4",
+            45000,
+            (3840, 2160),
+            false,
+            false,
+        ),
         make_source("src-003", "voiceover.mp4", 30000, (1280, 720), true, false),
     ]);
     setup_project(tmp.path(), &manifest);
@@ -98,9 +112,14 @@ fn source_list_shows_all_sources() {
 #[test]
 fn source_ids_preserved() {
     let tmp = TempDir::new().unwrap();
-    let manifest = make_manifest(vec![
-        make_source("src-001", "file1.mp4", 60000, (1920, 1080), false, false),
-    ]);
+    let manifest = make_manifest(vec![make_source(
+        "src-001",
+        "file1.mp4",
+        60000,
+        (1920, 1080),
+        false,
+        false,
+    )]);
     setup_project(tmp.path(), &manifest);
 
     let loaded = project::read_manifest(tmp.path()).unwrap();
@@ -112,8 +131,22 @@ fn source_ids_preserved() {
 fn source_filenames_available() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![
-        make_source("src-001", "interview-alice.mp4", 60000, (1920, 1080), false, false),
-        make_source("src-002", "broll-city-drone.mp4", 30000, (3840, 2160), false, false),
+        make_source(
+            "src-001",
+            "interview-alice.mp4",
+            60000,
+            (1920, 1080),
+            false,
+            false,
+        ),
+        make_source(
+            "src-002",
+            "broll-city-drone.mp4",
+            30000,
+            (3840, 2160),
+            false,
+            false,
+        ),
     ]);
     setup_project(tmp.path(), &manifest);
 
@@ -146,9 +179,14 @@ fn source_duration_short() {
 #[test]
 fn source_both_transcribed_and_indexed() {
     let tmp = TempDir::new().unwrap();
-    let manifest = make_manifest(vec![
-        make_source("src-001", "test.mp4", 60000, (1920, 1080), true, true),
-    ]);
+    let manifest = make_manifest(vec![make_source(
+        "src-001",
+        "test.mp4",
+        60000,
+        (1920, 1080),
+        true,
+        true,
+    )]);
     setup_project(tmp.path(), &manifest);
 
     let loaded = project::read_manifest(tmp.path()).unwrap();
@@ -161,9 +199,14 @@ fn source_both_transcribed_and_indexed() {
 #[test]
 fn source_transcribed_only() {
     let tmp = TempDir::new().unwrap();
-    let manifest = make_manifest(vec![
-        make_source("src-001", "test.mp4", 60000, (1920, 1080), true, false),
-    ]);
+    let manifest = make_manifest(vec![make_source(
+        "src-001",
+        "test.mp4",
+        60000,
+        (1920, 1080),
+        true,
+        false,
+    )]);
     setup_project(tmp.path(), &manifest);
 
     let loaded = project::read_manifest(tmp.path()).unwrap();
@@ -175,9 +218,14 @@ fn source_transcribed_only() {
 #[test]
 fn source_indexed_only() {
     let tmp = TempDir::new().unwrap();
-    let manifest = make_manifest(vec![
-        make_source("src-001", "test.mp4", 60000, (1920, 1080), false, true),
-    ]);
+    let manifest = make_manifest(vec![make_source(
+        "src-001",
+        "test.mp4",
+        60000,
+        (1920, 1080),
+        false,
+        true,
+    )]);
     setup_project(tmp.path(), &manifest);
 
     let loaded = project::read_manifest(tmp.path()).unwrap();
@@ -189,9 +237,14 @@ fn source_indexed_only() {
 #[test]
 fn source_neither_transcribed_nor_indexed() {
     let tmp = TempDir::new().unwrap();
-    let manifest = make_manifest(vec![
-        make_source("src-001", "test.mp4", 60000, (1920, 1080), false, false),
-    ]);
+    let manifest = make_manifest(vec![make_source(
+        "src-001",
+        "test.mp4",
+        60000,
+        (1920, 1080),
+        false,
+        false,
+    )]);
     setup_project(tmp.path(), &manifest);
 
     let loaded = project::read_manifest(tmp.path()).unwrap();
@@ -207,9 +260,14 @@ fn source_neither_transcribed_nor_indexed() {
 #[test]
 fn source_resolution_available() {
     let tmp = TempDir::new().unwrap();
-    let manifest = make_manifest(vec![
-        make_source("src-001", "test.mp4", 60000, (3840, 2160), false, false),
-    ]);
+    let manifest = make_manifest(vec![make_source(
+        "src-001",
+        "test.mp4",
+        60000,
+        (3840, 2160),
+        false,
+        false,
+    )]);
     setup_project(tmp.path(), &manifest);
 
     let loaded = project::read_manifest(tmp.path()).unwrap();

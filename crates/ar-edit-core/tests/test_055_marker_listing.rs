@@ -31,7 +31,10 @@ fn seed_markers(tmp: &TempDir) {
     add_marker(
         tmp.path(),
         "src-001",
-        ShotRange::Time { from_ms: 62000, to_ms: 68000 },
+        ShotRange::Time {
+            from_ms: 62000,
+            to_ms: 68000,
+        },
         "avoid",
         Some("Bad audio"),
     )
@@ -147,11 +150,7 @@ fn filter_markers_by_label_avoid() {
     seed_markers(&tmp);
 
     let src1 = list_markers(tmp.path(), "src-001").unwrap();
-    let avoided: Vec<_> = src1
-        .markers
-        .iter()
-        .filter(|m| m.label == "avoid")
-        .collect();
+    let avoided: Vec<_> = src1.markers.iter().filter(|m| m.label == "avoid").collect();
     assert_eq!(avoided.len(), 1);
     assert_eq!(avoided[0].note.as_deref(), Some("Bad audio"));
 }

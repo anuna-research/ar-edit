@@ -71,10 +71,7 @@ pub fn resolve_range_from_dir(
                 source: e,
             })?;
             let transcript: Transcript =
-                serde_json::from_str(&data).map_err(|e| ResolveError::Json {
-                    path,
-                    source: e,
-                })?;
+                serde_json::from_str(&data).map_err(|e| ResolveError::Json { path, source: e })?;
             resolve_range(range, Some(&transcript), None)
         }
         ShotRange::Scenes { .. } => {
@@ -84,10 +81,7 @@ pub fn resolve_range_from_dir(
                 source: e,
             })?;
             let index: SourceIndex =
-                serde_json::from_str(&data).map_err(|e| ResolveError::Json {
-                    path,
-                    source: e,
-                })?;
+                serde_json::from_str(&data).map_err(|e| ResolveError::Json { path, source: e })?;
             resolve_range(range, None, Some(&index))
         }
     }
@@ -130,10 +124,34 @@ mod tests {
                     end_ms: 5230,
                     text: "Welcome to the interview".into(),
                     words: vec![
-                        Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                        Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                        Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                        Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
+                        Word {
+                            index: 0,
+                            text: "Welcome".into(),
+                            start_ms: 0,
+                            end_ms: 420,
+                            confidence: 0.95,
+                        },
+                        Word {
+                            index: 1,
+                            text: "to".into(),
+                            start_ms: 420,
+                            end_ms: 540,
+                            confidence: 0.97,
+                        },
+                        Word {
+                            index: 2,
+                            text: "the".into(),
+                            start_ms: 540,
+                            end_ms: 650,
+                            confidence: 0.98,
+                        },
+                        Word {
+                            index: 3,
+                            text: "interview".into(),
+                            start_ms: 650,
+                            end_ms: 1200,
+                            confidence: 0.96,
+                        },
                     ],
                 },
                 TranscriptSegment {
@@ -142,10 +160,34 @@ mod tests {
                     end_ms: 12400,
                     text: "Today we discuss climate".into(),
                     words: vec![
-                        Word { index: 4, text: "Today".into(), start_ms: 5230, end_ms: 5600, confidence: 0.94 },
-                        Word { index: 5, text: "we".into(), start_ms: 5600, end_ms: 5750, confidence: 0.99 },
-                        Word { index: 6, text: "discuss".into(), start_ms: 5750, end_ms: 6200, confidence: 0.93 },
-                        Word { index: 7, text: "climate".into(), start_ms: 6200, end_ms: 6800, confidence: 0.91 },
+                        Word {
+                            index: 4,
+                            text: "Today".into(),
+                            start_ms: 5230,
+                            end_ms: 5600,
+                            confidence: 0.94,
+                        },
+                        Word {
+                            index: 5,
+                            text: "we".into(),
+                            start_ms: 5600,
+                            end_ms: 5750,
+                            confidence: 0.99,
+                        },
+                        Word {
+                            index: 6,
+                            text: "discuss".into(),
+                            start_ms: 5750,
+                            end_ms: 6200,
+                            confidence: 0.93,
+                        },
+                        Word {
+                            index: 7,
+                            text: "climate".into(),
+                            start_ms: 6200,
+                            end_ms: 6800,
+                            confidence: 0.91,
+                        },
                     ],
                 },
             ],
@@ -195,7 +237,10 @@ mod tests {
 
     #[test]
     fn time_passthrough() {
-        let range = ShotRange::Time { from_ms: 15000, to_ms: 22000 };
+        let range = ShotRange::Time {
+            from_ms: 15000,
+            to_ms: 22000,
+        };
         let (start, end) = resolve_range(&range, None, None).unwrap();
         assert_eq!(start, 15000);
         assert_eq!(end, 22000);
@@ -208,8 +253,8 @@ mod tests {
         let t = make_transcript();
         let range = ShotRange::Words { from: 0, to: 3 };
         let (start, end) = resolve_range(&range, Some(&t), None).unwrap();
-        assert_eq!(start, 0);    // word 0 start
-        assert_eq!(end, 1200);   // word 3 end
+        assert_eq!(start, 0); // word 0 start
+        assert_eq!(end, 1200); // word 3 end
     }
 
     #[test]
@@ -217,8 +262,8 @@ mod tests {
         let t = make_transcript();
         let range = ShotRange::Words { from: 2, to: 6 };
         let (start, end) = resolve_range(&range, Some(&t), None).unwrap();
-        assert_eq!(start, 540);  // word 2 start
-        assert_eq!(end, 6200);   // word 6 end
+        assert_eq!(start, 540); // word 2 start
+        assert_eq!(end, 6200); // word 6 end
     }
 
     #[test]
@@ -227,7 +272,7 @@ mod tests {
         let range = ShotRange::Words { from: 4, to: 4 };
         let (start, end) = resolve_range(&range, Some(&t), None).unwrap();
         assert_eq!(start, 5230); // word 4 start
-        assert_eq!(end, 5600);   // word 4 end
+        assert_eq!(end, 5600); // word 4 end
     }
 
     #[test]
@@ -284,9 +329,13 @@ mod tests {
 
     #[test]
     fn from_dir_time_no_files_needed() {
-        let range = ShotRange::Time { from_ms: 1000, to_ms: 2000 };
+        let range = ShotRange::Time {
+            from_ms: 1000,
+            to_ms: 2000,
+        };
         // Should succeed even with a non-existent dir since Time needs no files.
-        let (start, end) = resolve_range_from_dir(&range, "src-001", Path::new("/nonexistent")).unwrap();
+        let (start, end) =
+            resolve_range_from_dir(&range, "src-001", Path::new("/nonexistent")).unwrap();
         assert_eq!(start, 1000);
         assert_eq!(end, 2000);
     }

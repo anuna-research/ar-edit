@@ -12,7 +12,8 @@ use tempfile::TempDir;
 #[test]
 fn trim_words_range() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 })
+        .unwrap();
 
     doc.trim_shot("shot-001", ShotRange::Words { from: 10, to: 90 })
         .unwrap();
@@ -26,7 +27,8 @@ fn trim_words_range() {
 #[test]
 fn trim_words_op_stores_old_and_new() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 })
+        .unwrap();
 
     doc.trim_shot("shot-001", ShotRange::Words { from: 10, to: 90 })
         .unwrap();
@@ -50,7 +52,8 @@ fn trim_words_op_stores_old_and_new() {
 #[test]
 fn trim_scenes_range() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Scenes { from: 0, to: 5 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Scenes { from: 0, to: 5 })
+        .unwrap();
 
     doc.trim_shot("shot-001", ShotRange::Scenes { from: 1, to: 4 })
         .unwrap();
@@ -66,7 +69,14 @@ fn trim_scenes_range() {
 #[test]
 fn trim_time_range() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 60000 }).unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 60000,
+        },
+    )
+    .unwrap();
 
     doc.trim_shot(
         "shot-001",
@@ -91,7 +101,8 @@ fn trim_time_range() {
 #[test]
 fn trim_same_shot_twice() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 })
+        .unwrap();
 
     doc.trim_shot("shot-001", ShotRange::Words { from: 10, to: 90 })
         .unwrap();
@@ -133,7 +144,8 @@ fn trim_nonexistent_shot_errors() {
 #[test]
 fn head_advances_after_trim() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 })
+        .unwrap();
     assert_eq!(doc.head, 0);
 
     doc.trim_shot("shot-001", ShotRange::Words { from: 10, to: 90 })
@@ -149,8 +161,16 @@ fn save_load_roundtrip_after_trim() {
     let path = tmp.path().join("trimmed.edit.json");
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Time { from_ms: 0, to_ms: 60000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 100 })
+        .unwrap();
+    doc.add_shot(
+        "src-002",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 60000,
+        },
+    )
+    .unwrap();
     doc.trim_shot("shot-001", ShotRange::Words { from: 10, to: 90 })
         .unwrap();
     doc.trim_shot(

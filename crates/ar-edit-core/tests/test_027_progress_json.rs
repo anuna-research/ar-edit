@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use ar_edit_core::models::*;
-use ar_edit_core::render::{self, RenderOptions};
 use ar_edit_core::overlay::OverlayMode;
+use ar_edit_core::render::{self, RenderOptions};
 
 // ---------------------------------------------------------------------------
 // Tests: RenderProgress JSON serialisation

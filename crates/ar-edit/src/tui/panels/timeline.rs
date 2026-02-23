@@ -13,9 +13,7 @@ use ar_edit_core::models::{Shot, ShotRange};
 /// Displays shot ID, source ID, duration, and text preview for each shot.
 /// Scrolling is handled automatically by `ListState`.
 pub fn draw(f: &mut Frame, shots: &[ResolvedShot], selected: &mut ListState, area: Rect) {
-    let block = Block::default()
-        .title(" Timeline ")
-        .borders(Borders::ALL);
+    let block = Block::default().title(" Timeline ").borders(Borders::ALL);
 
     if shots.is_empty() {
         let items = vec![ListItem::new(

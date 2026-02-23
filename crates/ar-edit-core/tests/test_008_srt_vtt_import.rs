@@ -283,11 +283,7 @@ Actual content";
 fn import_transcript_detects_srt_by_extension() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("test.srt");
-    fs::write(
-        &path,
-        "1\n00:00:00,000 --> 00:00:03,000\nHello world\n",
-    )
-    .unwrap();
+    fs::write(&path, "1\n00:00:00,000 --> 00:00:03,000\nHello world\n").unwrap();
 
     let t = import_transcript(&path, "src-001").unwrap();
     assert_eq!(t.model, "imported");

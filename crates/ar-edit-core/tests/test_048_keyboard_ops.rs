@@ -10,8 +10,8 @@ use std::path::Path;
 
 use ar_edit_core::display;
 use ar_edit_core::models::{
-    Defaults, EditDocument, EditOpKind, Manifest, ShotRange, Source,
-    Transcript, TranscriptSegment, Word,
+    Defaults, EditDocument, EditOpKind, Manifest, ShotRange, Source, Transcript, TranscriptSegment,
+    Word,
 };
 use tempfile::TempDir;
 
@@ -51,8 +51,11 @@ fn make_transcript() -> Transcript {
             words: (0..10)
                 .map(|i| Word {
                     index: i,
-                    text: ["one", "two", "three", "four", "five",
-                           "six", "seven", "eight", "nine", "ten"][i as usize].into(),
+                    text: [
+                        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+                        "ten",
+                    ][i as usize]
+                        .into(),
                     start_ms: (i as u64) * 1000,
                     end_ms: (i as u64) * 1000 + 900,
                     confidence: 0.95,
@@ -107,7 +110,8 @@ fn add_shot_appends_to_timeline() {
     let mut doc = EditDocument::create("test");
     assert!(doc.snapshot.shots.is_empty());
 
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 })
+        .unwrap();
     assert_eq!(doc.snapshot.shots.len(), 1);
     assert_eq!(doc.snapshot.shots[0].id, "shot-001");
     assert_eq!(doc.snapshot.shots[0].source, "src-001");
@@ -117,9 +121,18 @@ fn add_shot_appends_to_timeline() {
 #[test]
 fn add_shot_increments_ids() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 })
+        .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 5000,
+        },
+    )
+    .unwrap();
 
     assert_eq!(doc.snapshot.shots[0].id, "shot-001");
     assert_eq!(doc.snapshot.shots[1].id, "shot-002");
@@ -130,7 +143,8 @@ fn add_shot_increments_ids() {
 #[test]
 fn add_shot_creates_op() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
 
     assert_eq!(doc.ops.len(), 1);
     assert!(matches!(&doc.ops[0].op, EditOpKind::AddShot { shot } if shot.id == "shot-001"));
@@ -145,8 +159,10 @@ fn add_shot_creates_op() {
 #[test]
 fn delete_shot_removes_from_snapshot() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 })
+        .unwrap();
 
     doc.remove_shot("shot-001").unwrap();
     assert_eq!(doc.snapshot.shots.len(), 1);
@@ -157,7 +173,8 @@ fn delete_shot_removes_from_snapshot() {
 #[test]
 fn delete_shot_creates_op() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
 
     doc.remove_shot("shot-001").unwrap();
     assert_eq!(doc.ops.len(), 2);
@@ -183,9 +200,12 @@ fn delete_nonexistent_shot_errors() {
 #[test]
 fn move_shot_down() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 2 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 3, to: 5 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 6, to: 9 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 2 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 3, to: 5 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 6, to: 9 })
+        .unwrap();
 
     doc.move_shot("shot-001", 2).unwrap();
     assert_eq!(doc.snapshot.shots[0].id, "shot-002");
@@ -197,9 +217,12 @@ fn move_shot_down() {
 #[test]
 fn move_shot_up() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 2 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 3, to: 5 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 6, to: 9 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 2 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 3, to: 5 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 6, to: 9 })
+        .unwrap();
 
     doc.move_shot("shot-003", 0).unwrap();
     assert_eq!(doc.snapshot.shots[0].id, "shot-003");
@@ -211,8 +234,10 @@ fn move_shot_up() {
 #[test]
 fn move_shot_creates_op() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 2 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 3, to: 5 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 2 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 3, to: 5 })
+        .unwrap();
 
     doc.move_shot("shot-001", 1).unwrap();
     assert!(matches!(
@@ -225,8 +250,10 @@ fn move_shot_creates_op() {
 #[test]
 fn move_shot_out_of_bounds() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 2 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 3, to: 5 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 2 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 3, to: 5 })
+        .unwrap();
 
     let err = doc.move_shot("shot-001", 5).unwrap_err();
     assert!(format!("{err}").contains("out of bounds"));
@@ -240,19 +267,26 @@ fn move_shot_out_of_bounds() {
 #[test]
 fn trim_shot_updates_range() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 9 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 9 })
+        .unwrap();
 
-    doc.trim_shot("shot-001", ShotRange::Words { from: 2, to: 7 }).unwrap();
-    assert_eq!(doc.snapshot.shots[0].range, ShotRange::Words { from: 2, to: 7 });
+    doc.trim_shot("shot-001", ShotRange::Words { from: 2, to: 7 })
+        .unwrap();
+    assert_eq!(
+        doc.snapshot.shots[0].range,
+        ShotRange::Words { from: 2, to: 7 }
+    );
 }
 
 /// Trimming records a TrimShot op with both old and new ranges.
 #[test]
 fn trim_shot_creates_op() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 9 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 9 })
+        .unwrap();
 
-    doc.trim_shot("shot-001", ShotRange::Words { from: 2, to: 7 }).unwrap();
+    doc.trim_shot("shot-001", ShotRange::Words { from: 2, to: 7 })
+        .unwrap();
     assert!(matches!(
         &doc.ops[1].op,
         EditOpKind::TrimShot {
@@ -267,7 +301,9 @@ fn trim_shot_creates_op() {
 #[test]
 fn trim_nonexistent_shot_errors() {
     let mut doc = EditDocument::create("test");
-    let err = doc.trim_shot("shot-999", ShotRange::Words { from: 0, to: 5 }).unwrap_err();
+    let err = doc
+        .trim_shot("shot-999", ShotRange::Words { from: 0, to: 5 })
+        .unwrap_err();
     assert!(format!("{err}").contains("not found"));
 }
 
@@ -279,7 +315,8 @@ fn trim_nonexistent_shot_errors() {
 #[test]
 fn add_note_appends() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 })
+        .unwrap();
 
     doc.add_note("shot-001", "Great take").unwrap();
     assert_eq!(doc.snapshot.shots[0].notes.len(), 1);
@@ -290,7 +327,8 @@ fn add_note_appends() {
 #[test]
 fn multiple_notes_accumulate() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 })
+        .unwrap();
 
     doc.add_note("shot-001", "Note one").unwrap();
     doc.add_note("shot-001", "Note two").unwrap();
@@ -303,7 +341,8 @@ fn multiple_notes_accumulate() {
 #[test]
 fn add_note_creates_op() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 })
+        .unwrap();
     doc.add_note("shot-001", "Test note").unwrap();
 
     assert!(matches!(
@@ -320,7 +359,8 @@ fn add_note_creates_op() {
 #[test]
 fn undo_reverses_add_shot() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 })
+        .unwrap();
     assert_eq!(doc.snapshot.shots.len(), 1);
 
     doc.undo().unwrap();
@@ -332,7 +372,8 @@ fn undo_reverses_add_shot() {
 #[test]
 fn redo_reapplies_add_shot() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 })
+        .unwrap();
 
     doc.undo().unwrap();
     assert!(doc.snapshot.shots.is_empty());
@@ -346,9 +387,12 @@ fn redo_reapplies_add_shot() {
 #[test]
 fn undo_redo_roundtrip() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 8, to: 9 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 8, to: 9 })
+        .unwrap();
     let original = doc.snapshot.clone();
 
     // Undo all
@@ -376,7 +420,8 @@ fn undo_empty_errors() {
 #[test]
 fn redo_at_head_errors() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 })
+        .unwrap();
 
     let err = doc.redo().unwrap_err();
     assert!(format!("{err}").contains("nothing to redo"));
@@ -386,15 +431,24 @@ fn redo_at_head_errors() {
 #[test]
 fn new_op_after_undo_forks() {
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 })
+        .unwrap();
 
     // Undo one op
     doc.undo().unwrap();
     assert_eq!(doc.snapshot.shots.len(), 1);
 
     // Add a different shot — forks the history
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 5000,
+        },
+    )
+    .unwrap();
 
     // Only 2 ops should remain (original first + new fork)
     assert_eq!(doc.ops.len(), 2);
@@ -417,10 +471,19 @@ fn ops_survive_save_load() {
     let path = tmp.path().join("test.edit.json");
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 3000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 5 })
+        .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 3000,
+        },
+    )
+    .unwrap();
     doc.move_shot("shot-001", 1).unwrap();
-    doc.trim_shot("shot-001", ShotRange::Words { from: 1, to: 4 }).unwrap();
+    doc.trim_shot("shot-001", ShotRange::Words { from: 1, to: 4 })
+        .unwrap();
     doc.add_note("shot-001", "Good take").unwrap();
     doc.save(&path).unwrap();
 
@@ -439,8 +502,10 @@ fn operations_update_resolved_shots() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 5, to: 9 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 4 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 5, to: 9 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 2);

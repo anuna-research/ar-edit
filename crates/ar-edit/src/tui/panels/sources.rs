@@ -11,9 +11,7 @@ use ar_edit_core::models::Source;
 /// Render the sources panel: a selectable list of registered sources with
 /// status indicators for transcription/indexing and duration.
 pub fn draw(f: &mut Frame, sources: &[Source], selected: &mut ListState, area: Rect) {
-    let block = Block::default()
-        .title(" Sources ")
-        .borders(Borders::ALL);
+    let block = Block::default().title(" Sources ").borders(Borders::ALL);
 
     if sources.is_empty() {
         let items = vec![ListItem::new(
@@ -24,10 +22,7 @@ pub fn draw(f: &mut Frame, sources: &[Source], selected: &mut ListState, area: R
         return;
     }
 
-    let items: Vec<ListItem> = sources
-        .iter()
-        .map(|s| format_source_item(s))
-        .collect();
+    let items: Vec<ListItem> = sources.iter().map(|s| format_source_item(s)).collect();
 
     let list = List::new(items)
         .block(block)
@@ -109,10 +104,7 @@ fn format_source_item(source: &Source) -> ListItem<'static> {
     let indexed = if source.indexed { "I" } else { "-" };
 
     let line = Line::from(vec![
-        Span::styled(
-            source.id.clone(),
-            Style::default().fg(Color::Cyan),
-        ),
+        Span::styled(source.id.clone(), Style::default().fg(Color::Cyan)),
         Span::raw("  "),
         Span::styled(
             source.original_filename.clone(),

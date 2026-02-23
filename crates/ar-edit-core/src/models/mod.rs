@@ -144,12 +144,32 @@ pub struct EditOp {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum EditOpKind {
-    AddShot { shot: Shot },
-    RemoveShot { shot_id: String, shot: Shot },
-    MoveShot { shot_id: String, from_position: u32, to_position: u32 },
-    TrimShot { shot_id: String, old_range: ShotRange, new_range: ShotRange },
-    ReplaceRangeType { shot_id: String, old_range: ShotRange, new_range: ShotRange },
-    AddNote { shot_id: String, note: ShotNote },
+    AddShot {
+        shot: Shot,
+    },
+    RemoveShot {
+        shot_id: String,
+        shot: Shot,
+    },
+    MoveShot {
+        shot_id: String,
+        from_position: u32,
+        to_position: u32,
+    },
+    TrimShot {
+        shot_id: String,
+        old_range: ShotRange,
+        new_range: ShotRange,
+    },
+    ReplaceRangeType {
+        shot_id: String,
+        old_range: ShotRange,
+        new_range: ShotRange,
+    },
+    AddNote {
+        shot_id: String,
+        note: ShotNote,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +267,10 @@ mod tests {
             to_ms: 22000,
         };
         let json = serde_json::to_value(&range).unwrap();
-        assert_eq!(json, json!({ "time": { "from_ms": 15000, "to_ms": 22000 } }));
+        assert_eq!(
+            json,
+            json!({ "time": { "from_ms": 15000, "to_ms": 22000 } })
+        );
 
         let back: ShotRange = serde_json::from_value(json).unwrap();
         assert_eq!(back, range);
@@ -541,7 +564,10 @@ mod tests {
         assert_eq!(idx.source_id, "src-001");
         assert_eq!(idx.metadata.resolution, (1920, 1080));
         assert_eq!(idx.thumbnails.len(), 2);
-        assert_eq!(idx.scenes[0].description.as_deref(), Some("Interior office, wide shot"));
+        assert_eq!(
+            idx.scenes[0].description.as_deref(),
+            Some("Interior office, wide shot")
+        );
         assert_eq!(idx.scenes[1].description, None);
 
         let json = serde_json::to_value(&idx).unwrap();

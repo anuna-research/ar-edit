@@ -68,12 +68,7 @@ pub fn generate_srt(
         let transcript = load_transcript_cached(project_dir, &shot.source, &mut transcripts);
 
         if let Some(ref transcript) = transcript {
-            let shot_cues = extract_shot_cues(
-                transcript,
-                shot,
-                timeline_offset_ms,
-                &mut cue_index,
-            );
+            let shot_cues = extract_shot_cues(transcript, shot, timeline_offset_ms, &mut cue_index);
             cues.extend(shot_cues);
         }
 
@@ -101,9 +96,7 @@ fn extract_shot_cues(
         ShotRange::Words { from, to } => {
             collect_word_groups_by_index(&transcript.segments, *from, *to)
         }
-        _ => {
-            collect_word_groups_by_time(&transcript.segments, shot.start_ms, shot.end_ms)
-        }
+        _ => collect_word_groups_by_time(&transcript.segments, shot.start_ms, shot.end_ms),
     };
 
     for group in &word_groups {
@@ -116,14 +109,8 @@ fn extract_shot_cues(
 
         // Compute output timeline timing:
         // output_start = (word_source_start - shot_source_start) + timeline_offset
-        let output_start = first
-            .start_ms
-            .saturating_sub(shot.start_ms)
-            + timeline_offset_ms;
-        let output_end = last
-            .end_ms
-            .saturating_sub(shot.start_ms)
-            + timeline_offset_ms;
+        let output_start = first.start_ms.saturating_sub(shot.start_ms) + timeline_offset_ms;
+        let output_end = last.end_ms.saturating_sub(shot.start_ms) + timeline_offset_ms;
 
         let text: String = group
             .words
@@ -320,10 +307,34 @@ mod tests {
                     end_ms: 5230,
                     text: "Welcome to the interview".into(),
                     words: vec![
-                        Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                        Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                        Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                        Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
+                        Word {
+                            index: 0,
+                            text: "Welcome".into(),
+                            start_ms: 0,
+                            end_ms: 420,
+                            confidence: 0.95,
+                        },
+                        Word {
+                            index: 1,
+                            text: "to".into(),
+                            start_ms: 420,
+                            end_ms: 540,
+                            confidence: 0.97,
+                        },
+                        Word {
+                            index: 2,
+                            text: "the".into(),
+                            start_ms: 540,
+                            end_ms: 650,
+                            confidence: 0.98,
+                        },
+                        Word {
+                            index: 3,
+                            text: "interview".into(),
+                            start_ms: 650,
+                            end_ms: 1200,
+                            confidence: 0.96,
+                        },
                     ],
                 },
                 TranscriptSegment {
@@ -332,10 +343,34 @@ mod tests {
                     end_ms: 12400,
                     text: "Today we discuss climate".into(),
                     words: vec![
-                        Word { index: 4, text: "Today".into(), start_ms: 5230, end_ms: 5600, confidence: 0.94 },
-                        Word { index: 5, text: "we".into(), start_ms: 5600, end_ms: 5750, confidence: 0.99 },
-                        Word { index: 6, text: "discuss".into(), start_ms: 5750, end_ms: 6200, confidence: 0.93 },
-                        Word { index: 7, text: "climate".into(), start_ms: 6200, end_ms: 6800, confidence: 0.91 },
+                        Word {
+                            index: 4,
+                            text: "Today".into(),
+                            start_ms: 5230,
+                            end_ms: 5600,
+                            confidence: 0.94,
+                        },
+                        Word {
+                            index: 5,
+                            text: "we".into(),
+                            start_ms: 5600,
+                            end_ms: 5750,
+                            confidence: 0.99,
+                        },
+                        Word {
+                            index: 6,
+                            text: "discuss".into(),
+                            start_ms: 5750,
+                            end_ms: 6200,
+                            confidence: 0.93,
+                        },
+                        Word {
+                            index: 7,
+                            text: "climate".into(),
+                            start_ms: 6200,
+                            end_ms: 6800,
+                            confidence: 0.91,
+                        },
                     ],
                 },
             ],
@@ -567,7 +602,10 @@ Today we discuss climate\n";
         let shot = ResolvedShot {
             id: "shot-001".into(),
             source: "src-001".into(),
-            range: ShotRange::Time { from_ms: 0, to_ms: 6800 },
+            range: ShotRange::Time {
+                from_ms: 0,
+                to_ms: 6800,
+            },
             start_ms: 0,
             end_ms: 6800,
             duration_ms: 6800,
@@ -640,7 +678,10 @@ Today we discuss climate\n";
         let resolved = vec![ResolvedShot {
             id: "shot-001".into(),
             source: "src-001".into(),
-            range: ShotRange::Time { from_ms: 0, to_ms: 5000 },
+            range: ShotRange::Time {
+                from_ms: 0,
+                to_ms: 5000,
+            },
             start_ms: 0,
             end_ms: 5000,
             duration_ms: 5000,
@@ -691,7 +732,10 @@ Today we discuss climate\n";
             ResolvedShot {
                 id: "shot-002".into(),
                 source: "src-002".into(),
-                range: ShotRange::Time { from_ms: 0, to_ms: 5000 },
+                range: ShotRange::Time {
+                    from_ms: 0,
+                    to_ms: 5000,
+                },
                 start_ms: 0,
                 end_ms: 5000,
                 duration_ms: 5000,

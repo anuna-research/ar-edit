@@ -314,16 +314,25 @@ fn json_authored_doc_saves_and_loads() {
 #[test]
 fn all_range_type_json_formats() {
     // Words
-    let words: ShotRange = serde_json::from_value(json!({ "words": { "from": 0, "to": 52 } })).unwrap();
+    let words: ShotRange =
+        serde_json::from_value(json!({ "words": { "from": 0, "to": 52 } })).unwrap();
     assert_eq!(words, ShotRange::Words { from: 0, to: 52 });
 
     // Scenes
-    let scenes: ShotRange = serde_json::from_value(json!({ "scenes": { "from": 0, "to": 2 } })).unwrap();
+    let scenes: ShotRange =
+        serde_json::from_value(json!({ "scenes": { "from": 0, "to": 2 } })).unwrap();
     assert_eq!(scenes, ShotRange::Scenes { from: 0, to: 2 });
 
     // Time
-    let time: ShotRange = serde_json::from_value(json!({ "time": { "from_ms": 15000, "to_ms": 22000 } })).unwrap();
-    assert_eq!(time, ShotRange::Time { from_ms: 15000, to_ms: 22000 });
+    let time: ShotRange =
+        serde_json::from_value(json!({ "time": { "from_ms": 15000, "to_ms": 22000 } })).unwrap();
+    assert_eq!(
+        time,
+        ShotRange::Time {
+            from_ms: 15000,
+            to_ms: 22000
+        }
+    );
 }
 
 // -- Op type JSON formats -----------------------------------------------------

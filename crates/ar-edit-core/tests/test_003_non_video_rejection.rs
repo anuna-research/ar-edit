@@ -85,11 +85,7 @@ fn rejects_audio_only_file() {
     // Create an audio-only file (no video stream)
     let audio_only = tmp.path().join("audio.wav");
     let created = Command::new("ffmpeg")
-        .args([
-            "-f", "lavfi",
-            "-i", "sine=frequency=440:duration=1",
-            "-y",
-        ])
+        .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-y"])
         .arg(&audio_only)
         .stderr(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

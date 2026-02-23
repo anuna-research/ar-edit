@@ -72,6 +72,7 @@ pub fn detect_scenes(
 /// `src-NNN_MMmSSs.jpg` inside the `thumbs_dir` directory.
 ///
 /// Returns the list of generated thumbnails sorted by timestamp.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_thumbnails(
     source: &Path,
     source_id: &str,
@@ -129,8 +130,10 @@ pub fn build_source_index(
     )?;
 
     // Map timestamp → thumbnail path so we can assign each scene its thumbnail.
-    let thumb_map: HashMap<u64, &PathBuf> =
-        thumbnails.iter().map(|t| (t.timestamp_ms, &t.path)).collect();
+    let thumb_map: HashMap<u64, &PathBuf> = thumbnails
+        .iter()
+        .map(|t| (t.timestamp_ms, &t.path))
+        .collect();
 
     for scene in &mut scenes {
         if let Some(path) = thumb_map.get(&scene.start_ms) {
@@ -345,14 +348,7 @@ fn extract_frame(source: &Path, timestamp_ms: u64, out_path: &Path) -> Result<()
     let output = Command::new("ffmpeg")
         .args(["-y", "-ss", &ss, "-i"])
         .arg(source)
-        .args([
-            "-frames:v",
-            "1",
-            "-vf",
-            "scale=640:-2",
-            "-q:v",
-            "2",
-        ])
+        .args(["-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "2"])
         .arg(out_path)
         .output()
         .map_err(|e| IndexError::FfmpegFailed(format!("failed to run ffmpeg: {e}")))?;
@@ -400,8 +396,7 @@ mod tests {
 
     #[test]
     fn parse_timestamps_with_fractional_seconds() {
-        let stderr =
-            "[Parsed_showinfo_1 @ 0x1] n: 0 pts: 90 pts_time:3.500000 fmt:yuv420p\n";
+        let stderr = "[Parsed_showinfo_1 @ 0x1] n: 0 pts: 90 pts_time:3.500000 fmt:yuv420p\n";
 
         let timestamps = parse_scene_timestamps(stderr).unwrap();
         assert_eq!(timestamps, vec![3500]);
@@ -591,7 +586,10 @@ mod tests {
 
     #[test]
     fn format_filename_zero() {
-        assert_eq!(format_thumbnail_filename("src-001", 0), "src-001_00m00s.jpg");
+        assert_eq!(
+            format_thumbnail_filename("src-001", 0),
+            "src-001_00m00s.jpg"
+        );
     }
 
     #[test]
@@ -807,10 +805,7 @@ mod tests {
         let err = set_scene_description(tmp.path(), "src-003", 5, "nope").unwrap_err();
         assert!(matches!(
             err,
-            IndexError::SceneOutOfRange {
-                index: 5,
-                count: 2
-            }
+            IndexError::SceneOutOfRange { index: 5, count: 2 }
         ));
     }
 

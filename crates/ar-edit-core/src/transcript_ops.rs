@@ -166,10 +166,7 @@ pub fn search(
 fn load_manifest(project_dir: &Path) -> Result<Manifest, TranscriptOpsError> {
     let path = project_dir.join("manifest.json");
     let data = std::fs::read_to_string(&path)?;
-    serde_json::from_str(&data).map_err(|e| TranscriptOpsError::Json {
-        path,
-        source: e,
-    })
+    serde_json::from_str(&data).map_err(|e| TranscriptOpsError::Json { path, source: e })
 }
 
 fn load_transcript(path: &Path) -> Result<Transcript, TranscriptOpsError> {
@@ -373,7 +370,11 @@ mod tests {
             })
             .collect();
 
-        let text = words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
+        let text = words
+            .iter()
+            .map(|w| w.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
 
         segments.push(TranscriptSegment {
             index: 0,
@@ -422,15 +423,15 @@ mod tests {
             make_source("src-003", true),
         ]);
 
-        let t1 = make_transcript("src-001", &[
-            ("Hello", 0, 500),
-            ("world", 500, 1000),
-        ]);
-        let t3 = make_transcript("src-003", &[
-            ("Climate", 0, 400),
-            ("policy", 400, 800),
-            ("matters", 800, 1200),
-        ]);
+        let t1 = make_transcript("src-001", &[("Hello", 0, 500), ("world", 500, 1000)]);
+        let t3 = make_transcript(
+            "src-003",
+            &[
+                ("Climate", 0, 400),
+                ("policy", 400, 800),
+                ("matters", 800, 1200),
+            ],
+        );
 
         setup_project(tmp.path(), &manifest, &[t1, t3]);
 
@@ -456,7 +457,7 @@ mod tests {
     fn list_skips_missing_transcript_files() {
         let tmp = TempDir::new().unwrap();
         let manifest = make_manifest(vec![
-            make_source("src-001", true),  // transcribed=true but no file
+            make_source("src-001", true), // transcribed=true but no file
         ]);
         setup_project(tmp.path(), &manifest, &[]);
 
@@ -470,10 +471,7 @@ mod tests {
     fn read_returns_transcript() {
         let tmp = TempDir::new().unwrap();
         let manifest = make_manifest(vec![make_source("src-001", true)]);
-        let t = make_transcript("src-001", &[
-            ("Hello", 0, 500),
-            ("world", 500, 1000),
-        ]);
+        let t = make_transcript("src-001", &[("Hello", 0, 500), ("world", 500, 1000)]);
         setup_project(tmp.path(), &manifest, &[t.clone()]);
 
         let result = read(tmp.path(), "src-001").unwrap();
@@ -508,13 +506,16 @@ mod tests {
     fn search_finds_matching_words() {
         let tmp = TempDir::new().unwrap();
         let manifest = make_manifest(vec![make_source("src-001", true)]);
-        let t = make_transcript("src-001", &[
-            ("The", 0, 200),
-            ("climate", 200, 600),
-            ("policy", 600, 1000),
-            ("has", 1000, 1200),
-            ("changed", 1200, 1600),
-        ]);
+        let t = make_transcript(
+            "src-001",
+            &[
+                ("The", 0, 200),
+                ("climate", 200, 600),
+                ("policy", 600, 1000),
+                ("has", 1000, 1200),
+                ("changed", 1200, 1600),
+            ],
+        );
         setup_project(tmp.path(), &manifest, &[t]);
 
         let results = search(tmp.path(), "climate", None).unwrap();
@@ -535,21 +536,26 @@ mod tests {
             make_source("src-002", true),
             make_source("src-003", true),
         ]);
-        let t1 = make_transcript("src-001", &[
-            ("The", 0, 200),
-            ("climate", 200, 600),
-            ("policy", 600, 1000),
-        ]);
-        let t2 = make_transcript("src-002", &[
-            ("No", 0, 200),
-            ("match", 200, 500),
-            ("here", 500, 800),
-        ]);
-        let t3 = make_transcript("src-003", &[
-            ("Our", 0, 200),
-            ("climate", 200, 600),
-            ("future", 600, 1000),
-        ]);
+        let t1 = make_transcript(
+            "src-001",
+            &[
+                ("The", 0, 200),
+                ("climate", 200, 600),
+                ("policy", 600, 1000),
+            ],
+        );
+        let t2 = make_transcript(
+            "src-002",
+            &[("No", 0, 200), ("match", 200, 500), ("here", 500, 800)],
+        );
+        let t3 = make_transcript(
+            "src-003",
+            &[
+                ("Our", 0, 200),
+                ("climate", 200, 600),
+                ("future", 600, 1000),
+            ],
+        );
         setup_project(tmp.path(), &manifest, &[t1, t2, t3]);
 
         let results = search(tmp.path(), "climate", None).unwrap();
@@ -565,12 +571,8 @@ mod tests {
             make_source("src-001", true),
             make_source("src-003", true),
         ]);
-        let t1 = make_transcript("src-001", &[
-            ("climate", 0, 400),
-        ]);
-        let t3 = make_transcript("src-003", &[
-            ("climate", 0, 400),
-        ]);
+        let t1 = make_transcript("src-001", &[("climate", 0, 400)]);
+        let t3 = make_transcript("src-003", &[("climate", 0, 400)]);
         setup_project(tmp.path(), &manifest, &[t1, t3]);
 
         let results = search(tmp.path(), "climate", Some("src-003")).unwrap();
@@ -582,10 +584,7 @@ mod tests {
     fn search_case_insensitive() {
         let tmp = TempDir::new().unwrap();
         let manifest = make_manifest(vec![make_source("src-001", true)]);
-        let t = make_transcript("src-001", &[
-            ("Climate", 0, 400),
-            ("POLICY", 400, 800),
-        ]);
+        let t = make_transcript("src-001", &[("Climate", 0, 400), ("POLICY", 400, 800)]);
         setup_project(tmp.path(), &manifest, &[t]);
 
         let results = search(tmp.path(), "climate", None).unwrap();
@@ -597,12 +596,15 @@ mod tests {
     fn search_regex_pattern() {
         let tmp = TempDir::new().unwrap();
         let manifest = make_manifest(vec![make_source("src-001", true)]);
-        let t = make_transcript("src-001", &[
-            ("The", 0, 200),
-            ("climate", 200, 600),
-            ("climates", 600, 1000),
-            ("warming", 1000, 1400),
-        ]);
+        let t = make_transcript(
+            "src-001",
+            &[
+                ("The", 0, 200),
+                ("climate", 200, 600),
+                ("climates", 600, 1000),
+                ("warming", 1000, 1400),
+            ],
+        );
         setup_project(tmp.path(), &manifest, &[t]);
 
         // Regex: word boundary match
@@ -615,10 +617,7 @@ mod tests {
     fn search_no_matches() {
         let tmp = TempDir::new().unwrap();
         let manifest = make_manifest(vec![make_source("src-001", true)]);
-        let t = make_transcript("src-001", &[
-            ("Hello", 0, 400),
-            ("world", 400, 800),
-        ]);
+        let t = make_transcript("src-001", &[("Hello", 0, 400), ("world", 400, 800)]);
         setup_project(tmp.path(), &manifest, &[t]);
 
         let results = search(tmp.path(), "nonexistent", None).unwrap();
@@ -639,13 +638,16 @@ mod tests {
     fn search_provides_context() {
         let tmp = TempDir::new().unwrap();
         let manifest = make_manifest(vec![make_source("src-001", true)]);
-        let t = make_transcript("src-001", &[
-            ("The", 0, 200),
-            ("big", 200, 400),
-            ("climate", 400, 800),
-            ("policy", 800, 1200),
-            ("debate", 1200, 1600),
-        ]);
+        let t = make_transcript(
+            "src-001",
+            &[
+                ("The", 0, 200),
+                ("big", 200, 400),
+                ("climate", 400, 800),
+                ("policy", 800, 1200),
+                ("debate", 1200, 1600),
+            ],
+        );
         setup_project(tmp.path(), &manifest, &[t]);
 
         let results = search(tmp.path(), "climate", None).unwrap();
@@ -658,11 +660,14 @@ mod tests {
     fn search_multi_word_match() {
         let tmp = TempDir::new().unwrap();
         let manifest = make_manifest(vec![make_source("src-001", true)]);
-        let t = make_transcript("src-001", &[
-            ("climate", 0, 400),
-            ("policy", 400, 800),
-            ("debate", 800, 1200),
-        ]);
+        let t = make_transcript(
+            "src-001",
+            &[
+                ("climate", 0, 400),
+                ("policy", 400, 800),
+                ("debate", 800, 1200),
+            ],
+        );
         setup_project(tmp.path(), &manifest, &[t]);
 
         let results = search(tmp.path(), "climate policy", None).unwrap();

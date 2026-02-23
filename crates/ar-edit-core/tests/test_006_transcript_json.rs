@@ -176,11 +176,7 @@ fn word_indices_start_at_zero() {
         "src-003.transcript.json",
     ] {
         let t = load_fixture(name);
-        let first_word = t
-            .segments
-            .iter()
-            .flat_map(|s| &s.words)
-            .next();
+        let first_word = t.segments.iter().flat_map(|s| &s.words).next();
         if let Some(w) = first_word {
             assert_eq!(
                 w.index, 0,
@@ -199,11 +195,7 @@ fn word_indices_end_at_word_count_minus_one() {
         "src-003.transcript.json",
     ] {
         let t = load_fixture(name);
-        let last_word = t
-            .segments
-            .iter()
-            .flat_map(|s| &s.words)
-            .last();
+        let last_word = t.segments.iter().flat_map(|s| &s.words).last();
         if let Some(w) = last_word {
             assert_eq!(
                 w.index,

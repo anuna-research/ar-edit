@@ -39,12 +39,18 @@ fn find_test_model() -> Option<PathBuf> {
 fn create_test_video(path: &Path) -> bool {
     Command::new("ffmpeg")
         .args([
-            "-f", "lavfi",
-            "-i", "color=black:s=320x240:d=1",
-            "-f", "lavfi",
-            "-i", "sine=frequency=440:duration=1",
-            "-c:v", "libx264",
-            "-c:a", "aac",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=black:s=320x240:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=1",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
             "-shortest",
             "-y",
         ])

@@ -30,6 +30,14 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    /// Show verbose diagnostic output
+    #[arg(short, long, global = true)]
+    pub verbose: bool,
+
+    /// Preview what would be done without making changes
+    #[arg(short = 'n', long, global = true)]
+    pub dry_run: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -561,14 +569,8 @@ mod tests {
 
     #[test]
     fn cli_parses_transcribe_single() {
-        let cli = Cli::try_parse_from([
-            "ar-edit",
-            "transcribe",
-            "src-001",
-            "--model",
-            "base",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["ar-edit", "transcribe", "src-001", "--model", "base"]).unwrap();
         match cli.command {
             Commands::Transcribe(ref args) => {
                 assert_eq!(args.source_id.as_deref(), Some("src-001"));
@@ -605,7 +607,11 @@ mod tests {
         .unwrap();
         match cli.command {
             Commands::Transcripts {
-                command: TranscriptsCommand::Read { ref source_id, with_markers },
+                command:
+                    TranscriptsCommand::Read {
+                        ref source_id,
+                        with_markers,
+                    },
             } => {
                 assert_eq!(source_id, "src-001");
                 assert!(with_markers);
@@ -616,16 +622,14 @@ mod tests {
 
     #[test]
     fn cli_parses_transcripts_read_without_markers() {
-        let cli = Cli::try_parse_from([
-            "ar-edit",
-            "transcripts",
-            "read",
-            "src-001",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["ar-edit", "transcripts", "read", "src-001"]).unwrap();
         match cli.command {
             Commands::Transcripts {
-                command: TranscriptsCommand::Read { ref source_id, with_markers },
+                command:
+                    TranscriptsCommand::Read {
+                        ref source_id,
+                        with_markers,
+                    },
             } => {
                 assert_eq!(source_id, "src-001");
                 assert!(!with_markers);
@@ -647,7 +651,11 @@ mod tests {
         .unwrap();
         match cli.command {
             Commands::Transcripts {
-                command: TranscriptsCommand::Search { ref query, ref source },
+                command:
+                    TranscriptsCommand::Search {
+                        ref query,
+                        ref source,
+                    },
             } => {
                 assert_eq!(query, "climate policy");
                 assert_eq!(source.as_deref(), Some("src-001"));
@@ -658,8 +666,7 @@ mod tests {
 
     #[test]
     fn cli_parses_edit_create() {
-        let cli =
-            Cli::try_parse_from(["ar-edit", "edit", "create", "rough-cut"]).unwrap();
+        let cli = Cli::try_parse_from(["ar-edit", "edit", "create", "rough-cut"]).unwrap();
         match cli.command {
             Commands::Edit {
                 command: EditCommand::Create { ref name },
@@ -713,7 +720,12 @@ mod tests {
         .unwrap();
         match cli.command {
             Commands::Edit {
-                command: EditCommand::MoveSegment { ref edit, ref shot, position },
+                command:
+                    EditCommand::MoveSegment {
+                        ref edit,
+                        ref shot,
+                        position,
+                    },
             } => {
                 assert_eq!(edit, "rough-cut");
                 assert_eq!(shot, "shot-003");
@@ -810,14 +822,7 @@ mod tests {
 
     #[test]
     fn cli_parses_play_source_at_word() {
-        let cli = Cli::try_parse_from([
-            "ar-edit",
-            "play",
-            "src-001",
-            "--at-word",
-            "85",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["ar-edit", "play", "src-001", "--at-word", "85"]).unwrap();
         match cli.command {
             Commands::Play(ref args) => {
                 assert_eq!(args.target, "src-001");
@@ -856,14 +861,8 @@ mod tests {
 
     #[test]
     fn cli_parses_render_minimal() {
-        let cli = Cli::try_parse_from([
-            "ar-edit",
-            "render",
-            "rough-cut",
-            "-o",
-            "output.mp4",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["ar-edit", "render", "rough-cut", "-o", "output.mp4"]).unwrap();
         match cli.command {
             Commands::Render(ref args) => {
                 assert_eq!(args.edit, "rough-cut");
@@ -1016,7 +1015,10 @@ mod tests {
     fn cli_parses_markers_with_source() {
         let cli = Cli::try_parse_from(["ar-edit", "markers", "src-001"]).unwrap();
         match cli.command {
-            Commands::Markers { ref source_id, ref label } => {
+            Commands::Markers {
+                ref source_id,
+                ref label,
+            } => {
                 assert_eq!(source_id.as_deref(), Some("src-001"));
                 assert!(label.is_none());
             }
@@ -1028,7 +1030,10 @@ mod tests {
     fn cli_parses_markers_all_sources() {
         let cli = Cli::try_parse_from(["ar-edit", "markers"]).unwrap();
         match cli.command {
-            Commands::Markers { ref source_id, ref label } => {
+            Commands::Markers {
+                ref source_id,
+                ref label,
+            } => {
                 assert!(source_id.is_none());
                 assert!(label.is_none());
             }
@@ -1038,9 +1043,13 @@ mod tests {
 
     #[test]
     fn cli_parses_markers_with_label_filter() {
-        let cli = Cli::try_parse_from(["ar-edit", "markers", "src-001", "--label", "select"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["ar-edit", "markers", "src-001", "--label", "select"]).unwrap();
         match cli.command {
-            Commands::Markers { ref source_id, ref label } => {
+            Commands::Markers {
+                ref source_id,
+                ref label,
+            } => {
                 assert_eq!(source_id.as_deref(), Some("src-001"));
                 assert_eq!(label.as_deref(), Some("select"));
             }
@@ -1063,7 +1072,12 @@ mod tests {
         .unwrap();
         match cli.command {
             Commands::Edit {
-                command: EditCommand::Note { ref edit, ref shot, ref text },
+                command:
+                    EditCommand::Note {
+                        ref edit,
+                        ref shot,
+                        ref text,
+                    },
             } => {
                 assert_eq!(edit, "rough-cut");
                 assert_eq!(shot, "shot-001");
@@ -1113,15 +1127,14 @@ mod tests {
 
     #[test]
     fn cli_parses_transcripts_export_default() {
-        let cli = Cli::try_parse_from([
-            "ar-edit",
-            "transcripts",
-            "export",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["ar-edit", "transcripts", "export"]).unwrap();
         match cli.command {
             Commands::Transcripts {
-                command: TranscriptsCommand::Export { ref format, ref output },
+                command:
+                    TranscriptsCommand::Export {
+                        ref format,
+                        ref output,
+                    },
             } => {
                 assert_eq!(format, "editable");
                 assert!(output.is_none());
@@ -1144,7 +1157,11 @@ mod tests {
         .unwrap();
         match cli.command {
             Commands::Transcripts {
-                command: TranscriptsCommand::Export { ref format, ref output },
+                command:
+                    TranscriptsCommand::Export {
+                        ref format,
+                        ref output,
+                    },
             } => {
                 assert_eq!(format, "editable");
                 assert_eq!(output.as_deref(), Some(std::path::Path::new("draft.md")));

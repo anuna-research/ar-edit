@@ -119,11 +119,8 @@ pub fn resolve_markers(
         let transcript = load_transcript_cached(project_dir, source_id, &mut transcripts);
         let index = load_index_cached(project_dir, source_id, &mut indices);
 
-        let resolve_result = resolve::resolve_range(
-            &marker.range,
-            transcript.as_ref(),
-            index.as_ref(),
-        );
+        let resolve_result =
+            resolve::resolve_range(&marker.range, transcript.as_ref(), index.as_ref());
 
         // If resolution fails (e.g. transcript/index missing), fall back to
         // placeholder values so the marker still appears in listings.
@@ -138,7 +135,9 @@ pub fn resolve_markers(
                 if fallback {
                     Some(format!("(transcript not available) words {}..{}", from, to))
                 } else {
-                    transcript.as_ref().map(|t| extract_text_preview(t, *from, *to))
+                    transcript
+                        .as_ref()
+                        .map(|t| extract_text_preview(t, *from, *to))
                 }
             }
             _ => None,
@@ -149,7 +148,9 @@ pub fn resolve_markers(
                 if fallback {
                     Some(format!("(index not available) scenes {}..{}", from, to))
                 } else {
-                    index.as_ref().map(|idx| extract_scene_preview(idx, *from, *to))
+                    index
+                        .as_ref()
+                        .map(|idx| extract_scene_preview(idx, *from, *to))
                 }
             }
             _ => None,
@@ -188,25 +189,22 @@ fn resolve_shot(
     let transcript = load_transcript_cached(project_dir, &shot.source, transcripts);
     let index = load_index_cached(project_dir, &shot.source, indices);
 
-    let (start_ms, end_ms) = resolve::resolve_range(
-        &shot.range,
-        transcript.as_ref(),
-        index.as_ref(),
-    )?;
+    let (start_ms, end_ms) =
+        resolve::resolve_range(&shot.range, transcript.as_ref(), index.as_ref())?;
 
     let duration_ms = end_ms.saturating_sub(start_ms);
 
     let text_preview = match &shot.range {
-        ShotRange::Words { from, to } => {
-            transcript.as_ref().map(|t| extract_text_preview(t, *from, *to))
-        }
+        ShotRange::Words { from, to } => transcript
+            .as_ref()
+            .map(|t| extract_text_preview(t, *from, *to)),
         _ => None,
     };
 
     let scene_preview = match &shot.range {
-        ShotRange::Scenes { from, to } => {
-            index.as_ref().map(|idx| extract_scene_preview(idx, *from, *to))
-        }
+        ShotRange::Scenes { from, to } => index
+            .as_ref()
+            .map(|idx| extract_scene_preview(idx, *from, *to)),
         _ => None,
     };
 
@@ -264,7 +262,7 @@ fn extract_text_preview(transcript: &Transcript, from: u32, to: u32) -> String {
     truncate_preview(&full, PREVIEW_MAX_CHARS)
 }
 
-fn collect_words_in_range<'a>(segments: &'a [TranscriptSegment], from: u32, to: u32) -> Vec<&'a str> {
+fn collect_words_in_range(segments: &[TranscriptSegment], from: u32, to: u32) -> Vec<&str> {
     let mut words = Vec::new();
     for seg in segments {
         for w in &seg.words {
@@ -351,9 +349,8 @@ pub fn interleave_transcript_with_markers(
     transcript: &Transcript,
     markers: &[ResolvedMarker],
 ) -> InterleavedTranscript {
-    let mut items: Vec<TranscriptItem> = Vec::with_capacity(
-        transcript.segments.len() + markers.len(),
-    );
+    let mut items: Vec<TranscriptItem> =
+        Vec::with_capacity(transcript.segments.len() + markers.len());
 
     for seg in &transcript.segments {
         items.push(TranscriptItem::Segment(seg.clone()));
@@ -423,10 +420,34 @@ mod tests {
                     end_ms: 5230,
                     text: "Welcome to the interview".into(),
                     words: vec![
-                        Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                        Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                        Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                        Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
+                        Word {
+                            index: 0,
+                            text: "Welcome".into(),
+                            start_ms: 0,
+                            end_ms: 420,
+                            confidence: 0.95,
+                        },
+                        Word {
+                            index: 1,
+                            text: "to".into(),
+                            start_ms: 420,
+                            end_ms: 540,
+                            confidence: 0.97,
+                        },
+                        Word {
+                            index: 2,
+                            text: "the".into(),
+                            start_ms: 540,
+                            end_ms: 650,
+                            confidence: 0.98,
+                        },
+                        Word {
+                            index: 3,
+                            text: "interview".into(),
+                            start_ms: 650,
+                            end_ms: 1200,
+                            confidence: 0.96,
+                        },
                     ],
                 },
                 TranscriptSegment {
@@ -435,10 +456,34 @@ mod tests {
                     end_ms: 12400,
                     text: "Today we discuss climate".into(),
                     words: vec![
-                        Word { index: 4, text: "Today".into(), start_ms: 5230, end_ms: 5600, confidence: 0.94 },
-                        Word { index: 5, text: "we".into(), start_ms: 5600, end_ms: 5750, confidence: 0.99 },
-                        Word { index: 6, text: "discuss".into(), start_ms: 5750, end_ms: 6200, confidence: 0.93 },
-                        Word { index: 7, text: "climate".into(), start_ms: 6200, end_ms: 6800, confidence: 0.91 },
+                        Word {
+                            index: 4,
+                            text: "Today".into(),
+                            start_ms: 5230,
+                            end_ms: 5600,
+                            confidence: 0.94,
+                        },
+                        Word {
+                            index: 5,
+                            text: "we".into(),
+                            start_ms: 5600,
+                            end_ms: 5750,
+                            confidence: 0.99,
+                        },
+                        Word {
+                            index: 6,
+                            text: "discuss".into(),
+                            start_ms: 5750,
+                            end_ms: 6200,
+                            confidence: 0.93,
+                        },
+                        Word {
+                            index: 7,
+                            text: "climate".into(),
+                            start_ms: 6200,
+                            end_ms: 6800,
+                            confidence: 0.91,
+                        },
                     ],
                 },
             ],
@@ -591,7 +636,8 @@ mod tests {
         setup_project(tmp.path());
 
         let mut doc = EditDocument::create("test");
-        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+            .unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
         assert_eq!(resolved.len(), 1);
@@ -612,7 +658,8 @@ mod tests {
         setup_project(tmp.path());
 
         let mut doc = EditDocument::create("test");
-        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+            .unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
         assert_eq!(resolved.len(), 1);
@@ -632,7 +679,14 @@ mod tests {
         setup_project(tmp.path());
 
         let mut doc = EditDocument::create("test");
-        doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 10000 }).unwrap();
+        doc.add_shot(
+            "src-001",
+            ShotRange::Time {
+                from_ms: 5000,
+                to_ms: 10000,
+            },
+        )
+        .unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
         assert_eq!(resolved.len(), 1);
@@ -649,9 +703,18 @@ mod tests {
         setup_project(tmp.path());
 
         let mut doc = EditDocument::create("test");
-        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();
-        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
-        doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 3000 }).unwrap();
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 })
+            .unwrap();
+        doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 })
+            .unwrap();
+        doc.add_shot(
+            "src-001",
+            ShotRange::Time {
+                from_ms: 1000,
+                to_ms: 3000,
+            },
+        )
+        .unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
         assert_eq!(resolved.len(), 3);
@@ -686,7 +749,8 @@ mod tests {
         setup_project(tmp.path());
 
         let mut doc = EditDocument::create("test");
-        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+            .unwrap();
         doc.add_note("shot-001", "Great take").unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
@@ -701,8 +765,10 @@ mod tests {
 
         let mut doc = EditDocument::create("test");
         // Two shots from same source — transcript should only be loaded once
-        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-        doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
+        doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+            .unwrap();
+        doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 })
+            .unwrap();
 
         let resolved = resolve_edit(&doc, tmp.path()).unwrap();
         assert_eq!(resolved.len(), 2);
@@ -722,7 +788,10 @@ mod tests {
         ResolvedMarker {
             id: id.into(),
             source_id: "src-001".into(),
-            range: ShotRange::Time { from_ms: start_ms, to_ms: end_ms },
+            range: ShotRange::Time {
+                from_ms: start_ms,
+                to_ms: end_ms,
+            },
             label: label.into(),
             note: None,
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
@@ -749,9 +818,7 @@ mod tests {
     #[test]
     fn interleave_marker_between_segments() {
         let t = make_transcript();
-        let markers = vec![
-            make_resolved_marker("mark-001", "select", 3000, 4000),
-        ];
+        let markers = vec![make_resolved_marker("mark-001", "select", 3000, 4000)];
         let result = interleave_transcript_with_markers(&t, &markers);
         assert_eq!(result.items.len(), 3);
         assert_eq!(result.marker_count, 1);
@@ -765,9 +832,7 @@ mod tests {
     fn interleave_marker_at_segment_start() {
         let t = make_transcript();
         // Marker at same start_ms as segment 0 — segment should come first
-        let markers = vec![
-            make_resolved_marker("mark-001", "review", 0, 500),
-        ];
+        let markers = vec![make_resolved_marker("mark-001", "review", 0, 500)];
         let result = interleave_transcript_with_markers(&t, &markers);
         assert_eq!(result.items.len(), 3);
         assert!(matches!(&result.items[0], TranscriptItem::Segment(s) if s.index == 0));
@@ -794,9 +859,7 @@ mod tests {
     #[test]
     fn interleave_marker_after_all_segments() {
         let t = make_transcript();
-        let markers = vec![
-            make_resolved_marker("mark-001", "note", 100000, 110000),
-        ];
+        let markers = vec![make_resolved_marker("mark-001", "note", 100000, 110000)];
         let result = interleave_transcript_with_markers(&t, &markers);
         assert_eq!(result.items.len(), 3);
         assert!(matches!(&result.items[2], TranscriptItem::Marker(m) if m.id == "mark-001"));
@@ -805,9 +868,7 @@ mod tests {
     #[test]
     fn interleave_preserves_transcript_metadata() {
         let t = make_transcript();
-        let markers = vec![
-            make_resolved_marker("mark-001", "select", 1000, 2000),
-        ];
+        let markers = vec![make_resolved_marker("mark-001", "select", 1000, 2000)];
         let result = interleave_transcript_with_markers(&t, &markers);
         assert_eq!(result.source_id, "src-001");
         assert_eq!(result.duration_ms, 124500);
@@ -817,9 +878,7 @@ mod tests {
     #[test]
     fn interleave_serialization_roundtrip() {
         let t = make_transcript();
-        let markers = vec![
-            make_resolved_marker("mark-001", "select", 3000, 4000),
-        ];
+        let markers = vec![make_resolved_marker("mark-001", "select", 3000, 4000)];
         let result = interleave_transcript_with_markers(&t, &markers);
         let json = serde_json::to_value(&result).unwrap();
 
@@ -898,7 +957,10 @@ mod tests {
 
         let markers = vec![Marker {
             id: "mark-003".into(),
-            range: ShotRange::Time { from_ms: 5000, to_ms: 10000 },
+            range: ShotRange::Time {
+                from_ms: 5000,
+                to_ms: 10000,
+            },
             label: "highlight".into(),
             note: None,
             created: "2026-02-19T14:00:00Z".parse().unwrap(),

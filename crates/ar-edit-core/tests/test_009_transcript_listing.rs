@@ -123,17 +123,10 @@ fn list_returns_three_transcribed_sources() {
         make_source("src-003", true),
     ]);
 
-    let t1 = make_transcript(
-        "src-001",
-        &[("Hello", 0, 500), ("world", 500, 1000)],
-    );
+    let t1 = make_transcript("src-001", &[("Hello", 0, 500), ("world", 500, 1000)]);
     let t2 = make_transcript(
         "src-002",
-        &[
-            ("The", 0, 200),
-            ("economy", 200, 600),
-            ("grows", 600, 1000),
-        ],
+        &[("The", 0, 200), ("economy", 200, 600), ("grows", 600, 1000)],
     );
     let t3 = make_transcript(
         "src-003",

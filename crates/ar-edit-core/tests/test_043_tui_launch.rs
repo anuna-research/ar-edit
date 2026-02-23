@@ -49,10 +49,34 @@ fn make_transcript() -> Transcript {
             end_ms: 5230,
             text: "Welcome to the interview".into(),
             words: vec![
-                Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
+                Word {
+                    index: 0,
+                    text: "Welcome".into(),
+                    start_ms: 0,
+                    end_ms: 420,
+                    confidence: 0.95,
+                },
+                Word {
+                    index: 1,
+                    text: "to".into(),
+                    start_ms: 420,
+                    end_ms: 540,
+                    confidence: 0.97,
+                },
+                Word {
+                    index: 2,
+                    text: "the".into(),
+                    start_ms: 540,
+                    end_ms: 650,
+                    confidence: 0.98,
+                },
+                Word {
+                    index: 3,
+                    text: "interview".into(),
+                    start_ms: 650,
+                    end_ms: 1200,
+                    confidence: 0.96,
+                },
             ],
         }],
         word_count: 4,
@@ -142,9 +166,18 @@ fn setup_full_project(dir: &Path) -> EditDocument {
 
     // Edit document with shots from both sources
     let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 2000, to_ms: 8000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 })
+        .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 2000,
+            to_ms: 8000,
+        },
+    )
+    .unwrap();
     doc.save(&dir.join("edits/rough-cut.edit.json")).unwrap();
 
     doc
@@ -278,7 +311,14 @@ fn project_with_missing_transcript_still_loads() {
 
     // Edit with time range (doesn't need transcript)
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 5000 }).unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 5000,
+        },
+    )
+    .unwrap();
     doc.save(&dir.join("edits/test.edit.json")).unwrap();
 
     // Should resolve without error because time ranges don't need transcripts

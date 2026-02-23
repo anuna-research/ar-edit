@@ -219,9 +219,18 @@ fn same_codec_detected_across_aliases() {
 /// When source and target codecs differ, re-encoding is needed.
 #[test]
 fn different_codecs_detected() {
-    assert_ne!(render::normalize_codec("h264"), render::normalize_codec("h265"));
-    assert_ne!(render::normalize_codec("h264"), render::normalize_codec("vp9"));
-    assert_ne!(render::normalize_codec("h265"), render::normalize_codec("av1"));
+    assert_ne!(
+        render::normalize_codec("h264"),
+        render::normalize_codec("h265")
+    );
+    assert_ne!(
+        render::normalize_codec("h264"),
+        render::normalize_codec("vp9")
+    );
+    assert_ne!(
+        render::normalize_codec("h265"),
+        render::normalize_codec("av1")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -243,7 +252,11 @@ fn render_to_file_with_options_empty_edit() {
 
     // With default options
     let result = render::render_to_file(
-        &doc, tmp.path(), &output, OverlayMode::Clean, &RenderOptions::default(),
+        &doc,
+        tmp.path(),
+        &output,
+        OverlayMode::Clean,
+        &RenderOptions::default(),
     );
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("no shots"));

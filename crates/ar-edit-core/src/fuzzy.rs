@@ -81,7 +81,7 @@ pub fn match_text(text: &str, transcript: &Transcript) -> Option<(u32, u32)> {
 /// Split `text` on whitespace and normalise each token.
 fn tokenize(text: &str) -> Vec<String> {
     text.split_whitespace()
-        .map(|w| normalize_word(w))
+        .map(normalize_word)
         .filter(|w| !w.is_empty())
         .collect()
 }
@@ -116,8 +116,8 @@ fn levenshtein(a: &str, b: &str) -> usize {
     let mut prev = vec![0usize; n + 1];
     let mut curr = vec![0usize; n + 1];
 
-    for j in 0..=n {
-        prev[j] = j;
+    for (j, val) in prev.iter_mut().enumerate().take(n + 1) {
+        *val = j;
     }
 
     for i in 1..=m {
@@ -128,9 +128,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
             } else {
                 1
             };
-            curr[j] = (prev[j] + 1)
-                .min(curr[j - 1] + 1)
-                .min(prev[j - 1] + cost);
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -256,7 +254,7 @@ mod tests {
     #[test]
     fn levenshtein_two_edits() {
         assert_eq!(levenshtein("hello", "hllo"), 1); // one deletion
-        assert_eq!(levenshtein("hello", "hlo"), 2);  // two deletions
+        assert_eq!(levenshtein("hello", "hlo"), 2); // two deletions
     }
 
     // -- match_text: exact matches --------------------------------------------
@@ -270,27 +268,21 @@ mod tests {
 
     #[test]
     fn exact_match_beginning() {
-        let t = make_transcript(&[
-            "Welcome", "to", "the", "interview", "today", "we", "talk",
-        ]);
+        let t = make_transcript(&["Welcome", "to", "the", "interview", "today", "we", "talk"]);
         let result = match_text("Welcome to the interview", &t);
         assert_eq!(result, Some((0, 3)));
     }
 
     #[test]
     fn exact_match_middle() {
-        let t = make_transcript(&[
-            "Welcome", "to", "the", "interview", "today", "we", "talk",
-        ]);
+        let t = make_transcript(&["Welcome", "to", "the", "interview", "today", "we", "talk"]);
         let result = match_text("the interview today", &t);
         assert_eq!(result, Some((2, 4)));
     }
 
     #[test]
     fn exact_match_end() {
-        let t = make_transcript(&[
-            "Welcome", "to", "the", "interview", "today", "we", "talk",
-        ]);
+        let t = make_transcript(&["Welcome", "to", "the", "interview", "today", "we", "talk"]);
         let result = match_text("today we talk", &t);
         assert_eq!(result, Some((4, 6)));
     }
@@ -331,9 +323,7 @@ mod tests {
 
     #[test]
     fn fuzzy_match_one_typo() {
-        let t = make_transcript(&[
-            "Welcome", "to", "the", "interview", "today",
-        ]);
+        let t = make_transcript(&["Welcome", "to", "the", "interview", "today"]);
         // "intervew" is 1 edit from "interview"
         let result = match_text("Welcome to the intervew today", &t);
         assert_eq!(result, Some((0, 4)));
@@ -342,9 +332,7 @@ mod tests {
     #[test]
     fn fuzzy_match_threshold_met() {
         // 5 words, threshold = ceil(5 * 0.8) = 4
-        let t = make_transcript(&[
-            "Welcome", "to", "the", "interview", "today",
-        ]);
+        let t = make_transcript(&["Welcome", "to", "the", "interview", "today"]);
         // 4/5 match (one wrong short word "xx" won't fuzzy-match "to")
         let result = match_text("Welcome xx the interview today", &t);
         assert_eq!(result, Some((0, 4)));
@@ -352,9 +340,7 @@ mod tests {
 
     #[test]
     fn fuzzy_match_threshold_not_met() {
-        let t = make_transcript(&[
-            "Welcome", "to", "the", "interview", "today",
-        ]);
+        let t = make_transcript(&["Welcome", "to", "the", "interview", "today"]);
         // Only 1/5 match — well below threshold
         let result = match_text("Goodbye from our discussion yesterday", &t);
         assert_eq!(result, None);
@@ -409,8 +395,16 @@ mod tests {
     #[test]
     fn split_block_first_half() {
         let t = make_transcript(&[
-            "Welcome", "to", "the", "interview", "today", "we're",
-            "going", "to", "talk", "about",
+            "Welcome",
+            "to",
+            "the",
+            "interview",
+            "today",
+            "we're",
+            "going",
+            "to",
+            "talk",
+            "about",
         ]);
         // User kept the first half
         let result = match_text("Welcome to the interview", &t);
@@ -420,8 +414,16 @@ mod tests {
     #[test]
     fn split_block_second_half() {
         let t = make_transcript(&[
-            "Welcome", "to", "the", "interview", "today", "we're",
-            "going", "to", "talk", "about",
+            "Welcome",
+            "to",
+            "the",
+            "interview",
+            "today",
+            "we're",
+            "going",
+            "to",
+            "talk",
+            "about",
         ]);
         // User split after "interview" — orphaned second half
         let result = match_text("today we're going to talk about", &t);
@@ -436,8 +438,7 @@ mod tests {
             vec!["climate", "policy"],
         ]);
         // Merged first two segments
-        let result =
-            match_text("Welcome to the interview today we talk about", &t);
+        let result = match_text("Welcome to the interview today we talk about", &t);
         assert_eq!(result, Some((0, 7)));
     }
 

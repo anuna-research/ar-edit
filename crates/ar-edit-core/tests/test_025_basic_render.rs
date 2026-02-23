@@ -9,8 +9,8 @@
 
 use ar_edit_core::display::{self, ResolvedShot};
 use ar_edit_core::models::*;
-use ar_edit_core::render::{self, RenderOptions};
 use ar_edit_core::overlay::OverlayMode;
+use ar_edit_core::render::{self, RenderOptions};
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
@@ -30,10 +30,34 @@ fn make_transcript() -> Transcript {
                 end_ms: 5230,
                 text: "Welcome to the interview".into(),
                 words: vec![
-                    Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                    Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                    Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                    Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
+                    Word {
+                        index: 0,
+                        text: "Welcome".into(),
+                        start_ms: 0,
+                        end_ms: 420,
+                        confidence: 0.95,
+                    },
+                    Word {
+                        index: 1,
+                        text: "to".into(),
+                        start_ms: 420,
+                        end_ms: 540,
+                        confidence: 0.97,
+                    },
+                    Word {
+                        index: 2,
+                        text: "the".into(),
+                        start_ms: 540,
+                        end_ms: 650,
+                        confidence: 0.98,
+                    },
+                    Word {
+                        index: 3,
+                        text: "interview".into(),
+                        start_ms: 650,
+                        end_ms: 1200,
+                        confidence: 0.96,
+                    },
                 ],
             },
             TranscriptSegment {
@@ -42,10 +66,34 @@ fn make_transcript() -> Transcript {
                 end_ms: 12400,
                 text: "Today we discuss climate".into(),
                 words: vec![
-                    Word { index: 4, text: "Today".into(), start_ms: 5230, end_ms: 5600, confidence: 0.94 },
-                    Word { index: 5, text: "we".into(), start_ms: 5600, end_ms: 5750, confidence: 0.99 },
-                    Word { index: 6, text: "discuss".into(), start_ms: 5750, end_ms: 6200, confidence: 0.93 },
-                    Word { index: 7, text: "climate".into(), start_ms: 6200, end_ms: 6800, confidence: 0.91 },
+                    Word {
+                        index: 4,
+                        text: "Today".into(),
+                        start_ms: 5230,
+                        end_ms: 5600,
+                        confidence: 0.94,
+                    },
+                    Word {
+                        index: 5,
+                        text: "we".into(),
+                        start_ms: 5600,
+                        end_ms: 5750,
+                        confidence: 0.99,
+                    },
+                    Word {
+                        index: 6,
+                        text: "discuss".into(),
+                        start_ms: 5750,
+                        end_ms: 6200,
+                        confidence: 0.93,
+                    },
+                    Word {
+                        index: 7,
+                        text: "climate".into(),
+                        start_ms: 6200,
+                        end_ms: 6800,
+                        confidence: 0.91,
+                    },
                 ],
             },
         ],
@@ -159,9 +207,11 @@ fn resolve_edit_produces_correct_durations() {
 
     let mut doc = EditDocument::create("test");
     // Words 0-3: starts at 0ms, ends at 1200ms → duration 1200ms
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
     // Words 4-7: starts at 5230ms, ends at 6800ms → duration 1570ms
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 2);
@@ -179,8 +229,22 @@ fn time_range_shots_have_exact_duration() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 1000, to_ms: 4000 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 6000, to_ms: 8500 }).unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 1000,
+            to_ms: 4000,
+        },
+    )
+    .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 6000,
+            to_ms: 8500,
+        },
+    )
+    .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 2);
@@ -202,8 +266,10 @@ fn resolved_shots_maintain_edit_order() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 2);
@@ -226,8 +292,10 @@ fn resolve_preview_returns_shots() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 })
+        .unwrap();
 
     let resolved = render::resolve_preview(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 2);
@@ -259,9 +327,18 @@ fn duration_consistency_across_resolve() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 0, to_ms: 2000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 4, to: 7 })
+        .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 2000,
+        },
+    )
+    .unwrap();
 
     let resolved = render::resolve_preview(&doc, tmp.path()).unwrap();
 
@@ -283,7 +360,8 @@ fn single_shot_edit_duration() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 7 })
+        .unwrap();
 
     let resolved = render::resolve_preview(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 1);

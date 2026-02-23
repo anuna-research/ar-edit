@@ -5,7 +5,7 @@
 //! `mpsc::Receiver` that the TUI event loop polls each tick.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -38,30 +38,26 @@ impl FileWatcher {
         let (tx, rx) = mpsc::channel();
 
         let target = watched_name.clone();
-        let mut watcher =
-            RecommendedWatcher::new(
-                move |res: Result<Event, notify::Error>| {
-                    if let Ok(ev) = res {
-                        let dominated = matches!(
-                            ev.kind,
-                            EventKind::Modify(_) | EventKind::Create(_)
-                        );
-                        if dominated
-                            && ev.paths.iter().any(|p| {
-                                p.file_name()
-                                    .map(|n| n == target.as_os_str())
-                                    .unwrap_or(false)
-                            })
-                        {
-                            // Best-effort send; if the channel is full the loop
-                            // will pick up the next one.
-                            let _ = tx.send(());
-                        }
+        let mut watcher = RecommendedWatcher::new(
+            move |res: Result<Event, notify::Error>| {
+                if let Ok(ev) = res {
+                    let dominated = matches!(ev.kind, EventKind::Modify(_) | EventKind::Create(_));
+                    if dominated
+                        && ev.paths.iter().any(|p| {
+                            p.file_name()
+                                .map(|n| n == target.as_os_str())
+                                .unwrap_or(false)
+                        })
+                    {
+                        // Best-effort send; if the channel is full the loop
+                        // will pick up the next one.
+                        let _ = tx.send(());
                     }
-                },
-                Config::default(),
-            )
-            .ok()?;
+                }
+            },
+            Config::default(),
+        )
+        .ok()?;
 
         watcher.watch(dir, RecursiveMode::NonRecursive).ok()?;
 
@@ -77,11 +73,8 @@ impl FileWatcher {
     pub fn poll(&mut self) -> bool {
         // Drain all queued notifications.
         let mut changed = false;
-        loop {
-            match self.rx.try_recv() {
-                Ok(()) => changed = true,
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
-            }
+        while let Ok(()) = self.rx.try_recv() {
+            changed = true;
         }
 
         if changed && self.last_event.elapsed() >= DEBOUNCE {

@@ -137,9 +137,27 @@ fn valid_edit_passes_all_checks() {
     write_index(tmp.path(), &make_source_index("src-001", 4));
 
     let doc = make_edit_doc(vec![
-        Shot { id: "shot-001".into(), source: "src-001".into(), range: ShotRange::Words { from: 0, to: 52 }, notes: vec![] },
-        Shot { id: "shot-002".into(), source: "src-001".into(), range: ShotRange::Scenes { from: 0, to: 2 }, notes: vec![] },
-        Shot { id: "shot-003".into(), source: "src-001".into(), range: ShotRange::Time { from_ms: 15000, to_ms: 22000 }, notes: vec![] },
+        Shot {
+            id: "shot-001".into(),
+            source: "src-001".into(),
+            range: ShotRange::Words { from: 0, to: 52 },
+            notes: vec![],
+        },
+        Shot {
+            id: "shot-002".into(),
+            source: "src-001".into(),
+            range: ShotRange::Scenes { from: 0, to: 2 },
+            notes: vec![],
+        },
+        Shot {
+            id: "shot-003".into(),
+            source: "src-001".into(),
+            range: ShotRange::Time {
+                from_ms: 15000,
+                to_ms: 22000,
+            },
+            notes: vec![],
+        },
     ]);
 
     let result = validate(&doc, &manifest, tmp.path());
@@ -149,11 +167,7 @@ fn valid_edit_passes_all_checks() {
 #[test]
 fn empty_edit_is_valid() {
     let tmp = TempDir::new().unwrap();
-    let result = validate(
-        &make_edit_doc(vec![]),
-        &make_manifest(vec![]),
-        tmp.path(),
-    );
+    let result = validate(&make_edit_doc(vec![]), &make_manifest(vec![]), tmp.path());
     assert!(result.valid);
 }
 
@@ -191,7 +205,10 @@ fn check2_word_range_no_transcript() {
 
     let result = validate(&doc, &manifest, tmp.path());
     assert!(!result.valid);
-    assert!(result.errors.iter().any(|e| e.error.contains("no transcript")));
+    assert!(result
+        .errors
+        .iter()
+        .any(|e| e.error.contains("no transcript")));
 }
 
 // -- Check 3: scene range without index ---------------------------------------
@@ -210,7 +227,10 @@ fn check3_scene_range_no_index() {
 
     let result = validate(&doc, &manifest, tmp.path());
     assert!(!result.valid);
-    assert!(result.errors.iter().any(|e| e.error.contains("no scene index")));
+    assert!(result
+        .errors
+        .iter()
+        .any(|e| e.error.contains("no scene index")));
 }
 
 // -- Check 4: word index out of bounds ----------------------------------------
@@ -231,7 +251,10 @@ fn check4_word_index_exceeds_count() {
 
     let result = validate(&doc, &manifest, tmp.path());
     assert!(!result.valid);
-    assert!(result.errors.iter().any(|e| e.error.contains("word index 500")));
+    assert!(result
+        .errors
+        .iter()
+        .any(|e| e.error.contains("word index 500")));
 }
 
 #[test]
@@ -249,7 +272,11 @@ fn check4_word_from_also_checked() {
     }]);
 
     let result = validate(&doc, &manifest, tmp.path());
-    let word_errors: Vec<_> = result.errors.iter().filter(|e| e.error.contains("word index")).collect();
+    let word_errors: Vec<_> = result
+        .errors
+        .iter()
+        .filter(|e| e.error.contains("word index"))
+        .collect();
     assert_eq!(word_errors.len(), 2, "both from and to should be flagged");
 }
 
@@ -271,7 +298,10 @@ fn check5_scene_index_exceeds_count() {
 
     let result = validate(&doc, &manifest, tmp.path());
     assert!(!result.valid);
-    assert!(result.errors.iter().any(|e| e.error.contains("scene index 10")));
+    assert!(result
+        .errors
+        .iter()
+        .any(|e| e.error.contains("scene index 10")));
 }
 
 // -- Check 6: time exceeds duration -------------------------------------------
@@ -285,13 +315,19 @@ fn check6_time_to_exceeds_duration() {
     let doc = make_edit_doc(vec![Shot {
         id: "shot-001".into(),
         source: "src-001".into(),
-        range: ShotRange::Time { from_ms: 0, to_ms: 200000 },
+        range: ShotRange::Time {
+            from_ms: 0,
+            to_ms: 200000,
+        },
         notes: vec![],
     }]);
 
     let result = validate(&doc, &manifest, tmp.path());
     assert!(!result.valid);
-    assert!(result.errors.iter().any(|e| e.error.contains("exceeds duration")));
+    assert!(result
+        .errors
+        .iter()
+        .any(|e| e.error.contains("exceeds duration")));
 }
 
 #[test]
@@ -303,12 +339,19 @@ fn check6_time_from_exceeds_duration() {
     let doc = make_edit_doc(vec![Shot {
         id: "shot-001".into(),
         source: "src-001".into(),
-        range: ShotRange::Time { from_ms: 60000, to_ms: 70000 },
+        range: ShotRange::Time {
+            from_ms: 60000,
+            to_ms: 70000,
+        },
         notes: vec![],
     }]);
 
     let result = validate(&doc, &manifest, tmp.path());
-    let time_errors: Vec<_> = result.errors.iter().filter(|e| e.error.contains("exceeds duration")).collect();
+    let time_errors: Vec<_> = result
+        .errors
+        .iter()
+        .filter(|e| e.error.contains("exceeds duration"))
+        .collect();
     assert_eq!(time_errors.len(), 2, "both from and to exceed");
 }
 
@@ -321,7 +364,10 @@ fn check6_time_at_duration_boundary_is_valid() {
     let doc = make_edit_doc(vec![Shot {
         id: "shot-001".into(),
         source: "src-001".into(),
-        range: ShotRange::Time { from_ms: 10000, to_ms: 124500 },
+        range: ShotRange::Time {
+            from_ms: 10000,
+            to_ms: 124500,
+        },
         notes: vec![],
     }]);
 
@@ -378,7 +424,10 @@ fn check7_time_reversed_range() {
     let doc = make_edit_doc(vec![Shot {
         id: "shot-001".into(),
         source: "src-001".into(),
-        range: ShotRange::Time { from_ms: 22000, to_ms: 15000 },
+        range: ShotRange::Time {
+            from_ms: 22000,
+            to_ms: 15000,
+        },
         notes: vec![],
     }]);
 
@@ -405,7 +454,10 @@ fn check8_words_zero_duration() {
 
     let result = validate(&doc, &manifest, tmp.path());
     assert!(!result.valid);
-    assert!(result.errors.iter().any(|e| e.error.contains("zero duration")));
+    assert!(result
+        .errors
+        .iter()
+        .any(|e| e.error.contains("zero duration")));
 }
 
 #[test]
@@ -424,7 +476,10 @@ fn check8_scenes_zero_duration() {
 
     let result = validate(&doc, &manifest, tmp.path());
     assert!(!result.valid);
-    assert!(result.errors.iter().any(|e| e.error.contains("zero duration")));
+    assert!(result
+        .errors
+        .iter()
+        .any(|e| e.error.contains("zero duration")));
 }
 
 #[test]
@@ -436,13 +491,19 @@ fn check8_time_zero_duration() {
     let doc = make_edit_doc(vec![Shot {
         id: "shot-001".into(),
         source: "src-001".into(),
-        range: ShotRange::Time { from_ms: 5000, to_ms: 5000 },
+        range: ShotRange::Time {
+            from_ms: 5000,
+            to_ms: 5000,
+        },
         notes: vec![],
     }]);
 
     let result = validate(&doc, &manifest, tmp.path());
     assert!(!result.valid);
-    assert!(result.errors.iter().any(|e| e.error.contains("zero duration")));
+    assert!(result
+        .errors
+        .iter()
+        .any(|e| e.error.contains("zero duration")));
 }
 
 // -- Multiple errors collected ------------------------------------------------

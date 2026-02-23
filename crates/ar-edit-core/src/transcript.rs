@@ -190,9 +190,7 @@ pub fn download_model(model: &str) -> Result<PathBuf, TranscriptError> {
 
     let filename = format!("ggml-{model}.bin");
     let dest = cache_dir.join(&filename);
-    let url = format!(
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{filename}"
-    );
+    let url = format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{filename}");
 
     let status = Command::new("curl")
         .args(["-fL", "--progress-bar", "-o"])
@@ -428,10 +426,7 @@ pub fn is_word_token(text: &str) -> bool {
 ///
 /// For whisper.cpp JSON, word-level timestamps and confidence values are
 /// preserved directly via [`parse_whisper_json`].
-pub fn import_transcript(
-    path: &Path,
-    source_id: &str,
-) -> Result<Transcript, TranscriptError> {
+pub fn import_transcript(path: &Path, source_id: &str) -> Result<Transcript, TranscriptError> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -483,11 +478,7 @@ pub fn parse_srt(content: &str, source_id: &str) -> Result<Transcript, Transcrip
         let (start_ms, end_ms) = parse_srt_timestamp_line(lines[ts_line_idx])?;
 
         // Text is everything after the timestamp line
-        let text: String = lines[ts_line_idx + 1..]
-            .iter()
-            .copied()
-            .collect::<Vec<&str>>()
-            .join(" ");
+        let text: String = lines[ts_line_idx + 1..].to_vec().join(" ");
         let text = text.trim().to_string();
 
         if end_ms > duration_ms {
@@ -541,9 +532,9 @@ pub fn parse_vtt(content: &str, source_id: &str) -> Result<Transcript, Transcrip
 
     // Skip the header line(s) and any metadata before the first blank line
     let body = trimmed
-        .splitn(2, "\n\n")
-        .nth(1)
-        .or_else(|| trimmed.splitn(2, "\r\n\r\n").nth(1))
+        .split_once("\n\n")
+        .map(|x| x.1)
+        .or_else(|| trimmed.split_once("\r\n\r\n").map(|x| x.1))
         .unwrap_or("");
 
     let blocks = split_subtitle_blocks(body);
@@ -568,11 +559,7 @@ pub fn parse_vtt(content: &str, source_id: &str) -> Result<Transcript, Transcrip
         let (start_ms, end_ms) = parse_vtt_timestamp_line(lines[ts_line_idx])?;
 
         // Text is everything after the timestamp line
-        let text: String = lines[ts_line_idx + 1..]
-            .iter()
-            .copied()
-            .collect::<Vec<&str>>()
-            .join(" ");
+        let text: String = lines[ts_line_idx + 1..].to_vec().join(" ");
         let text = text.trim().to_string();
 
         if text.is_empty() {
@@ -642,9 +629,9 @@ fn parse_srt_timestamp_line(line: &str) -> Result<(u64, u64), TranscriptError> {
 /// Parse an SRT time: `HH:MM:SS,mmm` → milliseconds.
 fn parse_srt_time(s: &str) -> Result<u64, TranscriptError> {
     // Split on comma to separate seconds from milliseconds
-    let (time_part, ms_part) = s.split_once(',').ok_or_else(|| {
-        TranscriptError::InvalidSrt(format!("missing comma in timestamp: {s}"))
-    })?;
+    let (time_part, ms_part) = s
+        .split_once(',')
+        .ok_or_else(|| TranscriptError::InvalidSrt(format!("missing comma in timestamp: {s}")))?;
 
     let hms: Vec<&str> = time_part.split(':').collect();
     if hms.len() != 3 {
@@ -682,16 +669,16 @@ fn parse_vtt_timestamp_line(line: &str) -> Result<(u64, u64), TranscriptError> {
 
     let start = parse_vtt_time(parts[0].trim())?;
     // End timestamp may have positioning settings after it; take only the time
-    let end_str = parts[1].trim().split_whitespace().next().unwrap_or("");
+    let end_str = parts[1].split_whitespace().next().unwrap_or("");
     let end = parse_vtt_time(end_str)?;
     Ok((start, end))
 }
 
 /// Parse a VTT time: `HH:MM:SS.mmm` or `MM:SS.mmm` → milliseconds.
 fn parse_vtt_time(s: &str) -> Result<u64, TranscriptError> {
-    let (time_part, ms_part) = s.split_once('.').ok_or_else(|| {
-        TranscriptError::InvalidVtt(format!("missing period in timestamp: {s}"))
-    })?;
+    let (time_part, ms_part) = s
+        .split_once('.')
+        .ok_or_else(|| TranscriptError::InvalidVtt(format!("missing period in timestamp: {s}")))?;
 
     let hms: Vec<&str> = time_part.split(':').collect();
     let (h, m, sec) = match hms.len() {
@@ -1499,11 +1486,7 @@ Hello world";
     fn import_transcript_srt_file() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("test.srt");
-        std::fs::write(
-            &path,
-            "1\n00:00:00,000 --> 00:00:03,000\nHello world\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "1\n00:00:00,000 --> 00:00:03,000\nHello world\n").unwrap();
 
         let transcript = import_transcript(&path, "src-001").unwrap();
         assert_eq!(transcript.segments.len(), 1);

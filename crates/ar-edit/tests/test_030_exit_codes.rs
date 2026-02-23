@@ -67,12 +67,19 @@ fn render_missing_required_args_exits_nonzero() {
 fn mixed_range_types_rejected() {
     ar_edit()
         .args([
-            "edit", "add-segment", "my-edit",
-            "--source", "src-001",
-            "--from-word", "0",
-            "--to-word", "10",
-            "--from-scene", "1",
-            "--to-scene", "3",
+            "edit",
+            "add-segment",
+            "my-edit",
+            "--source",
+            "src-001",
+            "--from-word",
+            "0",
+            "--to-word",
+            "10",
+            "--from-scene",
+            "1",
+            "--to-scene",
+            "3",
         ])
         .assert()
         .failure();

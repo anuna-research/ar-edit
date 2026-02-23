@@ -193,7 +193,10 @@ mod tests {
 
     #[test]
     fn from_flag_minimal() {
-        assert_eq!(OverlayMode::from_flag(Some("minimal")), OverlayMode::Minimal);
+        assert_eq!(
+            OverlayMode::from_flag(Some("minimal")),
+            OverlayMode::Minimal
+        );
     }
 
     #[test]
@@ -237,7 +240,10 @@ mod tests {
         let info = make_info();
         let filter = build_drawtext_filter(OverlayMode::Full, &info).unwrap();
         let count = filter.matches("drawtext=").count();
-        assert_eq!(count, 2, "full overlay with snippet should have 2 drawtext filters");
+        assert_eq!(
+            count, 2,
+            "full overlay with snippet should have 2 drawtext filters"
+        );
     }
 
     #[test]
@@ -250,7 +256,10 @@ mod tests {
         };
         let filter = build_drawtext_filter(OverlayMode::Full, &info).unwrap();
         let count = filter.matches("drawtext=").count();
-        assert_eq!(count, 1, "full overlay without snippet should have 1 drawtext filter");
+        assert_eq!(
+            count, 1,
+            "full overlay without snippet should have 1 drawtext filter"
+        );
     }
 
     #[test]
@@ -262,7 +271,10 @@ mod tests {
             timecode_offset_sec: 90.5,
         };
         let filter = build_drawtext_filter(OverlayMode::Minimal, &info).unwrap();
-        assert!(filter.contains("pts:hms:90.500"), "filter should contain offset");
+        assert!(
+            filter.contains("pts:hms:90.500"),
+            "filter should contain offset"
+        );
     }
 
     #[test]

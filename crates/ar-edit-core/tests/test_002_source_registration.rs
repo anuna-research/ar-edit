@@ -30,12 +30,18 @@ fn has_fftools() -> bool {
 fn create_test_video(path: &Path) -> bool {
     Command::new("ffmpeg")
         .args([
-            "-f", "lavfi",
-            "-i", "color=black:s=320x240:d=1",
-            "-f", "lavfi",
-            "-i", "sine=frequency=440:duration=1",
-            "-c:v", "libx264",
-            "-c:a", "aac",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=black:s=320x240:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=1",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
             "-shortest",
             "-y",
         ])
@@ -131,7 +137,11 @@ fn add_creates_symlink_in_sources_dir() {
     assert!(linked_path.exists(), "symlinked source file should exist");
     #[cfg(unix)]
     assert!(
-        linked_path.symlink_metadata().unwrap().file_type().is_symlink(),
+        linked_path
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink(),
         "source should be a symlink on unix"
     );
 }

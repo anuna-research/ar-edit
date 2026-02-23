@@ -33,10 +33,34 @@ fn make_transcript() -> Transcript {
                 end_ms: 5230,
                 text: "Welcome to the interview".into(),
                 words: vec![
-                    Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                    Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                    Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                    Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
+                    Word {
+                        index: 0,
+                        text: "Welcome".into(),
+                        start_ms: 0,
+                        end_ms: 420,
+                        confidence: 0.95,
+                    },
+                    Word {
+                        index: 1,
+                        text: "to".into(),
+                        start_ms: 420,
+                        end_ms: 540,
+                        confidence: 0.97,
+                    },
+                    Word {
+                        index: 2,
+                        text: "the".into(),
+                        start_ms: 540,
+                        end_ms: 650,
+                        confidence: 0.98,
+                    },
+                    Word {
+                        index: 3,
+                        text: "interview".into(),
+                        start_ms: 650,
+                        end_ms: 1200,
+                        confidence: 0.96,
+                    },
                 ],
             },
             TranscriptSegment {
@@ -45,10 +69,34 @@ fn make_transcript() -> Transcript {
                 end_ms: 12400,
                 text: "Today we discuss climate".into(),
                 words: vec![
-                    Word { index: 4, text: "Today".into(), start_ms: 5230, end_ms: 5600, confidence: 0.94 },
-                    Word { index: 5, text: "we".into(), start_ms: 5600, end_ms: 5750, confidence: 0.99 },
-                    Word { index: 6, text: "discuss".into(), start_ms: 5750, end_ms: 6200, confidence: 0.93 },
-                    Word { index: 7, text: "climate".into(), start_ms: 6200, end_ms: 6800, confidence: 0.91 },
+                    Word {
+                        index: 4,
+                        text: "Today".into(),
+                        start_ms: 5230,
+                        end_ms: 5600,
+                        confidence: 0.94,
+                    },
+                    Word {
+                        index: 5,
+                        text: "we".into(),
+                        start_ms: 5600,
+                        end_ms: 5750,
+                        confidence: 0.99,
+                    },
+                    Word {
+                        index: 6,
+                        text: "discuss".into(),
+                        start_ms: 5750,
+                        end_ms: 6200,
+                        confidence: 0.93,
+                    },
+                    Word {
+                        index: 7,
+                        text: "climate".into(),
+                        start_ms: 6200,
+                        end_ms: 6800,
+                        confidence: 0.91,
+                    },
                 ],
             },
         ],
@@ -135,8 +183,20 @@ fn generate_srt_two_shots_timeline_offset() {
     setup_project_with_transcript(tmp.path());
 
     let resolved = vec![
-        make_shot("shot-001", "src-001", ShotRange::Words { from: 0, to: 3 }, 0, 1200),
-        make_shot("shot-002", "src-001", ShotRange::Words { from: 4, to: 7 }, 5230, 6800),
+        make_shot(
+            "shot-001",
+            "src-001",
+            ShotRange::Words { from: 0, to: 3 },
+            0,
+            1200,
+        ),
+        make_shot(
+            "shot-002",
+            "src-001",
+            ShotRange::Words { from: 4, to: 7 },
+            5230,
+            6800,
+        ),
     ];
 
     let srt = subtitles::generate_srt(&resolved, tmp.path()).unwrap();
@@ -157,8 +217,20 @@ fn srt_cue_indices_sequential() {
     setup_project_with_transcript(tmp.path());
 
     let resolved = vec![
-        make_shot("shot-001", "src-001", ShotRange::Words { from: 0, to: 3 }, 0, 1200),
-        make_shot("shot-002", "src-001", ShotRange::Words { from: 4, to: 7 }, 5230, 6800),
+        make_shot(
+            "shot-001",
+            "src-001",
+            ShotRange::Words { from: 0, to: 3 },
+            0,
+            1200,
+        ),
+        make_shot(
+            "shot-002",
+            "src-001",
+            ShotRange::Words { from: 4, to: 7 },
+            5230,
+            6800,
+        ),
     ];
 
     let srt = subtitles::generate_srt(&resolved, tmp.path()).unwrap();
@@ -220,7 +292,10 @@ fn generate_srt_no_transcript_empty() {
     let resolved = vec![make_shot(
         "shot-001",
         "src-missing",
-        ShotRange::Time { from_ms: 0, to_ms: 5000 },
+        ShotRange::Time {
+            from_ms: 0,
+            to_ms: 5000,
+        },
         0,
         5000,
     )];
@@ -249,11 +324,32 @@ fn generate_srt_mixed_sources_skips_missing() {
 
     let resolved = vec![
         // Shot from source with transcript
-        make_shot("shot-001", "src-001", ShotRange::Words { from: 0, to: 3 }, 0, 1200),
+        make_shot(
+            "shot-001",
+            "src-001",
+            ShotRange::Words { from: 0, to: 3 },
+            0,
+            1200,
+        ),
         // Shot from source without transcript (skipped)
-        make_shot("shot-002", "src-missing", ShotRange::Time { from_ms: 0, to_ms: 5000 }, 0, 5000),
+        make_shot(
+            "shot-002",
+            "src-missing",
+            ShotRange::Time {
+                from_ms: 0,
+                to_ms: 5000,
+            },
+            0,
+            5000,
+        ),
         // Shot from source with transcript again
-        make_shot("shot-003", "src-001", ShotRange::Words { from: 4, to: 7 }, 5230, 6800),
+        make_shot(
+            "shot-003",
+            "src-001",
+            ShotRange::Words { from: 4, to: 7 },
+            5230,
+            6800,
+        ),
     ];
 
     let srt = subtitles::generate_srt(&resolved, tmp.path()).unwrap();
@@ -298,7 +394,11 @@ fn srt_timecodes_correct_format() {
     // Each timecode matches HH:MM:SS,mmm
     for tc in &parts {
         let segments: Vec<&str> = tc.split(':').collect();
-        assert_eq!(segments.len(), 3, "timecode should have HH:MM:SS,mmm format");
+        assert_eq!(
+            segments.len(),
+            3,
+            "timecode should have HH:MM:SS,mmm format"
+        );
         // Last segment should have comma for milliseconds
         assert!(segments[2].contains(','), "seconds should have ,mmm suffix");
     }
@@ -315,8 +415,20 @@ fn srt_file_roundtrip() {
     setup_project_with_transcript(tmp.path());
 
     let resolved = vec![
-        make_shot("shot-001", "src-001", ShotRange::Words { from: 0, to: 3 }, 0, 1200),
-        make_shot("shot-002", "src-001", ShotRange::Words { from: 4, to: 7 }, 5230, 6800),
+        make_shot(
+            "shot-001",
+            "src-001",
+            ShotRange::Words { from: 0, to: 3 },
+            0,
+            1200,
+        ),
+        make_shot(
+            "shot-002",
+            "src-001",
+            ShotRange::Words { from: 4, to: 7 },
+            5230,
+            6800,
+        ),
     ];
 
     let srt = subtitles::generate_srt(&resolved, tmp.path()).unwrap();
@@ -336,8 +448,20 @@ fn srt_cue_count_matches_shot_segments() {
 
     // Two shots, each within a single transcript segment → 2 cues
     let resolved = vec![
-        make_shot("shot-001", "src-001", ShotRange::Words { from: 0, to: 3 }, 0, 1200),
-        make_shot("shot-002", "src-001", ShotRange::Words { from: 4, to: 7 }, 5230, 6800),
+        make_shot(
+            "shot-001",
+            "src-001",
+            ShotRange::Words { from: 0, to: 3 },
+            0,
+            1200,
+        ),
+        make_shot(
+            "shot-002",
+            "src-001",
+            ShotRange::Words { from: 4, to: 7 },
+            5230,
+            6800,
+        ),
     ];
 
     let srt = subtitles::generate_srt(&resolved, tmp.path()).unwrap();
@@ -403,8 +527,8 @@ fn render_options_subtitles_flag() {
 /// (subtitles don't bypass the empty edit check).
 #[test]
 fn render_with_subtitles_empty_edit_still_errors() {
-    use ar_edit_core::render::{self, RenderOptions};
     use ar_edit_core::overlay::OverlayMode;
+    use ar_edit_core::render::{self, RenderOptions};
 
     let tmp = TempDir::new().unwrap();
     std::fs::create_dir_all(tmp.path().join("transcripts")).unwrap();
@@ -417,13 +541,7 @@ fn render_with_subtitles_empty_edit_still_errors() {
         subtitles: true,
         ..Default::default()
     };
-    let result = render::render_to_file(
-        &doc,
-        tmp.path(),
-        &output,
-        OverlayMode::Clean,
-        &opts,
-    );
+    let result = render::render_to_file(&doc, tmp.path(), &output, OverlayMode::Clean, &opts);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("no shots"));
 }
@@ -442,27 +560,34 @@ fn srt_content_standard_format() {
     let tmp = TempDir::new().unwrap();
     setup_project_with_transcript(tmp.path());
 
-    let resolved = vec![
-        make_shot("shot-001", "src-001", ShotRange::Words { from: 0, to: 3 }, 0, 1200),
-    ];
+    let resolved = vec![make_shot(
+        "shot-001",
+        "src-001",
+        ShotRange::Words { from: 0, to: 3 },
+        0,
+        1200,
+    )];
 
     let srt = subtitles::generate_srt(&resolved, tmp.path()).unwrap();
 
     // Parse each cue block
-    let blocks: Vec<&str> = srt
-        .split("\n\n")
-        .filter(|b| !b.trim().is_empty())
-        .collect();
+    let blocks: Vec<&str> = srt.split("\n\n").filter(|b| !b.trim().is_empty()).collect();
 
     for block in &blocks {
         let lines: Vec<&str> = block.lines().collect();
         assert!(lines.len() >= 3, "each SRT cue needs at least 3 lines");
 
         // Line 1: cue index (numeric)
-        assert!(lines[0].parse::<u32>().is_ok(), "first line should be a number");
+        assert!(
+            lines[0].parse::<u32>().is_ok(),
+            "first line should be a number"
+        );
 
         // Line 2: timecodes with " --> " separator
-        assert!(lines[1].contains(" --> "), "second line should have timecodes");
+        assert!(
+            lines[1].contains(" --> "),
+            "second line should have timecodes"
+        );
 
         // Line 3+: subtitle text (non-empty)
         assert!(!lines[2].is_empty(), "third line should have subtitle text");

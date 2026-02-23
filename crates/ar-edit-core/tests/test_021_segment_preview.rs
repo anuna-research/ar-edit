@@ -32,10 +32,34 @@ fn make_transcript() -> Transcript {
                 end_ms: 5230,
                 text: "Welcome to the interview".into(),
                 words: vec![
-                    Word { index: 0, text: "Welcome".into(), start_ms: 0, end_ms: 420, confidence: 0.95 },
-                    Word { index: 1, text: "to".into(), start_ms: 420, end_ms: 540, confidence: 0.97 },
-                    Word { index: 2, text: "the".into(), start_ms: 540, end_ms: 650, confidence: 0.98 },
-                    Word { index: 3, text: "interview".into(), start_ms: 650, end_ms: 1200, confidence: 0.96 },
+                    Word {
+                        index: 0,
+                        text: "Welcome".into(),
+                        start_ms: 0,
+                        end_ms: 420,
+                        confidence: 0.95,
+                    },
+                    Word {
+                        index: 1,
+                        text: "to".into(),
+                        start_ms: 420,
+                        end_ms: 540,
+                        confidence: 0.97,
+                    },
+                    Word {
+                        index: 2,
+                        text: "the".into(),
+                        start_ms: 540,
+                        end_ms: 650,
+                        confidence: 0.98,
+                    },
+                    Word {
+                        index: 3,
+                        text: "interview".into(),
+                        start_ms: 650,
+                        end_ms: 1200,
+                        confidence: 0.96,
+                    },
                 ],
             },
             TranscriptSegment {
@@ -44,10 +68,34 @@ fn make_transcript() -> Transcript {
                 end_ms: 12400,
                 text: "Today we discuss climate".into(),
                 words: vec![
-                    Word { index: 4, text: "Today".into(), start_ms: 5230, end_ms: 5600, confidence: 0.94 },
-                    Word { index: 5, text: "we".into(), start_ms: 5600, end_ms: 5750, confidence: 0.99 },
-                    Word { index: 6, text: "discuss".into(), start_ms: 5750, end_ms: 6200, confidence: 0.93 },
-                    Word { index: 7, text: "climate".into(), start_ms: 6200, end_ms: 6800, confidence: 0.91 },
+                    Word {
+                        index: 4,
+                        text: "Today".into(),
+                        start_ms: 5230,
+                        end_ms: 5600,
+                        confidence: 0.94,
+                    },
+                    Word {
+                        index: 5,
+                        text: "we".into(),
+                        start_ms: 5600,
+                        end_ms: 5750,
+                        confidence: 0.99,
+                    },
+                    Word {
+                        index: 6,
+                        text: "discuss".into(),
+                        start_ms: 5750,
+                        end_ms: 6200,
+                        confidence: 0.93,
+                    },
+                    Word {
+                        index: 7,
+                        text: "climate".into(),
+                        start_ms: 6200,
+                        end_ms: 6800,
+                        confidence: 0.91,
+                    },
                 ],
             },
         ],
@@ -123,15 +171,16 @@ fn segment_preview_resolves_words_shot() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 1);
 
     let shot = &resolved[0];
     assert_eq!(shot.id, "shot-001");
-    assert_eq!(shot.start_ms, 0);    // word 0 start_ms
-    assert_eq!(shot.end_ms, 1200);   // word 3 end_ms
+    assert_eq!(shot.start_ms, 0); // word 0 start_ms
+    assert_eq!(shot.end_ms, 1200); // word 3 end_ms
     assert_eq!(shot.duration_ms, 1200);
 
     // Build PlayRequest for this segment
@@ -150,14 +199,15 @@ fn segment_preview_resolves_scenes_shot() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 1 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 1);
 
     let shot = &resolved[0];
-    assert_eq!(shot.start_ms, 0);     // scene 0 start_ms
-    assert_eq!(shot.end_ms, 45000);   // scene 1 end_ms
+    assert_eq!(shot.start_ms, 0); // scene 0 start_ms
+    assert_eq!(shot.end_ms, 45000); // scene 1 end_ms
     assert_eq!(shot.duration_ms, 45000);
 
     let req = PlayRequest {
@@ -175,7 +225,14 @@ fn segment_preview_resolves_time_shot() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 5000, to_ms: 10000 }).unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 5000,
+            to_ms: 10000,
+        },
+    )
+    .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 1);
@@ -204,7 +261,8 @@ fn segment_preview_vlc_args_for_segment() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     let shot = &resolved[0];
@@ -242,13 +300,14 @@ fn segment_preview_ffplay_args_for_segment() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     let shot = &resolved[0];
 
-    assert_eq!(shot.start_ms, 540);   // word 2 start
-    assert_eq!(shot.end_ms, 6200);    // word 6 end
+    assert_eq!(shot.start_ms, 540); // word 2 start
+    assert_eq!(shot.end_ms, 6200); // word 6 end
 
     // Build ffplay command per playback::launch_player logic
     let start_secs = shot.start_ms as f64 / 1000.0;
@@ -283,9 +342,18 @@ fn segment_preview_specific_shot_from_multi_shot_edit() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 2 }).unwrap();
-    doc.add_shot("src-001", ShotRange::Time { from_ms: 10000, to_ms: 20000 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 1, to: 2 })
+        .unwrap();
+    doc.add_shot(
+        "src-001",
+        ShotRange::Time {
+            from_ms: 10000,
+            to_ms: 20000,
+        },
+    )
+    .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(resolved.len(), 3);
@@ -293,8 +361,8 @@ fn segment_preview_specific_shot_from_multi_shot_edit() {
     // Simulate --shot shot-002: find and play only that shot
     let target = resolved.iter().find(|s| s.id == "shot-002").unwrap();
     assert_eq!(target.source, "src-002");
-    assert_eq!(target.start_ms, 18000);  // scene 1 start
-    assert_eq!(target.end_ms, 90000);    // scene 2 end
+    assert_eq!(target.start_ms, 18000); // scene 1 start
+    assert_eq!(target.end_ms, 90000); // scene 2 end
 
     let req = PlayRequest {
         file: PathBuf::from("/tmp/test.mp4"),
@@ -315,7 +383,8 @@ fn segment_preview_preserves_text_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 3 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(
@@ -331,7 +400,8 @@ fn segment_preview_preserves_scene_preview() {
     setup_project(tmp.path());
 
     let mut doc = EditDocument::create("test-edit");
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     assert_eq!(
@@ -352,12 +422,13 @@ fn segment_preview_cross_segment_words() {
 
     let mut doc = EditDocument::create("test-edit");
     // Range spanning both transcript segments
-    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 2, to: 6 })
+        .unwrap();
 
     let resolved = display::resolve_edit(&doc, tmp.path()).unwrap();
     let shot = &resolved[0];
-    assert_eq!(shot.start_ms, 540);   // word 2 ("the") start
-    assert_eq!(shot.end_ms, 6200);    // word 6 ("discuss") end
+    assert_eq!(shot.start_ms, 540); // word 2 ("the") start
+    assert_eq!(shot.end_ms, 6200); // word 6 ("discuss") end
     assert_eq!(shot.duration_ms, 5660);
     assert_eq!(
         shot.text_preview.as_deref(),
