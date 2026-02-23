@@ -19,7 +19,12 @@ pub mod exit_code {
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(name = "ar-edit", about = "Transcript-based video editor", version)]
+#[command(
+    name = "ar-edit",
+    about = "Transcript-based video editor",
+    version,
+    after_help = "Repository: https://codeberg.org/anuna/ar-edit"
+)]
 pub struct Cli {
     /// Output structured JSON instead of human-readable text
     #[arg(long, global = true)]

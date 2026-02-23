@@ -194,22 +194,22 @@ pub fn download_model(model: &str) -> Result<PathBuf, TranscriptError> {
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{filename}"
     );
 
-    let result = Command::new("curl")
-        .args(["-fSL", "-o"])
+    let status = Command::new("curl")
+        .args(["-fL", "--progress-bar", "-o"])
         .arg(&dest)
         .arg(&url)
-        .output()
+        .stderr(std::process::Stdio::inherit())
+        .status()
         .map_err(|e| TranscriptError::ModelDownloadFailed {
             model: model.to_string(),
             reason: format!("curl not found: {e}"),
         })?;
 
-    if !result.status.success() {
+    if !status.success() {
         let _ = std::fs::remove_file(&dest);
-        let stderr = String::from_utf8_lossy(&result.stderr);
         return Err(TranscriptError::ModelDownloadFailed {
             model: model.to_string(),
-            reason: stderr.trim().to_string(),
+            reason: format!("curl exited with {status}"),
         });
     }
 

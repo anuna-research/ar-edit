@@ -82,6 +82,13 @@ impl<T, E: std::fmt::Display> ResultExt<T> for Result<T, E> {
 }
 
 fn main() {
+    // Respect NO_COLOR (https://no-color.org/) and TERM=dumb per clig.dev guidelines.
+    if std::env::var_os("NO_COLOR").is_some()
+        || std::env::var("TERM").as_deref() == Ok("dumb")
+    {
+        std::env::set_var("NO_COLOR", "1");
+    }
+
     let cli = Cli::parse();
 
     let code = match run(&cli) {
