@@ -55,6 +55,12 @@ ar-edit render rough-cut -o final.mp4 --subtitles
 ar-edit mark src-001 --from-word 45 --to-word 120 --label select --note "Best take"
 ar-edit markers --json
 
+# Points of interest (single-moment annotations)
+ar-edit poi add src-001 --at-word 45 --category highlight --note "Key statistic"
+ar-edit poi add src-001 --at-ms 62500 --category issue --note "Mic bump"
+ar-edit poi list src-001 --category highlight
+ar-edit poi remove src-001 --id poi-001
+
 # Text-based editing
 ar-edit transcripts export --format editable -o draft.md
 # ... edit the markdown ...
@@ -90,7 +96,8 @@ my-project/
 ├── edits/
 │   └── rough-cut.edit.json
 └── annotations/
-    └── src-001.markers.json
+    ├── src-001.markers.json
+    └── src-001.pois.json
 ```
 
 ## Dependencies
@@ -125,6 +132,7 @@ cargo build --release
 See [`specs/`](specs/) for the full specification:
 
 - [SPEC-001](specs/SPEC-001-transcript-video-editor.md) — functional requirements
+- [SPEC-002](specs/SPEC-002-points-of-interest.md) — points of interest (single-moment annotations)
 - [DATA-MODEL](specs/DATA-MODEL.md) — data structures and relationships
 - [IMPL-001](specs/IMPL-001-implementation-plan.md) — implementation phases
 - [ADR-001](specs/ADR-001-event-sourced-edits.md) — event-sourced edit document
