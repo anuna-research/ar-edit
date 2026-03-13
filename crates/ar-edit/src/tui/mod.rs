@@ -311,24 +311,38 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
             match playback::detect_player() {
                 Ok(player) => {
                     // Set up IPC socket for position capture (mpv and VLC)
+                    let pid = std::process::id();
                     let ipc_path = match player.kind {
                         playback::PlayerKind::Mpv => {
-                            let path = std::env::temp_dir().join(format!(
-                                "ar-edit-mpv-{}.sock",
-                                std::process::id()
-                            ));
+                            let path = std::env::temp_dir()
+                                .join(format!("ar-edit-mpv-{pid}.sock"));
                             req.ipc_socket = Some(path.clone());
                             Some(path)
                         }
                         playback::PlayerKind::Vlc => {
-                            let path = std::env::temp_dir().join(format!(
-                                "ar-edit-vlc-{}.sock",
-                                std::process::id()
-                            ));
+                            let path = std::env::temp_dir()
+                                .join(format!("ar-edit-vlc-{pid}.sock"));
                             req.ipc_socket = Some(path.clone());
                             Some(path)
                         }
                         playback::PlayerKind::Ffplay => None,
+                    };
+
+                    // For mpv with POI mode: set up Lua script for in-player capture
+                    let marker_file = if player.kind == playback::PlayerKind::Mpv
+                        && req.source_id.is_some()
+                    {
+                        let marker = std::env::temp_dir()
+                            .join(format!("ar-edit-poi-{pid}.txt"));
+                        let script_path = std::env::temp_dir()
+                            .join(format!("ar-edit-poi-{pid}.lua"));
+                        let lua = playback::generate_mpv_poi_script(&marker);
+                        let _ = std::fs::write(&script_path, lua);
+                        req.mpv_script = Some(script_path);
+                        req.marker_file = Some(marker.clone());
+                        Some(marker)
+                    } else {
+                        None
                     };
 
                     restore_terminal(terminal)?;
@@ -340,6 +354,7 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
                                     &mut child,
                                     ipc_path.as_deref(),
                                     player.kind,
+                                    marker_file.as_deref(),
                                     src_id,
                                     &app.project_dir,
                                     req.start_ms,
@@ -359,8 +374,14 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
                         }
                     }
 
-                    // Clean up IPC socket
+                    // Clean up temp files (IPC socket, Lua script, marker file)
                     if let Some(ref path) = ipc_path {
+                        let _ = std::fs::remove_file(path);
+                    }
+                    if let Some(ref path) = req.mpv_script {
+                        let _ = std::fs::remove_file(path);
+                    }
+                    if let Some(ref path) = marker_file {
                         let _ = std::fs::remove_file(path);
                     }
 
@@ -383,21 +404,25 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
 // Interactive playback with POI creation (REQ-059)
 // ---------------------------------------------------------------------------
 
-/// Monitor mpv playback, capturing POI keypresses.
+/// Monitor playback, capturing POI marks from in-player keys or terminal.
 ///
-/// While the player runs, we put the terminal in raw mode (no alternate
-/// screen) to capture single keypresses. Press `i` to drop a POI at the
-/// current playback position, `q` to quit the player.
+/// For **mpv**: A Lua script handles `i` → category selection entirely within
+/// the mpv window (OSD prompts, no terminal focus needed). The script writes
+/// `<timestamp_ms> <category>` lines to a marker file, which this function
+/// polls and converts into POIs.
 ///
-/// When an mpv IPC socket is available, position is read precisely via IPC.
-/// For other players (VLC, ffplay) or when IPC is unavailable, position is
-/// estimated as `start_ms + wall-clock elapsed time`.
+/// For **VLC / ffplay**: Falls back to terminal raw-mode capture (requires
+/// terminal focus). VLC uses RC socket for precise position; ffplay uses
+/// wall-clock estimation.
+///
+/// Terminal `q` kills the player in all modes.
 ///
 /// Returns the IDs of any POIs created.
 fn monitor_playback_with_poi(
     child: &mut std::process::Child,
     ipc_socket: Option<&std::path::Path>,
     player_kind: playback::PlayerKind,
+    marker_file: Option<&std::path::Path>,
     source_id: &str,
     project_dir: &std::path::Path,
     start_ms: u64,
@@ -409,6 +434,9 @@ fn monitor_playback_with_poi(
 
     let mut pois_created = Vec::new();
     let playback_start = Instant::now();
+    let has_marker_file = marker_file.is_some();
+    // Track how many marker lines we've already processed
+    let mut marker_lines_read: usize = 0;
 
     // Load transcript once (best-effort)
     let transcript: Option<Transcript> = {
@@ -423,10 +451,14 @@ fn monitor_playback_with_poi(
     // Print instructions
     eprintln!();
     eprintln!("  \x1b[1;36m\u{25b6} Playing {source_id}\x1b[0m");
-    eprintln!("  \x1b[33mi\x1b[0m mark POI   \x1b[33mq\x1b[0m quit player");
+    if has_marker_file {
+        eprintln!("  Press \x1b[33mi\x1b[0m in the player window to mark a POI");
+    } else {
+        eprintln!("  \x1b[33mi\x1b[0m mark POI (in terminal)   \x1b[33mq\x1b[0m quit player");
+    }
     eprintln!();
 
-    // Wait briefly for mpv IPC socket to become available
+    // Wait briefly for IPC socket to become available
     if let Some(sock) = ipc_socket {
         for _ in 0..10 {
             if sock.exists() {
@@ -436,18 +468,81 @@ fn monitor_playback_with_poi(
         }
     }
 
-    // Enable raw mode to capture single keypresses
+    // Enable raw mode to capture single keypresses (q to quit, i for non-mpv)
     let raw_mode = enable_raw_mode().is_ok();
+
+    // Helper closure to create a POI from timestamp + category
+    let create_poi =
+        |timestamp_ms: u64,
+         category: PoiCategory,
+         transcript: &Option<Transcript>,
+         pois: &mut Vec<String>| {
+            let point = match transcript {
+                Some(t) => match find_nearest_word(timestamp_ms, t) {
+                    Some(word_idx) => PoiPoint::Word(word_idx),
+                    None => PoiPoint::TimeMs(timestamp_ms),
+                },
+                None => PoiPoint::TimeMs(timestamp_ms),
+            };
+
+            match ar_edit_core::poi::add_poi(
+                project_dir,
+                source_id,
+                point.clone(),
+                category.clone(),
+                None,
+            ) {
+                Ok(poi) => {
+                    let word_info = match &point {
+                        PoiPoint::Word(idx) => format!(" (word {idx})"),
+                        PoiPoint::Scene(idx) => format!(" (scene {idx})"),
+                        PoiPoint::TimeMs(_) => String::new(),
+                    };
+                    eprintln!(
+                        "  \x1b[1;32m\u{2713} {}\x1b[0m [{category}] @ {}{word_info}",
+                        poi.id,
+                        format_time(timestamp_ms),
+                    );
+                    pois.push(poi.id);
+                }
+                Err(e) => {
+                    eprintln!("  \x1b[31m\u{2717} POI failed: {e}\x1b[0m");
+                }
+            }
+        };
 
     loop {
         // Check if player has exited
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(_)) => {
+                // Process any remaining markers before exiting
+                if let Some(mf) = marker_file {
+                    process_marker_file(
+                        mf,
+                        &mut marker_lines_read,
+                        &transcript,
+                        &mut pois_created,
+                        &create_poi,
+                    );
+                }
+                break;
+            }
             Ok(None) => {}
             Err(_) => break,
         }
 
-        // Poll for keypresses (100ms timeout)
+        // Check marker file for new POI marks from mpv Lua script
+        if let Some(mf) = marker_file {
+            process_marker_file(
+                mf,
+                &mut marker_lines_read,
+                &transcript,
+                &mut pois_created,
+                &create_poi,
+            );
+        }
+
+        // Poll for terminal keypresses (100ms timeout)
         if !event::poll(Duration::from_millis(100)).unwrap_or(false) {
             continue;
         }
@@ -460,17 +555,26 @@ fn monitor_playback_with_poi(
             KeyCode::Char('q') => {
                 let _ = child.kill();
                 let _ = child.wait();
+                // Process any remaining markers
+                if let Some(mf) = marker_file {
+                    process_marker_file(
+                        mf,
+                        &mut marker_lines_read,
+                        &transcript,
+                        &mut pois_created,
+                        &create_poi,
+                    );
+                }
                 break;
             }
-            KeyCode::Char('i') => {
-                // Get current playback position: try IPC first, fall back to wall-clock
+            // Terminal-based POI capture (VLC/ffplay fallback)
+            KeyCode::Char('i') if !has_marker_file => {
                 let timestamp_ms = ipc_socket
                     .and_then(|sock| playback::get_player_position(sock, player_kind))
                     .unwrap_or_else(|| {
                         start_ms + playback_start.elapsed().as_millis() as u64
                     });
 
-                // Show category prompt
                 eprint!(
                     "  \x1b[1mCategory:\x1b[0m \x1b[33mh\x1b[0m=highlight \
                      \x1b[33mi\x1b[0m=issue \x1b[33mt\x1b[0m=transition \
@@ -478,7 +582,6 @@ fn monitor_playback_with_poi(
                      \x1b[2m(Esc=cancel)\x1b[0m "
                 );
 
-                // Wait for category keypress
                 let category = loop {
                     if let Ok(Event::Key(KeyEvent { code: cat, .. })) = event::read() {
                         match cat {
@@ -498,40 +601,7 @@ fn monitor_playback_with_poi(
                     continue;
                 };
 
-                // Resolve timestamp to word index if transcript available
-                let point = match &transcript {
-                    Some(t) => match find_nearest_word(timestamp_ms, t) {
-                        Some(word_idx) => PoiPoint::Word(word_idx),
-                        None => PoiPoint::TimeMs(timestamp_ms),
-                    },
-                    None => PoiPoint::TimeMs(timestamp_ms),
-                };
-
-                // Create the POI
-                match ar_edit_core::poi::add_poi(
-                    project_dir,
-                    source_id,
-                    point.clone(),
-                    category.clone(),
-                    None,
-                ) {
-                    Ok(poi) => {
-                        let word_info = match &point {
-                            PoiPoint::Word(idx) => format!(" (word {idx})"),
-                            PoiPoint::Scene(idx) => format!(" (scene {idx})"),
-                            PoiPoint::TimeMs(_) => String::new(),
-                        };
-                        eprintln!(
-                            "  \x1b[1;32m\u{2713} {}\x1b[0m [{category}] @ {}{word_info}",
-                            poi.id,
-                            format_time(timestamp_ms),
-                        );
-                        pois_created.push(poi.id);
-                    }
-                    Err(e) => {
-                        eprintln!("  \x1b[31m\u{2717} POI failed: {e}\x1b[0m");
-                    }
-                }
+                create_poi(timestamp_ms, category, &transcript, &mut pois_created);
             }
             _ => {}
         }
@@ -543,6 +613,48 @@ fn monitor_playback_with_poi(
     }
 
     pois_created
+}
+
+/// Read new lines from the marker file written by mpv's Lua script.
+///
+/// Each line has format: `<timestamp_ms> <category_name>`
+fn process_marker_file(
+    path: &std::path::Path,
+    lines_read: &mut usize,
+    transcript: &Option<ar_edit_core::models::Transcript>,
+    pois: &mut Vec<String>,
+    create_poi: &dyn Fn(u64, ar_edit_core::models::PoiCategory, &Option<ar_edit_core::models::Transcript>, &mut Vec<String>),
+) {
+    use ar_edit_core::models::PoiCategory;
+
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() <= *lines_read {
+        return;
+    }
+
+    for line in &lines[*lines_read..] {
+        let parts: Vec<&str> = line.splitn(2, ' ').collect();
+        if parts.len() != 2 {
+            continue;
+        }
+        let Ok(timestamp_ms) = parts[0].parse::<u64>() else {
+            continue;
+        };
+        let category = match parts[1] {
+            "highlight" => PoiCategory::Highlight,
+            "issue" => PoiCategory::Issue,
+            "transition" => PoiCategory::Transition,
+            "cue" => PoiCategory::Cue,
+            "note" => PoiCategory::Note,
+            _ => continue,
+        };
+        create_poi(timestamp_ms, category, transcript, pois);
+    }
+
+    *lines_read = lines.len();
 }
 
 // ---------------------------------------------------------------------------

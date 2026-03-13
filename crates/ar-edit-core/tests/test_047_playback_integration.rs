@@ -199,7 +199,7 @@ fn play_request_clone_preserves_fields() {
         file: PathBuf::from("/tmp/video.mp4"),
         start_ms: 5500,
         end_ms: Some(12000),
-        ipc_socket: None, source_id: None,
+        ipc_socket: None, source_id: None, mpv_script: None, marker_file: None,
     };
     let cloned = req.clone();
     assert_eq!(cloned.file, PathBuf::from("/tmp/video.mp4"));
@@ -283,7 +283,7 @@ fn full_playback_flow_simulation() {
         file,
         start_ms: shot.start_ms,
         end_ms: Some(shot.end_ms),
-        ipc_socket: None, source_id: None,
+        ipc_socket: None, source_id: None, mpv_script: None, marker_file: None,
     };
     assert_eq!(req.start_ms, 3000);
     assert_eq!(req.end_ms, Some(8000));

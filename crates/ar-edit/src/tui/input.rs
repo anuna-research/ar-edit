@@ -523,6 +523,8 @@ fn do_play(app: &mut App) {
                 end_ms,
                 ipc_socket: None,
                 source_id: Some(source_id.clone()),
+                mpv_script: None,
+                marker_file: None,
             });
             app.status_message = format!("Playing {shot_id}...");
         }

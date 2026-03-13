@@ -85,10 +85,14 @@ pub struct PlayRequest {
     pub start_ms: u64,
     /// Optional stop position in milliseconds (for shot playback).
     pub end_ms: Option<u64>,
-    /// Optional IPC socket path for mpv position capture.
+    /// Optional IPC socket path for player position capture (mpv or VLC RC).
     pub ipc_socket: Option<PathBuf>,
     /// Source ID for POI creation during playback.
     pub source_id: Option<String>,
+    /// Optional Lua script path for mpv in-player POI keybindings.
+    pub mpv_script: Option<PathBuf>,
+    /// Optional marker file path where mpv Lua script writes POI marks.
+    pub marker_file: Option<PathBuf>,
 }
 
 /// Launch a player subprocess for the given request.
@@ -113,6 +117,10 @@ pub fn launch_player(player: &Player, req: &PlayRequest) -> Result<Child, Playba
             // IPC socket path for position capture
             if let Some(ref ipc_path) = req.ipc_socket {
                 cmd.arg(format!("--input-ipc-server={}", ipc_path.display()));
+            }
+            // Lua script for in-player POI keybindings
+            if let Some(ref script) = req.mpv_script {
+                cmd.arg(format!("--script={}", script.display()));
             }
         }
         PlayerKind::Vlc => {
@@ -256,6 +264,65 @@ pub fn mpv_get_position(socket_path: &Path) -> Option<u64> {
         }
         None
     }
+}
+
+// ---------------------------------------------------------------------------
+// mpv Lua script for in-player POI capture
+// ---------------------------------------------------------------------------
+
+/// Generate a Lua script for mpv that captures POI keypresses in-player.
+///
+/// Press `i` in mpv to mark a POI. An OSD menu appears with category choices:
+/// `h`=highlight, `i`=issue, `t`=transition, `c`=cue, `n`=note, `Esc`=cancel.
+/// The script writes `<timestamp_ms> <category>\n` to the marker file.
+pub fn generate_mpv_poi_script(marker_file: &Path) -> String {
+    format!(
+        r#"-- ar-edit POI marker script
+local marker_path = "{marker_file}"
+local pending_time = nil
+
+local function clear_bindings()
+    mp.remove_key_binding("poi-h")
+    mp.remove_key_binding("poi-i")
+    mp.remove_key_binding("poi-t")
+    mp.remove_key_binding("poi-c")
+    mp.remove_key_binding("poi-n")
+    mp.remove_key_binding("poi-esc")
+end
+
+local function write_marker(category)
+    if pending_time == nil then return end
+    local ms = math.floor(pending_time * 1000)
+    local f = io.open(marker_path, "a")
+    if f then
+        f:write(string.format("%d %s\n", ms, category))
+        f:close()
+    end
+    local t = string.format("%d:%02d.%d", math.floor(pending_time/60), math.floor(pending_time) % 60, math.floor((pending_time * 10) % 10))
+    mp.osd_message("\u{{2713}} " .. category .. " @ " .. t, 2)
+    pending_time = nil
+    clear_bindings()
+end
+
+local function cancel()
+    mp.osd_message("cancelled", 1)
+    pending_time = nil
+    clear_bindings()
+end
+
+mp.add_key_binding("i", "poi-mark", function()
+    pending_time = mp.get_property_number("time-pos")
+    mp.osd_message("[h]ighlight  [i]ssue  [t]ransition  [c]ue  [n]ote  (Esc cancel)", 10)
+    mp.add_forced_key_binding("h", "poi-h", function() write_marker("highlight") end)
+    mp.add_forced_key_binding("i", "poi-i", function() write_marker("issue") end)
+    mp.add_forced_key_binding("t", "poi-t", function() write_marker("transition") end)
+    mp.add_forced_key_binding("c", "poi-c", function() write_marker("cue") end)
+    mp.add_forced_key_binding("n", "poi-n", function() write_marker("note") end)
+    mp.add_forced_key_binding("ESC", "poi-esc", cancel)
+end)
+"#,
+        marker_file = marker_file.display()
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -417,7 +484,7 @@ mod tests {
             start_ms: 5500,
             end_ms: None,
             ipc_socket: None,
-            source_id: None,
+            source_id: None, mpv_script: None, marker_file: None,
         };
         let mut cmd = Command::new(&player.path);
         cmd.arg(&req.file);
@@ -440,7 +507,7 @@ mod tests {
             start_ms: 5500,
             end_ms: Some(10000),
             ipc_socket: None,
-            source_id: None,
+            source_id: None, mpv_script: None, marker_file: None,
         };
         // Verify duration calculation
         let duration_secs = req.end_ms.unwrap().saturating_sub(req.start_ms) as f64 / 1000.0;
@@ -463,7 +530,7 @@ mod tests {
             start_ms: 1000,
             end_ms: Some(5000),
             ipc_socket: None,
-            source_id: None,
+            source_id: None, mpv_script: None, marker_file: None,
         };
         let req2 = req.clone();
         assert_eq!(req.start_ms, req2.start_ms);

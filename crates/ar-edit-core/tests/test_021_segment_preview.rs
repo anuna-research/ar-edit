@@ -188,7 +188,7 @@ fn segment_preview_resolves_words_shot() {
         file: PathBuf::from("/tmp/test.mp4"),
         start_ms: shot.start_ms,
         end_ms: Some(shot.end_ms),
-        ipc_socket: None, source_id: None,
+        ipc_socket: None, source_id: None, mpv_script: None, marker_file: None,
     };
     assert_eq!(req.start_ms, 0);
     assert_eq!(req.end_ms, Some(1200));
@@ -215,7 +215,7 @@ fn segment_preview_resolves_scenes_shot() {
         file: PathBuf::from("/tmp/test.mp4"),
         start_ms: shot.start_ms,
         end_ms: Some(shot.end_ms),
-        ipc_socket: None, source_id: None,
+        ipc_socket: None, source_id: None, mpv_script: None, marker_file: None,
     };
     assert_eq!(req.start_ms, 0);
     assert_eq!(req.end_ms, Some(45000));
@@ -248,7 +248,7 @@ fn segment_preview_resolves_time_shot() {
         file: PathBuf::from("/tmp/test.mp4"),
         start_ms: shot.start_ms,
         end_ms: Some(shot.end_ms),
-        ipc_socket: None, source_id: None,
+        ipc_socket: None, source_id: None, mpv_script: None, marker_file: None,
     };
     assert_eq!(req.start_ms, 5000);
     assert_eq!(req.end_ms, Some(10000));
@@ -371,7 +371,7 @@ fn segment_preview_specific_shot_from_multi_shot_edit() {
         file: PathBuf::from("/tmp/test.mp4"),
         start_ms: target.start_ms,
         end_ms: Some(target.end_ms),
-        ipc_socket: None, source_id: None,
+        ipc_socket: None, source_id: None, mpv_script: None, marker_file: None,
     };
     assert_eq!(req.start_ms, 18000);
     assert_eq!(req.end_ms, Some(90000));
