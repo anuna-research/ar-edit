@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use ar_edit_core::models::ShotRange;
+use ar_edit_core::models::{PoiCategory as PoiCat, PoiPoint, ShotRange};
 use ar_edit_core::playback;
 use ar_edit_core::search::{self, TypeFilter};
 
@@ -24,6 +24,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         Mode::Prompt => handle_prompt(app, key),
         Mode::Search => handle_search(app, key),
         Mode::SearchResults => handle_search_results(app, key),
+        Mode::PoiCategory => handle_poi_category(app, key),
     }
 }
 
@@ -86,6 +87,7 @@ fn handle_normal_timeline(app: &mut App, key: KeyEvent) {
         KeyCode::Char('m') => {
             start_prompt(app, "marker source ID:", PromptAction::MarkerSource);
         }
+        KeyCode::Char('i') => do_start_poi(app),
         KeyCode::Char('p') | KeyCode::Enter => do_play(app),
         KeyCode::Char('/') => {
             app.mode = Mode::Search;
@@ -519,6 +521,7 @@ fn do_play(app: &mut App) {
                 file,
                 start_ms,
                 end_ms,
+                ipc_socket: None, // Will be set by event loop for mpv
             });
             app.status_message = format!("Playing {shot_id}...");
         }
@@ -536,6 +539,64 @@ fn do_add_marker(app: &mut App, source: &str, range: ShotRange, label: &str) {
         Err(e) => {
             app.status_message = format!("Marker failed: {e}");
         }
+    }
+}
+
+fn do_start_poi(app: &mut App) {
+    if app.selected_resolved_shot().is_none() {
+        app.status_message = "No shot selected".into();
+        return;
+    }
+    app.mode = Mode::PoiCategory;
+    app.status_message =
+        "POI category: h=highlight i=issue t=transition c=cue n=note".into();
+}
+
+fn get_poi_context(app: &App) -> Option<(String, PoiPoint)> {
+    let shot = app.selected_resolved_shot()?;
+    let source = shot.source.clone();
+    let point = match &shot.range {
+        ShotRange::Words { from, .. } => PoiPoint::Word(*from),
+        ShotRange::Scenes { from, .. } => PoiPoint::Scene(*from),
+        ShotRange::Time { from_ms, .. } => PoiPoint::TimeMs(*from_ms),
+    };
+    Some((source, point))
+}
+
+fn do_create_poi(app: &mut App, source: &str, point: PoiPoint, category: PoiCat) {
+    match ar_edit_core::poi::add_poi(&app.project_dir, source, point, category, None) {
+        Ok(poi) => {
+            app.status_message =
+                format!("Created {} [{}] on {}", poi.id, poi.category, source);
+        }
+        Err(e) => {
+            app.status_message = format!("POI failed: {e}");
+        }
+    }
+}
+
+fn handle_poi_category(app: &mut App, key: KeyEvent) {
+    let category = match key.code {
+        KeyCode::Char('h') => Some(PoiCat::Highlight),
+        KeyCode::Char('i') => Some(PoiCat::Issue),
+        KeyCode::Char('t') => Some(PoiCat::Transition),
+        KeyCode::Char('c') => Some(PoiCat::Cue),
+        KeyCode::Char('n') => Some(PoiCat::Note),
+        KeyCode::Esc => {
+            app.mode = Mode::Normal;
+            app.status_message = default_status();
+            return;
+        }
+        _ => None,
+    };
+
+    if let Some(cat) = category {
+        if let Some((source, point)) = get_poi_context(app) {
+            do_create_poi(app, &source, point, cat);
+        } else {
+            app.status_message = "No word position available for POI".into();
+        }
+        app.mode = Mode::Normal;
     }
 }
 
@@ -768,7 +829,7 @@ fn parse_range_input(input: &str) -> Result<ShotRange, String> {
 
 /// Default status bar message showing available key bindings.
 pub fn default_status() -> String {
-    String::from("a:add d:del J/K:move t:trim p:play n:note m:mark /:search ^z/^y:undo/redo q:quit")
+    String::from("a:add d:del J/K:move t:trim p:play n:note m:mark i:poi /:search ^z/^y:undo/redo q:quit")
 }
 
 // ---------------------------------------------------------------------------
@@ -858,5 +919,6 @@ mod tests {
         assert!(status.contains("d:del"));
         assert!(status.contains("q:quit"));
         assert!(status.contains("^z"));
+        assert!(status.contains("i:poi"));
     }
 }

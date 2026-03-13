@@ -234,6 +234,10 @@ pub enum TranscriptsCommand {
         /// Interleave markers at their timestamp positions
         #[arg(long)]
         with_markers: bool,
+
+        /// Interleave POI annotations at their positions
+        #[arg(long)]
+        with_pois: bool,
     },
 
     /// Search within transcripts
@@ -304,6 +308,10 @@ pub enum EditCommand {
     Show {
         /// Edit document name
         edit: String,
+
+        /// Show POIs that fall within each shot's range
+        #[arg(long)]
+        with_pois: bool,
     },
 
     /// Show the operation history of an edit
@@ -683,10 +691,12 @@ mod tests {
                     TranscriptsCommand::Read {
                         ref source_id,
                         with_markers,
+                        with_pois,
                     },
             } => {
                 assert_eq!(source_id, "src-001");
                 assert!(with_markers);
+                assert!(!with_pois);
             }
             _ => panic!("expected Transcripts Read"),
         }
@@ -701,10 +711,39 @@ mod tests {
                     TranscriptsCommand::Read {
                         ref source_id,
                         with_markers,
+                        with_pois,
                     },
             } => {
                 assert_eq!(source_id, "src-001");
                 assert!(!with_markers);
+                assert!(!with_pois);
+            }
+            _ => panic!("expected Transcripts Read"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_transcripts_read_with_pois() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "transcripts",
+            "read",
+            "src-001",
+            "--with-pois",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Transcripts {
+                command:
+                    TranscriptsCommand::Read {
+                        ref source_id,
+                        with_markers,
+                        with_pois,
+                    },
+            } => {
+                assert_eq!(source_id, "src-001");
+                assert!(!with_markers);
+                assert!(with_pois);
             }
             _ => panic!("expected Transcripts Read"),
         }

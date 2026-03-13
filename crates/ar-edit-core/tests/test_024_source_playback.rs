@@ -222,6 +222,7 @@ fn source_playback_at_word_resolves_timestamp() {
         file: PathBuf::from("/tmp/interview.mp4"),
         start_ms,
         end_ms: None,
+        ipc_socket: None,
     };
     assert_eq!(req.start_ms, 5230);
     assert!(req.end_ms.is_none(), "source playback has no end time");
@@ -263,6 +264,7 @@ fn source_playback_at_scene_resolves_timestamp() {
         file: PathBuf::from("/tmp/interview.mp4"),
         start_ms,
         end_ms: None,
+        ipc_socket: None,
     };
     assert_eq!(req.start_ms, 18000);
     assert!(req.end_ms.is_none());
@@ -298,6 +300,7 @@ fn source_playback_at_timecode_seconds() {
         file: PathBuf::from("/tmp/interview.mp4"),
         start_ms: ms,
         end_ms: None,
+        ipc_socket: None,
     };
     assert_eq!(req.start_ms, 90000);
 }
@@ -504,6 +507,7 @@ fn source_playback_full_pipeline_at_word() {
         file: source_path,
         start_ms,
         end_ms: None,
+        ipc_socket: None,
     };
     assert_eq!(req.start_ms, 5750);
     assert!(req.end_ms.is_none());
@@ -533,6 +537,7 @@ fn source_playback_full_pipeline_at_scene() {
         file: tmp.path().join("sources/src-001.mp4"),
         start_ms,
         end_ms: None,
+        ipc_socket: None,
     };
     assert_eq!(req.start_ms, 45000);
 
@@ -556,6 +561,7 @@ fn source_playback_full_pipeline_at_timecode() {
         file: tmp.path().join("sources/src-001.mp4"),
         start_ms,
         end_ms: None,
+        ipc_socket: None,
     };
     assert_eq!(req.start_ms, 90000);
 

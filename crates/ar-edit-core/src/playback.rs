@@ -9,7 +9,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum PlaybackError {
-    #[error("no video player found: install VLC (preferred) or ffplay")]
+    #[error("no video player found: install mpv (preferred), VLC, or ffplay")]
     PlayerNotFound,
     #[error("invalid timecode \"{0}\": expected HH:MM:SS, MM:SS, or seconds")]
     InvalidTimecode(String),
@@ -35,6 +35,8 @@ pub struct Player {
 /// Classification of the detected player.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerKind {
+    /// mpv media player with IPC support.
+    Mpv,
     /// VLC media player (cvlc or vlc).
     Vlc,
     /// ffplay from the FFmpeg suite.
@@ -51,6 +53,7 @@ pub enum PlayerKind {
 /// Returns `Err(PlaybackError::PlayerNotFound)` if none are found.
 pub fn detect_player() -> Result<Player, PlaybackError> {
     static CANDIDATES: &[(&str, PlayerKind)] = &[
+        ("mpv", PlayerKind::Mpv),
         ("cvlc", PlayerKind::Vlc),
         ("vlc", PlayerKind::Vlc),
         ("ffplay", PlayerKind::Ffplay),
@@ -82,6 +85,8 @@ pub struct PlayRequest {
     pub start_ms: u64,
     /// Optional stop position in milliseconds (for shot playback).
     pub end_ms: Option<u64>,
+    /// Optional IPC socket path for mpv position capture.
+    pub ipc_socket: Option<PathBuf>,
 }
 
 /// Launch a player subprocess for the given request.
@@ -96,6 +101,18 @@ pub fn launch_player(player: &Player, req: &PlayRequest) -> Result<Child, Playba
     let mut cmd = Command::new(&player.path);
 
     match player.kind {
+        PlayerKind::Mpv => {
+            cmd.arg(&req.file);
+            cmd.arg(format!("--start={start_secs:.3}"));
+            if let Some(end_ms) = req.end_ms {
+                let length_secs = (end_ms - req.start_ms) as f64 / 1000.0;
+                cmd.arg(format!("--length={length_secs:.3}"));
+            }
+            // IPC socket path for position capture
+            if let Some(ref ipc_path) = req.ipc_socket {
+                cmd.arg(format!("--input-ipc-server={}", ipc_path.display()));
+            }
+        }
         PlayerKind::Vlc => {
             cmd.arg(&req.file);
             cmd.arg(format!("--start-time={start_secs:.3}"));
@@ -195,6 +212,45 @@ pub fn resolve_source_path(
 }
 
 // ---------------------------------------------------------------------------
+// mpv IPC client
+// ---------------------------------------------------------------------------
+
+/// Query mpv for the current playback position via IPC socket.
+///
+/// Sends `{ "command": ["get_property", "time-pos"] }` and parses the response.
+/// Returns the position in milliseconds, or None if the socket isn't available.
+pub fn mpv_get_position(socket_path: &Path) -> Option<u64> {
+    use std::io::{BufRead, BufReader, Write};
+    #[cfg(unix)]
+    use std::os::unix::net::UnixStream;
+
+    #[cfg(not(unix))]
+    return None;
+
+    #[cfg(unix)]
+    {
+        let mut stream = UnixStream::connect(socket_path).ok()?;
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_millis(500)))
+            .ok()?;
+
+        let cmd = r#"{ "command": ["get_property", "time-pos"] }"#;
+        writeln!(stream, "{}", cmd).ok()?;
+
+        let reader = BufReader::new(&stream);
+        for line in reader.lines() {
+            let line = line.ok()?;
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                if let Some(pos) = json.get("data").and_then(|v| v.as_f64()) {
+                    return Some((pos * 1000.0) as u64);
+                }
+            }
+        }
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -209,6 +265,9 @@ mod tests {
                 assert!(!player.name.is_empty());
                 assert!(player.path.exists());
                 match player.kind {
+                    PlayerKind::Mpv => {
+                        assert_eq!(player.name, "mpv");
+                    }
                     PlayerKind::Vlc => {
                         assert!(player.name == "cvlc" || player.name == "vlc");
                     }
@@ -225,14 +284,17 @@ mod tests {
 
     #[test]
     fn player_kind_equality() {
+        assert_eq!(PlayerKind::Mpv, PlayerKind::Mpv);
         assert_eq!(PlayerKind::Vlc, PlayerKind::Vlc);
         assert_ne!(PlayerKind::Vlc, PlayerKind::Ffplay);
+        assert_ne!(PlayerKind::Mpv, PlayerKind::Vlc);
     }
 
     #[test]
     fn player_not_found_error_message() {
         let err = PlaybackError::PlayerNotFound;
         let msg = err.to_string();
+        assert!(msg.contains("mpv"), "error should mention mpv");
         assert!(msg.contains("VLC"), "error should mention VLC");
         assert!(msg.contains("ffplay"), "error should mention ffplay");
     }
@@ -296,6 +358,7 @@ mod tests {
             file: PathBuf::from("/tmp/test.mp4"),
             start_ms: 5500,
             end_ms: None,
+            ipc_socket: None,
         };
         let mut cmd = Command::new(&player.path);
         cmd.arg(&req.file);
@@ -317,6 +380,7 @@ mod tests {
             file: PathBuf::from("/tmp/test.mp4"),
             start_ms: 5500,
             end_ms: Some(10000),
+            ipc_socket: None,
         };
         // Verify duration calculation
         let duration_secs = req.end_ms.unwrap().saturating_sub(req.start_ms) as f64 / 1000.0;
@@ -338,6 +402,7 @@ mod tests {
             file: PathBuf::from("/tmp/test.mp4"),
             start_ms: 1000,
             end_ms: Some(5000),
+            ipc_socket: None,
         };
         let req2 = req.clone();
         assert_eq!(req.start_ms, req2.start_ms);

@@ -175,7 +175,8 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             TranscriptsCommand::Read {
                 source_id,
                 with_markers,
-            } => cmd_transcripts_read(cli, source_id, *with_markers),
+                with_pois,
+            } => cmd_transcripts_read(cli, source_id, *with_markers, *with_pois),
             TranscriptsCommand::Search { query, source } => {
                 cmd_transcripts_search(cli, query, source.as_deref())
             }
@@ -295,7 +296,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 }
                 Ok(())
             }
-            EditCommand::Show { edit } => cmd_show(cli, edit),
+            EditCommand::Show { edit, with_pois } => cmd_show(cli, edit, *with_pois),
             EditCommand::History { edit } => cmd_history(cli, edit),
             EditCommand::FromTranscript { file, output } => {
                 cmd_from_transcript(cli, file, output.as_deref())
@@ -754,7 +755,7 @@ fn cmd_transcripts_list(cli: &Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_transcripts_read(cli: &Cli, source_id: &str, with_markers: bool) -> anyhow::Result<()> {
+fn cmd_transcripts_read(cli: &Cli, source_id: &str, with_markers: bool, with_pois: bool) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
     let transcript = ar_edit_core::transcript_ops::read(&project_dir, source_id).map_err(|e| {
         anyhow::Error::new(
@@ -764,24 +765,98 @@ fn cmd_transcripts_read(cli: &Cli, source_id: &str, with_markers: bool) -> anyho
         )
     })?;
 
-    if with_markers {
-        // Load and resolve markers for this source
-        let source_markers =
-            ar_edit_core::marker::list_markers(&project_dir, source_id).user_err()?;
-        let resolved = ar_edit_core::display::resolve_markers(
-            &source_markers.markers,
-            source_id,
-            &project_dir,
-        )
-        .user_err()?;
+    if with_markers || with_pois {
+        // Load markers if requested
+        let resolved_markers = if with_markers {
+            let source_markers =
+                ar_edit_core::marker::list_markers(&project_dir, source_id).user_err()?;
+            ar_edit_core::display::resolve_markers(
+                &source_markers.markers,
+                source_id,
+                &project_dir,
+            )
+            .user_err()?
+        } else {
+            vec![]
+        };
 
-        let interleaved =
-            ar_edit_core::display::interleave_transcript_with_markers(&transcript, &resolved);
+        // Load POIs if requested
+        let resolved_pois = if with_pois {
+            let source_pois = ar_edit_core::poi::list_pois(&project_dir, source_id).user_err()?;
+            let transcript_data = ar_edit_core::transcript_ops::read(&project_dir, source_id).ok();
+            let index_path = project_dir.join("index").join(format!("{source_id}.index.json"));
+            let index_data: Option<ar_edit_core::models::SourceIndex> = std::fs::read_to_string(&index_path)
+                .ok()
+                .and_then(|data| serde_json::from_str(&data).ok());
+
+            let mut resolved = Vec::new();
+            for poi in &source_pois.pois {
+                let resolved_ms = ar_edit_core::resolve::resolve_poi_point(
+                    &poi.point,
+                    transcript_data.as_ref(),
+                    index_data.as_ref(),
+                    transcript_data.as_ref().map(|t| t.duration_ms).unwrap_or(u64::MAX),
+                ).unwrap_or(0);
+                resolved.push(ar_edit_core::display::ResolvedPoi {
+                    id: poi.id.clone(),
+                    source_id: source_id.to_string(),
+                    point: poi.point.clone(),
+                    category: poi.category.clone(),
+                    note: poi.note.clone(),
+                    created: poi.created,
+                    resolved_ms,
+                });
+            }
+            resolved
+        } else {
+            vec![]
+        };
+
+        // Build interleaved items using the appropriate function
+        let items: Vec<ar_edit_core::display::TranscriptItem> = if with_markers && !with_pois {
+            let interleaved =
+                ar_edit_core::display::interleave_transcript_with_markers(&transcript, &resolved_markers);
+            interleaved.items
+        } else if with_pois && !with_markers {
+            let interleaved =
+                ar_edit_core::display::interleave_pois_into_transcript(&transcript, &resolved_pois);
+            interleaved.items
+        } else {
+            // Both markers and POIs: start with markers, then add POIs
+            let mut interleaved =
+                ar_edit_core::display::interleave_transcript_with_markers(&transcript, &resolved_markers);
+            for poi in &resolved_pois {
+                interleaved.items.push(ar_edit_core::display::TranscriptItem::Poi(poi.clone()));
+            }
+            interleaved.items.sort_by_key(|item| {
+                let ms = match item {
+                    ar_edit_core::display::TranscriptItem::Segment(s) => s.start_ms,
+                    ar_edit_core::display::TranscriptItem::Marker(m) => m.start_ms,
+                    ar_edit_core::display::TranscriptItem::Poi(p) => p.resolved_ms,
+                };
+                let tie_break = match item {
+                    ar_edit_core::display::TranscriptItem::Segment(_) => 0u8,
+                    ar_edit_core::display::TranscriptItem::Marker(_) => 1u8,
+                    ar_edit_core::display::TranscriptItem::Poi(_) => 2u8,
+                };
+                (ms, tie_break)
+            });
+            interleaved.items
+        };
 
         if cli.json {
-            println!("{}", serde_json::to_string_pretty(&interleaved)?);
+            // Build a JSON-serializable structure
+            let output = serde_json::json!({
+                "source_id": transcript.source_id,
+                "duration_ms": transcript.duration_ms,
+                "word_count": transcript.word_count,
+                "marker_count": resolved_markers.len(),
+                "poi_count": resolved_pois.len(),
+                "items": items,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
         } else {
-            for item in &interleaved.items {
+            for item in &items {
                 match item {
                     ar_edit_core::display::TranscriptItem::Segment(seg) => {
                         println!("{}", seg.text);
@@ -888,22 +963,80 @@ fn cmd_transcripts_export(_cli: &Cli, format: &str, output: Option<&Path>) -> an
 // Command handlers: show (REQ-016)
 // ---------------------------------------------------------------------------
 
-fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
+fn cmd_show(cli: &Cli, edit: &str, with_pois: bool) -> anyhow::Result<()> {
     let doc = load_edit(edit)?;
     let project_dir = PathBuf::from(".");
 
     let resolved = ar_edit_core::display::resolve_edit(&doc, &project_dir).user_err()?;
 
+    // Pre-resolve POIs per source if requested
+    let resolved_pois_by_source: std::collections::HashMap<String, Vec<ar_edit_core::display::ResolvedPoi>> = if with_pois {
+        let mut map = std::collections::HashMap::new();
+        for shot in &resolved {
+            if map.contains_key(&shot.source) {
+                continue;
+            }
+            let source_pois = ar_edit_core::poi::list_pois(&project_dir, &shot.source).user_err()?;
+            let transcript_data = ar_edit_core::transcript_ops::read(&project_dir, &shot.source).ok();
+            let index_path = project_dir.join("index").join(format!("{}.index.json", &shot.source));
+            let index_data: Option<ar_edit_core::models::SourceIndex> = std::fs::read_to_string(&index_path)
+                .ok()
+                .and_then(|data| serde_json::from_str(&data).ok());
+
+            let mut pois = Vec::new();
+            for poi in &source_pois.pois {
+                let resolved_ms = ar_edit_core::resolve::resolve_poi_point(
+                    &poi.point,
+                    transcript_data.as_ref(),
+                    index_data.as_ref(),
+                    transcript_data.as_ref().map(|t| t.duration_ms).unwrap_or(u64::MAX),
+                ).unwrap_or(0);
+                pois.push(ar_edit_core::display::ResolvedPoi {
+                    id: poi.id.clone(),
+                    source_id: shot.source.clone(),
+                    point: poi.point.clone(),
+                    category: poi.category.clone(),
+                    note: poi.note.clone(),
+                    created: poi.created,
+                    resolved_ms,
+                });
+            }
+            map.insert(shot.source.clone(), pois);
+        }
+        map
+    } else {
+        std::collections::HashMap::new()
+    };
+
     if cli.json {
         let total_duration_ms: u64 = resolved.iter().map(|s| s.duration_ms).sum();
-        let output = serde_json::json!({
-            "name": doc.name,
-            "head": doc.head,
-            "shot_count": resolved.len(),
-            "total_duration_ms": total_duration_ms,
-            "shots": resolved,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
+        if with_pois {
+            let shots_with_pois: Vec<serde_json::Value> = resolved.iter().map(|shot| {
+                let empty = vec![];
+                let source_pois = resolved_pois_by_source.get(&shot.source).unwrap_or(&empty);
+                let in_range = ar_edit_core::display::pois_in_range(source_pois, shot.start_ms, shot.end_ms);
+                let mut val = serde_json::to_value(shot).unwrap();
+                val.as_object_mut().unwrap().insert("pois".to_string(), serde_json::to_value(&in_range).unwrap());
+                val
+            }).collect();
+            let output = serde_json::json!({
+                "name": doc.name,
+                "head": doc.head,
+                "shot_count": resolved.len(),
+                "total_duration_ms": total_duration_ms,
+                "shots": shots_with_pois,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            let output = serde_json::json!({
+                "name": doc.name,
+                "head": doc.head,
+                "shot_count": resolved.len(),
+                "total_duration_ms": total_duration_ms,
+                "shots": resolved,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
     } else {
         println!(
             "Edit: {}  ({} shots, head: {})",
@@ -943,6 +1076,15 @@ fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
 
                 for note in &shot.notes {
                     println!("  {:>12} note: {}", "", note.text);
+                }
+
+                if with_pois {
+                    let empty = vec![];
+                    let source_pois = resolved_pois_by_source.get(&shot.source).unwrap_or(&empty);
+                    let in_range = ar_edit_core::display::pois_in_range(source_pois, shot.start_ms, shot.end_ms);
+                    for poi in in_range {
+                        println!("  {:>12} {} {} {}", "", poi.category_tag(), fmt_poi_point(&poi.point), poi.note.as_deref().unwrap_or(""));
+                    }
                 }
             }
 
@@ -1192,6 +1334,7 @@ fn cmd_play_full(
         file: preview_path.clone(),
         start_ms: 0,
         end_ms: None,
+        ipc_socket: None,
     };
 
     if !cli.json {
@@ -1514,6 +1657,7 @@ fn build_source_play_request(
         file,
         start_ms,
         end_ms: None,
+        ipc_socket: None,
     })
 }
 
@@ -1554,6 +1698,7 @@ fn build_edit_play_request(
         file,
         start_ms,
         end_ms: Some(end_ms),
+        ipc_socket: None,
     })
 }
 

@@ -32,6 +32,7 @@ pub enum Mode {
     Prompt,
     Search,
     SearchResults,
+    PoiCategory,
 }
 
 /// Which panel currently has keyboard focus.
@@ -306,22 +307,46 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
         }
 
         // Handle pending play: leave TUI, launch player, re-enter TUI.
-        if let Some(req) = app.pending_play.take() {
+        if let Some(mut req) = app.pending_play.take() {
             match playback::detect_player() {
                 Ok(player) => {
+                    // For mpv, set up IPC socket for position capture
+                    let ipc_path = if player.kind == playback::PlayerKind::Mpv {
+                        let path = std::env::temp_dir().join(format!(
+                            "ar-edit-mpv-{}.sock",
+                            std::process::id()
+                        ));
+                        req.ipc_socket = Some(path.clone());
+                        Some(path)
+                    } else {
+                        None
+                    };
+
                     restore_terminal(terminal)?;
+
                     match playback::launch_player(&player, &req) {
                         Ok(mut child) => {
+                            if ipc_path.is_some() {
+                                // mpv: wait with position capture support
+                                eprintln!("Playing... press 'q' to quit mpv");
+                            }
                             let _ = child.wait();
                         }
                         Err(e) => {
                             app.status_message = format!("Play failed: {e}");
                         }
                     }
+
+                    // Clean up IPC socket
+                    if let Some(ref path) = ipc_path {
+                        let _ = std::fs::remove_file(path);
+                    }
+
                     *terminal = setup_terminal()?;
                 }
                 Err(_) => {
-                    app.status_message = "No video player found (install VLC or ffplay)".into();
+                    app.status_message =
+                        "No video player found (install mpv, VLC, or ffplay)".into();
                 }
             }
         }
