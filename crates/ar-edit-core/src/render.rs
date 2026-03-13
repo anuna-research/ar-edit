@@ -736,9 +736,11 @@ pub fn ffmpeg_video_encoder(codec: &str) -> &str {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Extract a segment from a source video using ffmpeg stream copy.
+/// Extract a segment from a source video with frame-accurate seeking.
 ///
-/// Uses `-ss` before `-i` for fast seeking, then `-t` for duration.
+/// Re-encodes video to ensure frame-accurate cuts and uniform output format
+/// (pixel format, frame rate, audio sample rate) so concat with stream copy
+/// is safe.
 fn extract_segment(
     source: &Path,
     start_ms: u64,
@@ -751,7 +753,14 @@ fn extract_segment(
     let result = Command::new("ffmpeg")
         .args(["-y", "-ss", &format!("{start_secs:.3}"), "-i"])
         .arg(source)
-        .args(["-t", &format!("{duration_secs:.3}"), "-c", "copy"])
+        .args([
+            "-t", &format!("{duration_secs:.3}"),
+            "-map", "0:v:0", "-map", "0:a:0",
+            "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+            "-pix_fmt", "yuv420p",
+            "-r", "30",
+            "-c:a", "aac", "-ar", "48000", "-ac", "2",
+        ])
         .arg(output)
         .output()
         .map_err(|e| RenderError::FfmpegFailed(format!("failed to run ffmpeg: {e}")))?;
@@ -785,14 +794,17 @@ fn extract_segment_encoded(
     let mut cmd = Command::new("ffmpeg");
     cmd.args(["-y", "-ss", &format!("{start_secs:.3}"), "-i"])
         .arg(source)
-        .args(["-t", &format!("{duration_secs:.3}")]);
+        .args([
+            "-t", &format!("{duration_secs:.3}"),
+            "-map", "0:v:0", "-map", "0:a:0",
+        ]);
 
     if let Some(vf) = video_filter {
         cmd.args(["-vf", vf]);
     }
 
-    cmd.args(["-c:v", video_encoder])
-        .args(["-c:a", "aac"])
+    cmd.args(["-c:v", video_encoder, "-pix_fmt", "yuv420p", "-r", "30"])
+        .args(["-c:a", "aac", "-ar", "48000", "-ac", "2"])
         .arg(output);
 
     let result = cmd
@@ -856,16 +868,18 @@ where
         "-i",
     ])
     .arg(source)
-    .args(["-t", &format!("{duration_secs:.3}")]);
+    .args(["-t", &format!("{duration_secs:.3}"), "-map", "0:v:0", "-map", "0:a:0"]);
 
     if let Some(vf) = video_filter {
         cmd.args(["-vf", vf]);
     }
 
     if let Some(encoder) = video_encoder {
-        cmd.args(["-c:v", encoder, "-c:a", "aac"]);
+        cmd.args(["-c:v", encoder, "-pix_fmt", "yuv420p", "-r", "30"]);
+        cmd.args(["-c:a", "aac", "-ar", "48000", "-ac", "2"]);
     } else {
-        cmd.args(["-c", "copy"]);
+        cmd.args(["-c:v", "libx264", "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p", "-r", "30"]);
+        cmd.args(["-c:a", "aac", "-ar", "48000", "-ac", "2"]);
     }
 
     cmd.arg(output);
@@ -915,6 +929,9 @@ where
 }
 
 /// Concatenate segments using the ffmpeg concat demuxer.
+///
+/// Uses stream copy since all segments are pre-encoded to uniform format
+/// (same codec, pixel format, frame rate, and audio sample rate).
 fn concat_segments(concat_list: &Path, output: &Path) -> Result<(), RenderError> {
     let result = Command::new("ffmpeg")
         .args(["-y", "-f", "concat", "-safe", "0", "-i"])
