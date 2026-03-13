@@ -326,14 +326,13 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
 
                     match playback::launch_player(&player, &req) {
                         Ok(mut child) => {
-                            if let (Some(ref ipc), Some(ref src_id)) =
-                                (&ipc_path, &req.source_id)
-                            {
+                            if let Some(ref src_id) = req.source_id {
                                 let pois = monitor_playback_with_poi(
                                     &mut child,
-                                    ipc,
+                                    ipc_path.as_deref(),
                                     src_id,
                                     &app.project_dir,
+                                    req.start_ms,
                                 );
                                 if !pois.is_empty() {
                                     app.status_message = format!(
@@ -376,16 +375,21 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
 
 /// Monitor mpv playback, capturing POI keypresses.
 ///
-/// While mpv plays in its own window, we put the terminal in raw mode (no
-/// alternate screen) to capture single keypresses. Press `i` to drop a POI
-/// at the current playback position, `q` to quit mpv.
+/// While the player runs, we put the terminal in raw mode (no alternate
+/// screen) to capture single keypresses. Press `i` to drop a POI at the
+/// current playback position, `q` to quit the player.
+///
+/// When an mpv IPC socket is available, position is read precisely via IPC.
+/// For other players (VLC, ffplay) or when IPC is unavailable, position is
+/// estimated as `start_ms + wall-clock elapsed time`.
 ///
 /// Returns the IDs of any POIs created.
 fn monitor_playback_with_poi(
     child: &mut std::process::Child,
-    ipc_socket: &std::path::Path,
+    ipc_socket: Option<&std::path::Path>,
     source_id: &str,
     project_dir: &std::path::Path,
+    start_ms: u64,
 ) -> Vec<String> {
     use ar_edit_core::display::format_time;
     use ar_edit_core::models::{PoiCategory, PoiPoint, Transcript};
@@ -393,6 +397,7 @@ fn monitor_playback_with_poi(
     use crossterm::event::{self, Event, KeyCode, KeyEvent};
 
     let mut pois_created = Vec::new();
+    let playback_start = Instant::now();
 
     // Load transcript once (best-effort)
     let transcript: Option<Transcript> = {
@@ -407,22 +412,24 @@ fn monitor_playback_with_poi(
     // Print instructions
     eprintln!();
     eprintln!("  \x1b[1;36m\u{25b6} Playing {source_id}\x1b[0m");
-    eprintln!("  \x1b[33mi\x1b[0m mark POI   \x1b[33mq\x1b[0m quit mpv");
+    eprintln!("  \x1b[33mi\x1b[0m mark POI   \x1b[33mq\x1b[0m quit player");
     eprintln!();
 
     // Wait briefly for mpv IPC socket to become available
-    for _ in 0..10 {
-        if ipc_socket.exists() {
-            break;
+    if let Some(sock) = ipc_socket {
+        for _ in 0..10 {
+            if sock.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
-        std::thread::sleep(Duration::from_millis(100));
     }
 
     // Enable raw mode to capture single keypresses
     let raw_mode = enable_raw_mode().is_ok();
 
     loop {
-        // Check if mpv has exited
+        // Check if player has exited
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {}
@@ -445,11 +452,12 @@ fn monitor_playback_with_poi(
                 break;
             }
             KeyCode::Char('i') => {
-                // Get current playback position from mpv
-                let Some(timestamp_ms) = playback::mpv_get_position(ipc_socket) else {
-                    eprintln!("  \x1b[31m\u{2717} Could not read playback position\x1b[0m");
-                    continue;
-                };
+                // Get current playback position: try IPC first, fall back to wall-clock
+                let timestamp_ms = ipc_socket
+                    .and_then(playback::mpv_get_position)
+                    .unwrap_or_else(|| {
+                        start_ms + playback_start.elapsed().as_millis() as u64
+                    });
 
                 // Show category prompt
                 eprint!(
