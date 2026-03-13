@@ -310,35 +310,41 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
         if let Some(mut req) = app.pending_play.take() {
             match playback::detect_player() {
                 Ok(player) => {
-                    // Set up IPC socket for position capture (mpv and VLC)
+                    // Set up IPC socket for mpv position capture
                     let pid = std::process::id();
-                    let ipc_path = match player.kind {
-                        playback::PlayerKind::Mpv => {
-                            let path = std::env::temp_dir()
-                                .join(format!("ar-edit-mpv-{pid}.sock"));
-                            req.ipc_socket = Some(path.clone());
-                            Some(path)
-                        }
-                        playback::PlayerKind::Vlc => {
-                            let path = std::env::temp_dir()
-                                .join(format!("ar-edit-vlc-{pid}.sock"));
-                            req.ipc_socket = Some(path.clone());
-                            Some(path)
-                        }
-                        playback::PlayerKind::Ffplay => None,
+                    let ipc_path = if player.kind == playback::PlayerKind::Mpv {
+                        let path = std::env::temp_dir()
+                            .join(format!("ar-edit-mpv-{pid}.sock"));
+                        req.ipc_socket = Some(path.clone());
+                        Some(path)
+                    } else {
+                        None
                     };
 
-                    // For mpv with POI mode: set up Lua script for in-player capture
-                    let marker_file = if player.kind == playback::PlayerKind::Mpv
-                        && req.source_id.is_some()
-                    {
+                    // Set up in-player POI capture (Lua scripts for mpv and VLC)
+                    let mut vlc_lua_script: Option<PathBuf> = None;
+                    let marker_file = if req.source_id.is_some() {
                         let marker = std::env::temp_dir()
                             .join(format!("ar-edit-poi-{pid}.txt"));
-                        let script_path = std::env::temp_dir()
-                            .join(format!("ar-edit-poi-{pid}.lua"));
-                        let lua = playback::generate_mpv_poi_script(&marker);
-                        let _ = std::fs::write(&script_path, lua);
-                        req.mpv_script = Some(script_path);
+                        match player.kind {
+                            playback::PlayerKind::Mpv => {
+                                let script_path = std::env::temp_dir()
+                                    .join(format!("ar-edit-poi-{pid}.lua"));
+                                let lua = playback::generate_mpv_poi_script(&marker);
+                                let _ = std::fs::write(&script_path, lua);
+                                req.mpv_script = Some(script_path);
+                            }
+                            playback::PlayerKind::Vlc => {
+                                if let Some(intf_dir) = playback::vlc_lua_intf_dir() {
+                                    let _ = std::fs::create_dir_all(&intf_dir);
+                                    let script_path = intf_dir.join("ar_edit_poi.lua");
+                                    let lua = playback::generate_vlc_poi_script(&marker);
+                                    let _ = std::fs::write(&script_path, &lua);
+                                    vlc_lua_script = Some(script_path);
+                                }
+                            }
+                            playback::PlayerKind::Ffplay => {}
+                        }
                         req.marker_file = Some(marker.clone());
                         Some(marker)
                     } else {
@@ -353,7 +359,6 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
                                 let pois = monitor_playback_with_poi(
                                     &mut child,
                                     ipc_path.as_deref(),
-                                    player.kind,
                                     marker_file.as_deref(),
                                     src_id,
                                     &app.project_dir,
@@ -374,11 +379,14 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
                         }
                     }
 
-                    // Clean up temp files (IPC socket, Lua script, marker file)
+                    // Clean up temp files (IPC socket, Lua scripts, marker file)
                     if let Some(ref path) = ipc_path {
                         let _ = std::fs::remove_file(path);
                     }
                     if let Some(ref path) = req.mpv_script {
+                        let _ = std::fs::remove_file(path);
+                    }
+                    if let Some(ref path) = vlc_lua_script {
                         let _ = std::fs::remove_file(path);
                     }
                     if let Some(ref path) = marker_file {
@@ -421,7 +429,6 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
 fn monitor_playback_with_poi(
     child: &mut std::process::Child,
     ipc_socket: Option<&std::path::Path>,
-    player_kind: playback::PlayerKind,
     marker_file: Option<&std::path::Path>,
     source_id: &str,
     project_dir: &std::path::Path,
@@ -567,13 +574,10 @@ fn monitor_playback_with_poi(
                 }
                 break;
             }
-            // Terminal-based POI capture (VLC/ffplay fallback)
+            // Terminal-based POI capture (ffplay fallback — wall-clock only)
             KeyCode::Char('i') if !has_marker_file => {
-                let timestamp_ms = ipc_socket
-                    .and_then(|sock| playback::get_player_position(sock, player_kind))
-                    .unwrap_or_else(|| {
-                        start_ms + playback_start.elapsed().as_millis() as u64
-                    });
+                let timestamp_ms =
+                    start_ms + playback_start.elapsed().as_millis() as u64;
 
                 eprint!(
                     "  \x1b[1mCategory:\x1b[0m \x1b[33mh\x1b[0m=highlight \
