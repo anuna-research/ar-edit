@@ -215,57 +215,101 @@
   (description "TUI POI creation requires core module and CLI dispatch pattern")
   (justification "TUI calls same core functions as CLI, needs dispatch wired"))
 
+;; =============================================================================
+;; Completed tasks (manually implemented)
+;; =============================================================================
+
+(given completed-a1-model)
+(given completed-a1-model)
+(given completed-a2-poi-module)
+(given completed-a3-resolve)
+(given completed-b1-cli-args)
 
 (claims supervisor:ed25519:zhT3QZyz
-  :at "2026-03-13T10:48:36Z"
-  (given delegated-v1-a1-model-to-agent:claude)
-  (given (during (leased-v1-a1-model) (moment "2026-03-13T10:48:36Z") (moment "2026-03-13T11:18:36Z")))
-  (given claim-v1-a1-model-by-claude)
-  (normally r-cl-state-v1-a1-model-by-claude claim-v1-a1-model-by-claude state-claimed-v1-a1-model-by-claude)
-  (normally r-cl-chain-v1-a1-model-by-claude state-claimed-v1-a1-model-by-claude claimed-a1-model)
+  :at "2026-03-13T13:03:36Z"
+  (given delegated-v1-b2-cli-dispatch-to-agent:claude)
+  (given (during (leased-v1-b2-cli-dispatch) (moment "2026-03-13T13:03:36Z") (moment "2026-03-13T13:33:36Z")))
+  (given claim-v1-b2-cli-dispatch-by-claude)
+  (normally r-cl-state-v1-b2-cli-dispatch-by-claude claim-v1-b2-cli-dispatch-by-claude state-claimed-v1-b2-cli-dispatch-by-claude)
+  (normally r-cl-chain-v1-b2-cli-dispatch-by-claude state-claimed-v1-b2-cli-dispatch-by-claude claimed-b2-cli-dispatch)
 )
 
-;; Propagation rules: failures in 'a1-model' block downstream tasks
-(normally r-propagate-a2-poi-module-from-a1-model-failed failed-a1-model upstream-blocked-a2-poi-module)
-(normally r-propagate-a2-poi-module-from-a1-model-permanently-failed permanently-failed-a1-model upstream-blocked-a2-poi-module)
-(normally r-propagate-a2-poi-module-from-a1-model-stale-v1 stale-v1-a1-model upstream-blocked-a2-poi-module)
-(normally r-propagate-a2-poi-module-from-a1-model-timeout-v1 timeout-v1-a1-model upstream-blocked-a2-poi-module)
-(normally r-propagate-a2-poi-module-from-a1-model-blocked upstream-blocked-a1-model upstream-blocked-a2-poi-module)
-(normally r-propagate-a3-resolve-from-a1-model-failed failed-a1-model upstream-blocked-a3-resolve)
-(normally r-propagate-a3-resolve-from-a1-model-permanently-failed permanently-failed-a1-model upstream-blocked-a3-resolve)
-(normally r-propagate-a3-resolve-from-a1-model-stale-v1 stale-v1-a1-model upstream-blocked-a3-resolve)
-(normally r-propagate-a3-resolve-from-a1-model-timeout-v1 timeout-v1-a1-model upstream-blocked-a3-resolve)
-(normally r-propagate-a3-resolve-from-a1-model-blocked upstream-blocked-a1-model upstream-blocked-a3-resolve)
-(normally r-propagate-b1-cli-args-from-a1-model-failed failed-a1-model upstream-blocked-b1-cli-args)
-(normally r-propagate-b1-cli-args-from-a1-model-permanently-failed permanently-failed-a1-model upstream-blocked-b1-cli-args)
-(normally r-propagate-b1-cli-args-from-a1-model-stale-v1 stale-v1-a1-model upstream-blocked-b1-cli-args)
-(normally r-propagate-b1-cli-args-from-a1-model-timeout-v1 timeout-v1-a1-model upstream-blocked-b1-cli-args)
-(normally r-propagate-b1-cli-args-from-a1-model-blocked upstream-blocked-a1-model upstream-blocked-b1-cli-args)
+;; Propagation rules: failures in 'b2-cli-dispatch' block downstream tasks
+(normally r-propagate-b3-tests-cli-from-b2-cli-dispatch-failed failed-b2-cli-dispatch upstream-blocked-b3-tests-cli)
+(normally r-propagate-b3-tests-cli-from-b2-cli-dispatch-permanently-failed permanently-failed-b2-cli-dispatch upstream-blocked-b3-tests-cli)
+(normally r-propagate-b3-tests-cli-from-b2-cli-dispatch-stale-v1 stale-v1-b2-cli-dispatch upstream-blocked-b3-tests-cli)
+(normally r-propagate-b3-tests-cli-from-b2-cli-dispatch-timeout-v1 timeout-v1-b2-cli-dispatch upstream-blocked-b3-tests-cli)
+(normally r-propagate-b3-tests-cli-from-b2-cli-dispatch-blocked upstream-blocked-b2-cli-dispatch upstream-blocked-b3-tests-cli)
+(normally r-propagate-c2-transcript-flag-from-b2-cli-dispatch-failed failed-b2-cli-dispatch upstream-blocked-c2-transcript-flag)
+(normally r-propagate-c2-transcript-flag-from-b2-cli-dispatch-permanently-failed permanently-failed-b2-cli-dispatch upstream-blocked-c2-transcript-flag)
+(normally r-propagate-c2-transcript-flag-from-b2-cli-dispatch-stale-v1 stale-v1-b2-cli-dispatch upstream-blocked-c2-transcript-flag)
+(normally r-propagate-c2-transcript-flag-from-b2-cli-dispatch-timeout-v1 timeout-v1-b2-cli-dispatch upstream-blocked-c2-transcript-flag)
+(normally r-propagate-c2-transcript-flag-from-b2-cli-dispatch-blocked upstream-blocked-b2-cli-dispatch upstream-blocked-c2-transcript-flag)
+(normally r-propagate-c3-edit-show-from-b2-cli-dispatch-failed failed-b2-cli-dispatch upstream-blocked-c3-edit-show)
+(normally r-propagate-c3-edit-show-from-b2-cli-dispatch-permanently-failed permanently-failed-b2-cli-dispatch upstream-blocked-c3-edit-show)
+(normally r-propagate-c3-edit-show-from-b2-cli-dispatch-stale-v1 stale-v1-b2-cli-dispatch upstream-blocked-c3-edit-show)
+(normally r-propagate-c3-edit-show-from-b2-cli-dispatch-timeout-v1 timeout-v1-b2-cli-dispatch upstream-blocked-c3-edit-show)
+(normally r-propagate-c3-edit-show-from-b2-cli-dispatch-blocked upstream-blocked-b2-cli-dispatch upstream-blocked-c3-edit-show)
+(normally r-propagate-d1-tui-poi-from-b2-cli-dispatch-failed failed-b2-cli-dispatch upstream-blocked-d1-tui-poi)
+(normally r-propagate-d1-tui-poi-from-b2-cli-dispatch-permanently-failed permanently-failed-b2-cli-dispatch upstream-blocked-d1-tui-poi)
+(normally r-propagate-d1-tui-poi-from-b2-cli-dispatch-stale-v1 stale-v1-b2-cli-dispatch upstream-blocked-d1-tui-poi)
+(normally r-propagate-d1-tui-poi-from-b2-cli-dispatch-timeout-v1 timeout-v1-b2-cli-dispatch upstream-blocked-d1-tui-poi)
+(normally r-propagate-d1-tui-poi-from-b2-cli-dispatch-blocked upstream-blocked-b2-cli-dispatch upstream-blocked-d1-tui-poi)
 
 ;; Transitive propagation: upstream-blocked cascades through dependency chain
-(normally r-propagate-a4-tests-core-from-a2-poi-module-blocked upstream-blocked-a2-poi-module upstream-blocked-a4-tests-core)
-(normally r-propagate-b2-cli-dispatch-from-a2-poi-module-blocked upstream-blocked-a2-poi-module upstream-blocked-b2-cli-dispatch)
-(normally r-propagate-c1-interleave-from-a2-poi-module-blocked upstream-blocked-a2-poi-module upstream-blocked-c1-interleave)
-(normally r-propagate-d1-tui-poi-from-a2-poi-module-blocked upstream-blocked-a2-poi-module upstream-blocked-d1-tui-poi)
-(normally r-propagate-a4-tests-core-from-a3-resolve-blocked upstream-blocked-a3-resolve upstream-blocked-a4-tests-core)
-(normally r-propagate-b2-cli-dispatch-from-a3-resolve-blocked upstream-blocked-a3-resolve upstream-blocked-b2-cli-dispatch)
-(normally r-propagate-c1-interleave-from-a3-resolve-blocked upstream-blocked-a3-resolve upstream-blocked-c1-interleave)
-(normally r-propagate-b2-cli-dispatch-from-b1-cli-args-blocked upstream-blocked-b1-cli-args upstream-blocked-b2-cli-dispatch)
-(normally r-propagate-b3-tests-cli-from-b2-cli-dispatch-blocked upstream-blocked-b2-cli-dispatch upstream-blocked-b3-tests-cli)
-(normally r-propagate-c2-transcript-flag-from-b2-cli-dispatch-blocked upstream-blocked-b2-cli-dispatch upstream-blocked-c2-transcript-flag)
-(normally r-propagate-c3-edit-show-from-b2-cli-dispatch-blocked upstream-blocked-b2-cli-dispatch upstream-blocked-c3-edit-show)
-(normally r-propagate-d1-tui-poi-from-b2-cli-dispatch-blocked upstream-blocked-b2-cli-dispatch upstream-blocked-d1-tui-poi)
-(normally r-propagate-c2-transcript-flag-from-c1-interleave-blocked upstream-blocked-c1-interleave upstream-blocked-c2-transcript-flag)
-(normally r-propagate-c3-edit-show-from-c1-interleave-blocked upstream-blocked-c1-interleave upstream-blocked-c3-edit-show)
-(normally r-propagate-d2-playback-poi-from-d1-tui-poi-blocked upstream-blocked-d1-tui-poi upstream-blocked-d2-playback-poi)
-(normally r-propagate-d3-tests-tui-from-d1-tui-poi-blocked upstream-blocked-d1-tui-poi upstream-blocked-d3-tests-tui)
 (normally r-propagate-c4-tests-display-from-c2-transcript-flag-blocked upstream-blocked-c2-transcript-flag upstream-blocked-c4-tests-display)
 (normally r-propagate-c4-tests-display-from-c3-edit-show-blocked upstream-blocked-c3-edit-show upstream-blocked-c4-tests-display)
+(normally r-propagate-d2-playback-poi-from-d1-tui-poi-blocked upstream-blocked-d1-tui-poi upstream-blocked-d2-playback-poi)
+(normally r-propagate-d3-tests-tui-from-d1-tui-poi-blocked upstream-blocked-d1-tui-poi upstream-blocked-d3-tests-tui)
 (normally r-propagate-d3-tests-tui-from-d2-playback-poi-blocked upstream-blocked-d2-playback-poi upstream-blocked-d3-tests-tui)
 
 (claims evaluator:ed25519:iIOEFYgN
-  :at "2026-03-13T10:48:38Z"
-  (given failed-a1-model)
-  (given eval-result-v1-a1-model-by-claude)
-  (given eval-confidence-v1-a1-model-0.00)
+  :at "2026-03-13T13:03:38Z"
+  (given failed-b2-cli-dispatch)
+  (given eval-result-v1-b2-cli-dispatch-by-claude)
+  (given eval-confidence-v1-b2-cli-dispatch-0.00)
+)
+
+(claims supervisor:ed25519:zhT3QZyz
+  :at "2026-03-13T13:03:43Z"
+  (given delegated-v1-a4-tests-core-to-agent:claude)
+  (given (during (leased-v1-a4-tests-core) (moment "2026-03-13T13:03:43Z") (moment "2026-03-13T13:33:43Z")))
+  (given claim-v1-a4-tests-core-by-claude)
+  (normally r-cl-state-v1-a4-tests-core-by-claude claim-v1-a4-tests-core-by-claude state-claimed-v1-a4-tests-core-by-claude)
+  (normally r-cl-chain-v1-a4-tests-core-by-claude state-claimed-v1-a4-tests-core-by-claude claimed-a4-tests-core)
+)
+
+(claims evaluator:ed25519:iIOEFYgN
+  :at "2026-03-13T13:03:46Z"
+  (given failed-a4-tests-core)
+  (given eval-result-v1-a4-tests-core-by-claude)
+  (given eval-confidence-v1-a4-tests-core-0.00)
+)
+
+(claims supervisor:ed25519:zhT3QZyz
+  :at "2026-03-13T13:03:51Z"
+  (given delegated-v1-c1-interleave-to-agent:claude)
+  (given (during (leased-v1-c1-interleave) (moment "2026-03-13T13:03:51Z") (moment "2026-03-13T13:33:51Z")))
+  (given claim-v1-c1-interleave-by-claude)
+  (normally r-cl-state-v1-c1-interleave-by-claude claim-v1-c1-interleave-by-claude state-claimed-v1-c1-interleave-by-claude)
+  (normally r-cl-chain-v1-c1-interleave-by-claude state-claimed-v1-c1-interleave-by-claude claimed-c1-interleave)
+)
+
+;; Propagation rules: failures in 'c1-interleave' block downstream tasks
+(normally r-propagate-c2-transcript-flag-from-c1-interleave-failed failed-c1-interleave upstream-blocked-c2-transcript-flag)
+(normally r-propagate-c2-transcript-flag-from-c1-interleave-permanently-failed permanently-failed-c1-interleave upstream-blocked-c2-transcript-flag)
+(normally r-propagate-c2-transcript-flag-from-c1-interleave-stale-v1 stale-v1-c1-interleave upstream-blocked-c2-transcript-flag)
+(normally r-propagate-c2-transcript-flag-from-c1-interleave-timeout-v1 timeout-v1-c1-interleave upstream-blocked-c2-transcript-flag)
+(normally r-propagate-c2-transcript-flag-from-c1-interleave-blocked upstream-blocked-c1-interleave upstream-blocked-c2-transcript-flag)
+(normally r-propagate-c3-edit-show-from-c1-interleave-failed failed-c1-interleave upstream-blocked-c3-edit-show)
+(normally r-propagate-c3-edit-show-from-c1-interleave-permanently-failed permanently-failed-c1-interleave upstream-blocked-c3-edit-show)
+(normally r-propagate-c3-edit-show-from-c1-interleave-stale-v1 stale-v1-c1-interleave upstream-blocked-c3-edit-show)
+(normally r-propagate-c3-edit-show-from-c1-interleave-timeout-v1 timeout-v1-c1-interleave upstream-blocked-c3-edit-show)
+(normally r-propagate-c3-edit-show-from-c1-interleave-blocked upstream-blocked-c1-interleave upstream-blocked-c3-edit-show)
+
+(claims evaluator:ed25519:iIOEFYgN
+  :at "2026-03-13T13:03:53Z"
+  (given failed-c1-interleave)
+  (given eval-result-v1-c1-interleave-by-claude)
+  (given eval-confidence-v1-c1-interleave-0.00)
 )

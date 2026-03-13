@@ -122,6 +122,12 @@ pub enum Commands {
         label: Option<String>,
     },
 
+    /// Points of interest operations
+    Poi {
+        #[command(subcommand)]
+        command: PoiCommand,
+    },
+
     /// Output JSON Schema for data formats
     Schema {
         #[command(subcommand)]
@@ -524,6 +530,72 @@ pub struct MarkArgs {
 
     #[command(flatten)]
     pub range: RangeArgs,
+}
+
+// ---------------------------------------------------------------------------
+// POI (Points of Interest)
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+pub enum PoiCommand {
+    /// Add a point of interest to a source
+    Add(PoiAddArgs),
+
+    /// List points of interest
+    List(PoiListArgs),
+
+    /// Remove points of interest
+    Remove(PoiRemoveArgs),
+}
+
+#[derive(Args)]
+pub struct PoiAddArgs {
+    /// Source ID
+    pub source_id: String,
+
+    /// Word index
+    #[arg(long, conflicts_with_all = ["at_scene", "at_ms"])]
+    pub at_word: Option<u32>,
+
+    /// Scene index
+    #[arg(long, conflicts_with_all = ["at_word", "at_ms"])]
+    pub at_scene: Option<u32>,
+
+    /// Timestamp in milliseconds
+    #[arg(long, conflicts_with_all = ["at_word", "at_scene"])]
+    pub at_ms: Option<u64>,
+
+    /// POI category (highlight, issue, transition, cue, note)
+    #[arg(long)]
+    pub category: String,
+
+    /// Optional note
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PoiListArgs {
+    /// Source ID (omit to list across all sources)
+    pub source_id: Option<String>,
+
+    /// Filter by category
+    #[arg(long)]
+    pub category: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PoiRemoveArgs {
+    /// Source ID
+    pub source_id: String,
+
+    /// POI ID to remove
+    #[arg(long, conflicts_with = "category")]
+    pub id: Option<String>,
+
+    /// Remove all POIs with this category
+    #[arg(long, conflicts_with = "id")]
+    pub category: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1228,6 +1300,207 @@ mod tests {
             }
             _ => panic!("expected Edit AddSegment"),
         }
+    }
+
+    #[test]
+    fn cli_parses_poi_add_word() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "poi",
+            "add",
+            "src-001",
+            "--at-word",
+            "45",
+            "--category",
+            "highlight",
+            "--note",
+            "Key moment",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Poi {
+                command: PoiCommand::Add(ref args),
+            } => {
+                assert_eq!(args.source_id, "src-001");
+                assert_eq!(args.at_word, Some(45));
+                assert!(args.at_scene.is_none());
+                assert!(args.at_ms.is_none());
+                assert_eq!(args.category, "highlight");
+                assert_eq!(args.note.as_deref(), Some("Key moment"));
+            }
+            _ => panic!("expected Poi Add"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_poi_add_scene() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "poi",
+            "add",
+            "src-001",
+            "--at-scene",
+            "3",
+            "--category",
+            "transition",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Poi {
+                command: PoiCommand::Add(ref args),
+            } => {
+                assert_eq!(args.source_id, "src-001");
+                assert!(args.at_word.is_none());
+                assert_eq!(args.at_scene, Some(3));
+                assert!(args.at_ms.is_none());
+                assert_eq!(args.category, "transition");
+                assert!(args.note.is_none());
+            }
+            _ => panic!("expected Poi Add"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_poi_add_ms() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "poi",
+            "add",
+            "src-001",
+            "--at-ms",
+            "62500",
+            "--category",
+            "issue",
+            "--note",
+            "Mic bump",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Poi {
+                command: PoiCommand::Add(ref args),
+            } => {
+                assert_eq!(args.source_id, "src-001");
+                assert!(args.at_word.is_none());
+                assert!(args.at_scene.is_none());
+                assert_eq!(args.at_ms, Some(62500));
+                assert_eq!(args.category, "issue");
+                assert_eq!(args.note.as_deref(), Some("Mic bump"));
+            }
+            _ => panic!("expected Poi Add"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_poi_list_all() {
+        let cli = Cli::try_parse_from(["ar-edit", "poi", "list"]).unwrap();
+        match cli.command {
+            Commands::Poi {
+                command: PoiCommand::List(ref args),
+            } => {
+                assert!(args.source_id.is_none());
+                assert!(args.category.is_none());
+            }
+            _ => panic!("expected Poi List"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_poi_list_source() {
+        let cli = Cli::try_parse_from(["ar-edit", "poi", "list", "src-001"]).unwrap();
+        match cli.command {
+            Commands::Poi {
+                command: PoiCommand::List(ref args),
+            } => {
+                assert_eq!(args.source_id.as_deref(), Some("src-001"));
+                assert!(args.category.is_none());
+            }
+            _ => panic!("expected Poi List"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_poi_list_with_category() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "poi",
+            "list",
+            "src-001",
+            "--category",
+            "highlight",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Poi {
+                command: PoiCommand::List(ref args),
+            } => {
+                assert_eq!(args.source_id.as_deref(), Some("src-001"));
+                assert_eq!(args.category.as_deref(), Some("highlight"));
+            }
+            _ => panic!("expected Poi List"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_poi_remove_by_id() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "poi",
+            "remove",
+            "src-001",
+            "--id",
+            "poi-001",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Poi {
+                command: PoiCommand::Remove(ref args),
+            } => {
+                assert_eq!(args.source_id, "src-001");
+                assert_eq!(args.id.as_deref(), Some("poi-001"));
+                assert!(args.category.is_none());
+            }
+            _ => panic!("expected Poi Remove"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_poi_remove_by_category() {
+        let cli = Cli::try_parse_from([
+            "ar-edit",
+            "poi",
+            "remove",
+            "src-001",
+            "--category",
+            "issue",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Poi {
+                command: PoiCommand::Remove(ref args),
+            } => {
+                assert_eq!(args.source_id, "src-001");
+                assert!(args.id.is_none());
+                assert_eq!(args.category.as_deref(), Some("issue"));
+            }
+            _ => panic!("expected Poi Remove"),
+        }
+    }
+
+    #[test]
+    fn cli_rejects_poi_add_mixed_point_types() {
+        let result = Cli::try_parse_from([
+            "ar-edit",
+            "poi",
+            "add",
+            "src-001",
+            "--at-word",
+            "5",
+            "--at-ms",
+            "1000",
+            "--category",
+            "note",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]

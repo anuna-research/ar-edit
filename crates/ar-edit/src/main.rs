@@ -6,12 +6,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process;
 
-use ar_edit_core::models::{EditDocument, EditOpKind, ShotRange, Source};
+use ar_edit_core::models::{EditDocument, EditOpKind, PoiCategory, PoiPoint, ShotRange, Source};
 use ar_edit_core::playback;
 use clap::Parser;
 use cli::{
-    exit_code, Cli, Commands, EditCommand, IndexCommand, PlayArgs, RangeArgs, SchemaCommand,
-    SearchType, TranscriptsCommand,
+    exit_code, Cli, Commands, EditCommand, IndexCommand, PlayArgs, PoiCommand, RangeArgs,
+    SchemaCommand, SearchType, TranscriptsCommand,
 };
 
 use std::thread;
@@ -321,6 +321,11 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         Commands::Markers { source_id, label } => {
             cmd_markers(cli, source_id.as_deref(), label.as_deref())
         }
+        Commands::Poi { command } => match command {
+            PoiCommand::Add(args) => cmd_poi_add(cli, args),
+            PoiCommand::List(args) => cmd_poi_list(cli, args),
+            PoiCommand::Remove(args) => cmd_poi_remove(cli, args),
+        },
         Commands::Schema { command } => match command {
             SchemaCommand::Edit => {
                 println!("{}", ar_edit_core::schema::edit_document_schema());
@@ -794,6 +799,19 @@ fn cmd_transcripts_read(cli: &Cli, source_id: &str, with_markers: bool) -> anyho
                             .map(|n| format!(" \"{n}\""))
                             .unwrap_or_default();
                         println!("  [{} {}] [{}]{}", m.id, m.label, time_range, note_part);
+                        println!();
+                    }
+                    ar_edit_core::display::TranscriptItem::Poi(p) => {
+                        let time = ar_edit_core::display::format_time(p.resolved_ms);
+                        let note_part = p
+                            .note
+                            .as_deref()
+                            .map(|n| format!(" \"{n}\""))
+                            .unwrap_or_default();
+                        println!(
+                            "  [{} {} {}] [{}]{}",
+                            p.id, p.category, fmt_poi_point(&p.point), time, note_part
+                        );
                         println!();
                     }
                 }
@@ -1666,6 +1684,220 @@ fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyho
             );
         }
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: POI (Points of Interest)
+// ---------------------------------------------------------------------------
+
+fn fmt_poi_point(point: &PoiPoint) -> String {
+    match point {
+        PoiPoint::Word(w) => format!("word {w}"),
+        PoiPoint::Scene(s) => format!("scene {s}"),
+        PoiPoint::TimeMs(ms) => format!("{ms}ms"),
+    }
+}
+
+fn cmd_poi_add(cli: &Cli, args: &cli::PoiAddArgs) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+
+    // 1. Parse point from flags
+    let point = if let Some(w) = args.at_word {
+        PoiPoint::Word(w)
+    } else if let Some(s) = args.at_scene {
+        PoiPoint::Scene(s)
+    } else if let Some(ms) = args.at_ms {
+        PoiPoint::TimeMs(ms)
+    } else {
+        eprintln!("error: one of --at-word, --at-scene, or --at-ms is required");
+        process::exit(exit_code::USER_ERROR);
+    };
+
+    // 2. Parse category
+    let category: PoiCategory = match args.category.parse() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e}");
+            eprintln!("  valid categories: highlight, issue, transition, cue, note");
+            process::exit(exit_code::VALIDATION_ERROR);
+        }
+    };
+
+    // 3. Validate source exists in manifest
+    let manifest = ar_edit_core::project::read_manifest(&project_dir)?;
+    if !manifest.sources.iter().any(|s| s.id == args.source_id) {
+        eprintln!("error: source '{}' not found in manifest", args.source_id);
+        process::exit(exit_code::USER_ERROR);
+    }
+
+    // 4. Call core
+    let poi = ar_edit_core::poi::add_poi(
+        &project_dir,
+        &args.source_id,
+        point,
+        category,
+        args.note.as_deref(),
+    )
+    .user_err()?;
+
+    // 5. Output
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&poi)?);
+    } else {
+        let note_part = poi
+            .note
+            .as_deref()
+            .map(|n| format!("  note: \"{n}\""))
+            .unwrap_or_default();
+        println!(
+            "Created {} on {} at {} category={}{}",
+            poi.id,
+            args.source_id,
+            fmt_poi_point(&poi.point),
+            poi.category,
+            note_part,
+        );
+    }
+    Ok(())
+}
+
+fn cmd_poi_list(cli: &Cli, args: &cli::PoiListArgs) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+
+    // 1. Collect sources
+    let source_docs = if let Some(ref sid) = args.source_id {
+        let doc = ar_edit_core::poi::list_pois(&project_dir, sid).user_err()?;
+        vec![doc]
+    } else {
+        ar_edit_core::poi::list_all_pois(&project_dir).user_err()?
+    };
+
+    // 2. Parse optional category filter
+    let cat_filter: Option<PoiCategory> = if let Some(ref cat_str) = args.category {
+        Some(match cat_str.parse() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: {e}");
+                eprintln!("  valid categories: highlight, issue, transition, cue, note");
+                process::exit(exit_code::VALIDATION_ERROR);
+            }
+        })
+    } else {
+        None
+    };
+
+    // 3. Flatten and filter
+    let mut rows: Vec<(&str, &ar_edit_core::models::Poi)> = Vec::new();
+    for doc in &source_docs {
+        for poi in &doc.pois {
+            if let Some(ref cat) = cat_filter {
+                if poi.category != *cat {
+                    continue;
+                }
+            }
+            rows.push((&doc.source_id, poi));
+        }
+    }
+
+    // 4. Output
+    if cli.json {
+        // Build filtered SourcePois for JSON output
+        let mut filtered_docs: Vec<ar_edit_core::models::SourcePois> = Vec::new();
+        for doc in &source_docs {
+            let pois: Vec<_> = doc
+                .pois
+                .iter()
+                .filter(|p| cat_filter.as_ref().map_or(true, |c| p.category == *c))
+                .cloned()
+                .collect();
+            if !pois.is_empty() {
+                filtered_docs.push(ar_edit_core::models::SourcePois {
+                    source_id: doc.source_id.clone(),
+                    pois,
+                });
+            }
+        }
+        let output = serde_json::json!({ "pois": filtered_docs });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if rows.is_empty() {
+        if let Some(ref sid) = args.source_id {
+            println!("No POIs for {sid}.");
+        } else {
+            println!("No POIs.");
+        }
+    } else {
+        println!(
+            "  {:<10} {:<12} {:<14} {:<12} {}",
+            "ID", "Source", "Point", "Category", "Note"
+        );
+        for (source_id, poi) in &rows {
+            let note = poi.note.as_deref().unwrap_or("");
+            println!(
+                "  {:<10} {:<12} {:<14} {:<12} {}",
+                poi.id,
+                source_id,
+                fmt_poi_point(&poi.point),
+                poi.category,
+                note,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn cmd_poi_remove(cli: &Cli, args: &cli::PoiRemoveArgs) -> anyhow::Result<()> {
+    let project_dir = PathBuf::from(".");
+
+    if args.id.is_none() && args.category.is_none() {
+        eprintln!("error: one of --id or --category is required");
+        process::exit(exit_code::USER_ERROR);
+    }
+
+    if let Some(ref poi_id) = args.id {
+        // Remove single POI by ID
+        let removed_id =
+            ar_edit_core::poi::remove_poi(&project_dir, &args.source_id, poi_id).user_err()?;
+
+        if cli.json {
+            let output = serde_json::json!({ "removed": removed_id });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!("Removed {} from {}", removed_id, args.source_id);
+        }
+    } else if let Some(ref cat_str) = args.category {
+        // Remove by category
+        let category: PoiCategory = match cat_str.parse() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: {e}");
+                eprintln!("  valid categories: highlight, issue, transition, cue, note");
+                process::exit(exit_code::VALIDATION_ERROR);
+            }
+        };
+
+        let removed_ids =
+            ar_edit_core::poi::remove_pois_by_category(&project_dir, &args.source_id, category)
+                .user_err()?;
+
+        if cli.json {
+            let output = serde_json::json!({ "removed": removed_ids });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else if removed_ids.is_empty() {
+            println!(
+                "No POIs with category '{}' found for {}",
+                cat_str, args.source_id
+            );
+        } else {
+            println!(
+                "Removed {} POI(s) from {}: {}",
+                removed_ids.len(),
+                args.source_id,
+                removed_ids.join(", ")
+            );
+        }
+    }
+
     Ok(())
 }
 

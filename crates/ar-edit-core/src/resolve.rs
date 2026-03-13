@@ -2,7 +2,7 @@ use std::path::Path;
 
 use thiserror::Error;
 
-use crate::models::{Scene, ShotRange, SourceIndex, Transcript, Word};
+use crate::models::{PoiPoint, Scene, ShotRange, SourceIndex, Transcript, Word};
 
 #[derive(Debug, Error)]
 pub enum ResolveError {
@@ -14,6 +14,12 @@ pub enum ResolveError {
     TranscriptRequired,
     #[error("source index required to resolve scenes range")]
     IndexRequired,
+    #[error("word index {index} out of bounds (word_count={word_count})")]
+    WordIndexOutOfBounds { index: u32, word_count: u32 },
+    #[error("scene index {index} out of bounds (scene_count={scene_count})")]
+    SceneIndexOutOfBounds { index: u32, scene_count: u32 },
+    #[error("timestamp {timestamp_ms}ms exceeds duration {duration_ms}ms")]
+    TimestampOutOfBounds { timestamp_ms: u64, duration_ms: u64 },
     #[error("failed to read {path}: {source}")]
     Io {
         path: std::path::PathBuf,
@@ -85,6 +91,82 @@ pub fn resolve_range_from_dir(
             resolve_range(range, None, Some(&index))
         }
     }
+}
+
+/// Resolve a [`PoiPoint`] to an absolute timestamp in milliseconds.
+///
+/// - **Word(idx)**: looks up the word by index in `transcript` and returns its `start_ms`.
+/// - **Scene(idx)**: looks up the scene by index in `index` and returns its `start_ms`.
+/// - **TimeMs(ms)**: returns `ms` directly, provided it does not exceed `duration_ms`.
+pub fn resolve_poi_point(
+    point: &PoiPoint,
+    transcript: Option<&Transcript>,
+    index: Option<&SourceIndex>,
+    duration_ms: u64,
+) -> Result<u64, ResolveError> {
+    match point {
+        PoiPoint::Word(idx) => {
+            let transcript = transcript.ok_or(ResolveError::TranscriptRequired)?;
+            if *idx >= transcript.word_count {
+                return Err(ResolveError::WordIndexOutOfBounds {
+                    index: *idx,
+                    word_count: transcript.word_count,
+                });
+            }
+            let word = find_word(transcript, *idx)?;
+            Ok(word.start_ms)
+        }
+        PoiPoint::Scene(idx) => {
+            let index = index.ok_or(ResolveError::IndexRequired)?;
+            if *idx >= index.scene_count {
+                return Err(ResolveError::SceneIndexOutOfBounds {
+                    index: *idx,
+                    scene_count: index.scene_count,
+                });
+            }
+            let scene = find_scene(index, *idx)?;
+            Ok(scene.start_ms)
+        }
+        PoiPoint::TimeMs(ms) => {
+            if *ms > duration_ms {
+                return Err(ResolveError::TimestampOutOfBounds {
+                    timestamp_ms: *ms,
+                    duration_ms,
+                });
+            }
+            Ok(*ms)
+        }
+    }
+}
+
+/// Find the word whose interval contains `timestamp_ms`, or the nearest word
+/// by `start_ms` if the timestamp falls between words.
+///
+/// Returns the word's `index` field, or `None` if the transcript has no words.
+pub fn find_nearest_word(timestamp_ms: u64, transcript: &Transcript) -> Option<u32> {
+    let mut best_index: Option<u32> = None;
+    let mut best_distance: u64 = u64::MAX;
+
+    for segment in &transcript.segments {
+        for word in &segment.words {
+            // Exact containment
+            if timestamp_ms >= word.start_ms && timestamp_ms <= word.end_ms {
+                return Some(word.index);
+            }
+            // Distance from start_ms
+            let dist = if timestamp_ms > word.start_ms {
+                timestamp_ms - word.start_ms
+            } else {
+                word.start_ms - timestamp_ms
+            };
+            if dist < best_distance {
+                best_distance = dist;
+                best_index = Some(word.index);
+            }
+        }
+    }
+
+    best_index
 }
 
 fn find_word(transcript: &Transcript, word_index: u32) -> Result<&Word, ResolveError> {
@@ -372,5 +454,92 @@ mod tests {
         let range = ShotRange::Words { from: 0, to: 5 };
         let err = resolve_range_from_dir(&range, "src-001", dir.path()).unwrap_err();
         assert!(matches!(err, ResolveError::Io { .. }));
+    }
+
+    // -- POI point resolution -------------------------------------------------
+
+    #[test]
+    fn resolve_poi_word_point() {
+        let t = make_transcript();
+        let point = PoiPoint::Word(4);
+        let ms = resolve_poi_point(&point, Some(&t), None, 124500).unwrap();
+        assert_eq!(ms, 5230); // word 4 start_ms
+    }
+
+    #[test]
+    fn resolve_poi_scene_point() {
+        let idx = make_source_index();
+        let point = PoiPoint::Scene(2);
+        let ms = resolve_poi_point(&point, None, Some(&idx), 124500).unwrap();
+        assert_eq!(ms, 45000); // scene 2 start_ms
+    }
+
+    #[test]
+    fn resolve_poi_time_point() {
+        let point = PoiPoint::TimeMs(33000);
+        let ms = resolve_poi_point(&point, None, None, 124500).unwrap();
+        assert_eq!(ms, 33000);
+    }
+
+    #[test]
+    fn resolve_poi_word_no_transcript() {
+        let point = PoiPoint::Word(0);
+        let err = resolve_poi_point(&point, None, None, 124500).unwrap_err();
+        assert!(matches!(err, ResolveError::TranscriptRequired));
+    }
+
+    #[test]
+    fn resolve_poi_scene_no_index() {
+        let point = PoiPoint::Scene(0);
+        let err = resolve_poi_point(&point, None, None, 124500).unwrap_err();
+        assert!(matches!(err, ResolveError::IndexRequired));
+    }
+
+    #[test]
+    fn resolve_poi_word_out_of_bounds() {
+        let t = make_transcript();
+        let point = PoiPoint::Word(99);
+        let err = resolve_poi_point(&point, Some(&t), None, 124500).unwrap_err();
+        assert!(matches!(
+            err,
+            ResolveError::WordIndexOutOfBounds {
+                index: 99,
+                word_count: 8
+            }
+        ));
+    }
+
+    #[test]
+    fn resolve_poi_time_exceeds_duration() {
+        let point = PoiPoint::TimeMs(200000);
+        let err = resolve_poi_point(&point, None, None, 124500).unwrap_err();
+        assert!(matches!(
+            err,
+            ResolveError::TimestampOutOfBounds {
+                timestamp_ms: 200000,
+                duration_ms: 124500
+            }
+        ));
+    }
+
+    // -- find_nearest_word ----------------------------------------------------
+
+    #[test]
+    fn find_nearest_word_exact_match() {
+        let t = make_transcript();
+        // 500ms falls within word 1 (420..540)
+        let idx = find_nearest_word(500, &t);
+        assert_eq!(idx, Some(1));
+    }
+
+    #[test]
+    fn find_nearest_word_between_words() {
+        let t = make_transcript();
+        // 3000ms is between word 3 (end 1200) and word 4 (start 5230).
+        // Distance to word 3 start: |3000-650| = 2350
+        // Distance to word 4 start: |3000-5230| = 2230
+        // Closest by start_ms is word 4.
+        let idx = find_nearest_word(3000, &t);
+        assert_eq!(idx, Some(4));
     }
 }

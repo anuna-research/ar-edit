@@ -7,7 +7,8 @@ use thiserror::Error;
 use chrono::{DateTime, Utc};
 
 use crate::models::{
-    EditDocument, Marker, Shot, ShotNote, ShotRange, SourceIndex, Transcript, TranscriptSegment,
+    EditDocument, Marker, PoiCategory, PoiPoint, Shot, ShotNote, ShotRange, SourceIndex,
+    Transcript, TranscriptSegment,
 };
 use crate::resolve;
 
@@ -317,6 +318,7 @@ fn truncate_preview(s: &str, max: usize) -> String {
 pub enum TranscriptItem {
     Segment(TranscriptSegment),
     Marker(ResolvedMarker),
+    Poi(ResolvedPoi),
 }
 
 impl TranscriptItem {
@@ -324,6 +326,7 @@ impl TranscriptItem {
         match self {
             TranscriptItem::Segment(s) => s.start_ms,
             TranscriptItem::Marker(m) => m.start_ms,
+            TranscriptItem::Poi(p) => p.resolved_ms,
         }
     }
 }
@@ -360,11 +363,12 @@ pub fn interleave_transcript_with_markers(
         items.push(TranscriptItem::Marker(marker.clone()));
     }
 
-    // Stable sort: segments before markers when start_ms ties.
+    // Stable sort: segments before markers/pois when start_ms ties.
     items.sort_by_key(|item| {
         let tie_break = match item {
             TranscriptItem::Segment(_) => 0u8,
             TranscriptItem::Marker(_) => 1u8,
+            TranscriptItem::Poi(_) => 2u8,
         };
         (item.start_ms(), tie_break)
     });
@@ -374,6 +378,152 @@ pub fn interleave_transcript_with_markers(
         duration_ms: transcript.duration_ms,
         word_count: transcript.word_count,
         marker_count: markers.len(),
+        items,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Resolved POI (REQ-056)
+// ---------------------------------------------------------------------------
+
+/// A POI resolved against its source transcript, ready for display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedPoi {
+    pub id: String,
+    pub source_id: String,
+    pub point: PoiPoint,
+    pub category: PoiCategory,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub created: DateTime<Utc>,
+    pub resolved_ms: u64,
+}
+
+impl ResolvedPoi {
+    /// Category formatted as a bracketed tag, e.g. `[highlight]`.
+    pub fn category_tag(&self) -> String {
+        format!("[{}]", self.category)
+    }
+}
+
+/// Return only the POIs whose `resolved_ms` falls within `[start_ms, end_ms]`.
+pub fn pois_in_range<'a>(pois: &'a [ResolvedPoi], start_ms: u64, end_ms: u64) -> Vec<&'a ResolvedPoi> {
+    pois.iter()
+        .filter(|p| p.resolved_ms >= start_ms && p.resolved_ms <= end_ms)
+        .collect()
+}
+
+/// An interleaved transcript with POI annotations inserted at word positions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterleavedTranscriptWithPois {
+    pub source_id: String,
+    pub duration_ms: u64,
+    pub word_count: u32,
+    pub poi_count: usize,
+    pub items: Vec<TranscriptItem>,
+}
+
+/// Build an interleaved transcript with POI annotations.
+///
+/// POIs are inserted into the word stream at specific positions:
+/// - `PoiPoint::Word(idx)`: inserted immediately after word `idx`
+/// - `PoiPoint::TimeMs(ms)`: inserted after the word whose time range contains `ms`
+/// - `PoiPoint::Scene(_)`: placed at the start (resolved_ms used for ordering)
+///
+/// When no POIs are provided the transcript is returned unchanged (segments only).
+pub fn interleave_pois_into_transcript(
+    transcript: &Transcript,
+    pois: &[ResolvedPoi],
+) -> InterleavedTranscriptWithPois {
+    if pois.is_empty() {
+        let items = transcript
+            .segments
+            .iter()
+            .cloned()
+            .map(TranscriptItem::Segment)
+            .collect();
+        return InterleavedTranscriptWithPois {
+            source_id: transcript.source_id.clone(),
+            duration_ms: transcript.duration_ms,
+            word_count: transcript.word_count,
+            poi_count: 0,
+            items,
+        };
+    }
+
+    // Resolve each POI to a word index for insertion ordering.
+    // Collect all words from all segments for time-based lookup.
+    let all_words: Vec<&crate::models::Word> = transcript
+        .segments
+        .iter()
+        .flat_map(|seg| seg.words.iter())
+        .collect();
+
+    // Map each POI to the word index *after which* it should be inserted.
+    let mut poi_by_word: std::collections::BTreeMap<u32, Vec<&ResolvedPoi>> =
+        std::collections::BTreeMap::new();
+
+    for poi in pois {
+        let word_idx = match &poi.point {
+            PoiPoint::Word(idx) => *idx,
+            PoiPoint::TimeMs(ms) => {
+                // Find the word whose time range contains this timestamp.
+                all_words
+                    .iter()
+                    .find(|w| *ms >= w.start_ms && *ms <= w.end_ms)
+                    .map(|w| w.index)
+                    .unwrap_or_else(|| {
+                        // Fallback: find the closest word by start_ms.
+                        all_words
+                            .iter()
+                            .min_by_key(|w| {
+                                (w.start_ms as i64 - *ms as i64).unsigned_abs()
+                            })
+                            .map(|w| w.index)
+                            .unwrap_or(0)
+                    })
+            }
+            PoiPoint::Scene(_) => {
+                // Scene POIs go at position 0 (beginning).
+                0
+            }
+        };
+        poi_by_word.entry(word_idx).or_default().push(poi);
+    }
+
+    // Build the interleaved output: walk through segments, and after each
+    // word that has associated POIs, insert them.
+    let mut items: Vec<TranscriptItem> = Vec::new();
+
+    for seg in &transcript.segments {
+        // Build a new segment, but we need to intersperse POIs among the words.
+        // We emit the segment first, then any POIs that attach to words in it.
+        items.push(TranscriptItem::Segment(seg.clone()));
+
+        for word in &seg.words {
+            if let Some(pois_at) = poi_by_word.get(&word.index) {
+                for poi in pois_at {
+                    items.push(TranscriptItem::Poi((*poi).clone()));
+                }
+            }
+        }
+    }
+
+    // Stable sort: segments first, then POIs, ordered by start_ms.
+    items.sort_by_key(|item| {
+        let tie_break = match item {
+            TranscriptItem::Segment(_) => 0u8,
+            TranscriptItem::Marker(_) => 1u8,
+            TranscriptItem::Poi(_) => 2u8,
+        };
+        (item.start_ms(), tie_break)
+    });
+
+    InterleavedTranscriptWithPois {
+        source_id: transcript.source_id.clone(),
+        duration_ms: transcript.duration_ms,
+        word_count: transcript.word_count,
+        poi_count: pois.len(),
         items,
     }
 }
@@ -974,5 +1124,127 @@ mod tests {
         assert_eq!(resolved[0].duration_ms, 5000);
         assert!(resolved[0].text_preview.is_none());
         assert!(resolved[0].scene_preview.is_none());
+    }
+
+    // -- interleave_pois_into_transcript --------------------------------------
+
+    fn make_resolved_poi(
+        id: &str,
+        point: PoiPoint,
+        category: PoiCategory,
+        resolved_ms: u64,
+    ) -> ResolvedPoi {
+        ResolvedPoi {
+            id: id.into(),
+            source_id: "src-001".into(),
+            point,
+            category,
+            note: None,
+            created: "2026-02-19T14:00:00Z".parse().unwrap(),
+            resolved_ms,
+        }
+    }
+
+    #[test]
+    fn interleave_poi_at_word_position() {
+        let t = make_transcript();
+        // POI at word 1 ("to", start_ms=420) — should appear between word 1 and word 2
+        let pois = vec![make_resolved_poi(
+            "poi-001",
+            PoiPoint::Word(1),
+            PoiCategory::Highlight,
+            420,
+        )];
+        let result = interleave_pois_into_transcript(&t, &pois);
+        assert_eq!(result.poi_count, 1);
+        // Items: seg 0 (0ms), poi (420ms), seg 1 (5230ms)
+        assert_eq!(result.items.len(), 3);
+        assert!(matches!(&result.items[0], TranscriptItem::Segment(s) if s.index == 0));
+        assert!(matches!(&result.items[1], TranscriptItem::Poi(p) if p.id == "poi-001"));
+        assert!(matches!(&result.items[2], TranscriptItem::Segment(s) if s.index == 1));
+        // Verify category tag
+        if let TranscriptItem::Poi(p) = &result.items[1] {
+            assert_eq!(p.category_tag(), "[highlight]");
+        }
+    }
+
+    #[test]
+    fn interleave_no_pois() {
+        let t = make_transcript();
+        let result = interleave_pois_into_transcript(&t, &[]);
+        assert_eq!(result.source_id, "src-001");
+        assert_eq!(result.word_count, 8);
+        assert_eq!(result.poi_count, 0);
+        assert_eq!(result.items.len(), 2); // 2 segments, unchanged
+        assert!(matches!(&result.items[0], TranscriptItem::Segment(s) if s.index == 0));
+        assert!(matches!(&result.items[1], TranscriptItem::Segment(s) if s.index == 1));
+    }
+
+    #[test]
+    fn interleave_multiple_pois() {
+        let t = make_transcript();
+        let pois = vec![
+            make_resolved_poi("poi-001", PoiPoint::Word(1), PoiCategory::Highlight, 420),
+            make_resolved_poi("poi-002", PoiPoint::Word(6), PoiCategory::Issue, 5750),
+        ];
+        let result = interleave_pois_into_transcript(&t, &pois);
+        assert_eq!(result.poi_count, 2);
+        assert_eq!(result.items.len(), 4);
+        // seg 0 (0ms), poi-001 (420ms), seg 1 (5230ms), poi-002 (5750ms)
+        assert!(matches!(&result.items[0], TranscriptItem::Segment(s) if s.index == 0));
+        assert!(matches!(&result.items[1], TranscriptItem::Poi(p) if p.id == "poi-001"));
+        assert!(matches!(&result.items[2], TranscriptItem::Segment(s) if s.index == 1));
+        assert!(matches!(&result.items[3], TranscriptItem::Poi(p) if p.id == "poi-002"));
+    }
+
+    #[test]
+    fn pois_in_range_filters_correctly() {
+        let pois = vec![
+            make_resolved_poi("poi-001", PoiPoint::Word(0), PoiCategory::Highlight, 100),
+            make_resolved_poi("poi-002", PoiPoint::Word(3), PoiCategory::Issue, 800),
+            make_resolved_poi("poi-003", PoiPoint::Word(5), PoiCategory::Cue, 5600),
+            make_resolved_poi("poi-004", PoiPoint::Word(7), PoiCategory::Note, 6500),
+        ];
+        let result = pois_in_range(&pois, 500, 6000);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].id, "poi-002");
+        assert_eq!(result[1].id, "poi-003");
+
+        // Boundary inclusion: exact match on start and end
+        let result2 = pois_in_range(&pois, 100, 800);
+        assert_eq!(result2.len(), 2);
+        assert_eq!(result2[0].id, "poi-001");
+        assert_eq!(result2[1].id, "poi-002");
+
+        // Empty range
+        let result3 = pois_in_range(&pois, 2000, 3000);
+        assert!(result3.is_empty());
+    }
+
+    #[test]
+    fn interleave_poi_serialization_roundtrip() {
+        let t = make_transcript();
+        let pois = vec![
+            make_resolved_poi("poi-001", PoiPoint::Word(1), PoiCategory::Highlight, 420),
+            make_resolved_poi("poi-002", PoiPoint::Word(6), PoiCategory::Issue, 5750),
+        ];
+        let result = interleave_pois_into_transcript(&t, &pois);
+        let json = serde_json::to_value(&result).unwrap();
+
+        // Verify tagged union serialization includes POI objects
+        assert_eq!(json["poi_count"], 2);
+        assert_eq!(json["items"][0]["type"], "segment");
+        assert_eq!(json["items"][1]["type"], "poi");
+        assert_eq!(json["items"][1]["id"], "poi-001");
+        assert_eq!(json["items"][1]["category"], "highlight");
+        assert_eq!(json["items"][2]["type"], "segment");
+        assert_eq!(json["items"][3]["type"], "poi");
+        assert_eq!(json["items"][3]["id"], "poi-002");
+        assert_eq!(json["items"][3]["category"], "issue");
+
+        // Full round-trip
+        let back: InterleavedTranscriptWithPois = serde_json::from_value(json).unwrap();
+        assert_eq!(back.items.len(), 4);
+        assert_eq!(back.poi_count, 2);
     }
 }
