@@ -116,6 +116,12 @@ pub fn launch_player(player: &Player, req: &PlayRequest) -> Result<Child, Playba
             }
         }
         PlayerKind::Vlc => {
+            // Enable RC interface with Unix socket for position queries
+            if let Some(ref ipc_path) = req.ipc_socket {
+                cmd.arg("-I").arg("rc");
+                cmd.arg(format!("--rc-unix={}", ipc_path.display()));
+                cmd.arg("--rc-fake-tty");
+            }
             cmd.arg(&req.file);
             cmd.arg(format!("--start-time={start_secs:.3}"));
             if let Some(end_ms) = req.end_ms {
@@ -249,6 +255,56 @@ pub fn mpv_get_position(socket_path: &Path) -> Option<u64> {
             }
         }
         None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VLC RC client
+// ---------------------------------------------------------------------------
+
+/// Query VLC for the current playback position via RC Unix socket.
+///
+/// Sends `get_time\n` and parses the integer millisecond response.
+/// Returns the position in milliseconds, or None if the socket isn't available.
+pub fn vlc_get_position(socket_path: &Path) -> Option<u64> {
+    use std::io::{BufRead, BufReader, Write};
+    #[cfg(unix)]
+    use std::os::unix::net::UnixStream;
+
+    #[cfg(not(unix))]
+    return None;
+
+    #[cfg(unix)]
+    {
+        let mut stream = UnixStream::connect(socket_path).ok()?;
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_millis(500)))
+            .ok()?;
+
+        writeln!(stream, "get_time").ok()?;
+
+        let reader = BufReader::new(&stream);
+        for line in reader.lines() {
+            let line = line.ok()?;
+            let trimmed = line.trim();
+            // VLC RC may echo the command or print a prompt; skip non-numeric lines
+            if let Ok(ms) = trimmed.parse::<u64>() {
+                return Some(ms);
+            }
+        }
+        None
+    }
+}
+
+/// Query the current playback position from any supported player via IPC.
+///
+/// Tries mpv JSON-IPC first, then VLC RC protocol. Returns the position in
+/// milliseconds, or None if the socket isn't available or neither protocol works.
+pub fn get_player_position(socket_path: &Path, kind: PlayerKind) -> Option<u64> {
+    match kind {
+        PlayerKind::Mpv => mpv_get_position(socket_path),
+        PlayerKind::Vlc => vlc_get_position(socket_path),
+        PlayerKind::Ffplay => None, // ffplay has no IPC
     }
 }
 

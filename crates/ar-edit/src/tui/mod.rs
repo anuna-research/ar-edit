@@ -310,16 +310,25 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
         if let Some(mut req) = app.pending_play.take() {
             match playback::detect_player() {
                 Ok(player) => {
-                    // For mpv, set up IPC socket for position capture
-                    let ipc_path = if player.kind == playback::PlayerKind::Mpv {
-                        let path = std::env::temp_dir().join(format!(
-                            "ar-edit-mpv-{}.sock",
-                            std::process::id()
-                        ));
-                        req.ipc_socket = Some(path.clone());
-                        Some(path)
-                    } else {
-                        None
+                    // Set up IPC socket for position capture (mpv and VLC)
+                    let ipc_path = match player.kind {
+                        playback::PlayerKind::Mpv => {
+                            let path = std::env::temp_dir().join(format!(
+                                "ar-edit-mpv-{}.sock",
+                                std::process::id()
+                            ));
+                            req.ipc_socket = Some(path.clone());
+                            Some(path)
+                        }
+                        playback::PlayerKind::Vlc => {
+                            let path = std::env::temp_dir().join(format!(
+                                "ar-edit-vlc-{}.sock",
+                                std::process::id()
+                            ));
+                            req.ipc_socket = Some(path.clone());
+                            Some(path)
+                        }
+                        playback::PlayerKind::Ffplay => None,
                     };
 
                     restore_terminal(terminal)?;
@@ -330,6 +339,7 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
                                 let pois = monitor_playback_with_poi(
                                     &mut child,
                                     ipc_path.as_deref(),
+                                    player.kind,
                                     src_id,
                                     &app.project_dir,
                                     req.start_ms,
@@ -387,6 +397,7 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
 fn monitor_playback_with_poi(
     child: &mut std::process::Child,
     ipc_socket: Option<&std::path::Path>,
+    player_kind: playback::PlayerKind,
     source_id: &str,
     project_dir: &std::path::Path,
     start_ms: u64,
@@ -454,7 +465,7 @@ fn monitor_playback_with_poi(
             KeyCode::Char('i') => {
                 // Get current playback position: try IPC first, fall back to wall-clock
                 let timestamp_ms = ipc_socket
-                    .and_then(playback::mpv_get_position)
+                    .and_then(|sock| playback::get_player_position(sock, player_kind))
                     .unwrap_or_else(|| {
                         start_ms + playback_start.elapsed().as_millis() as u64
                     });
