@@ -1,0 +1,216 @@
+;; =============================================================================
+;; IMPL-002: Points of Interest
+;; Implementation plan derived from SPEC-002, ADR-005, ADR-006
+;; =============================================================================
+
+(meta plan
+  (id "IMPL-002")
+  (title "Points of Interest (POI)")
+  (version "1.0.0")
+  (status "active")
+  (created "2026-03-13")
+  (author "agent:architect")
+  (spec "SPEC-002")
+  (description "Single-point annotations on source material. 4 phases (A-D), 14 tasks: data model, core CRUD, CLI commands, display/interleave, TUI integration."))
+
+;; =============================================================================
+;; Agent
+;; =============================================================================
+
+(given agent-claude-available)
+
+;; =============================================================================
+;; PHASE A: Data Model + Core CRUD
+;; Delivers: PoiPoint, PoiCategory, Poi, SourcePois types; poi.rs module with
+;;           add/list/remove operations; JSON file storage
+;; =============================================================================
+
+(given task-a1-model)
+(given task-a2-poi-module)
+(given task-a3-resolve)
+(given task-a4-tests-core)
+(given no-deps-a1-model)
+
+(meta task-a1-model
+  (phase "A")
+  (description "Add POI types to ar-edit-core/src/models/mod.rs: PoiPoint enum (Word{index}, Scene{index}, Time{ms}) as externally-tagged serde enum mirroring ShotRange per ADR-006; PoiCategory enum (Highlight, Issue, Transition, Cue, Note) with serde lowercase rename and Display/FromStr impls that reject unknown values per REQ-056; Poi struct (id, point: PoiPoint, category: PoiCategory, note: Option<String>, created: DateTime<Utc>) with Serialize/Deserialize/JsonSchema derives; SourcePois struct (source_id, pois: Vec<Poi>).")
+  (acceptance "All types compile; PoiPoint serializes as externally-tagged JSON ({\"word\":45}, {\"scene\":3}, {\"time_ms\":62500}); PoiCategory FromStr rejects unknown strings; round-trip serde tests pass (TEST-059)"))
+
+(meta task-a2-poi-module
+  (phase "A")
+  (description "Create ar-edit-core/src/poi.rs following marker.rs pattern. Implement: add_poi(project_dir, source_id, point, category, note) -> Result<Poi> that reads/creates annotations/<source_id>.pois.json, assigns sequential ID (poi-001, poi-002, ...), records Utc::now() created timestamp, appends and saves; list_pois(project_dir, source_id) -> Result<SourcePois>; list_all_pois(project_dir) -> Result<Vec<SourcePois>> scanning annotations/*.pois.json; remove_poi(project_dir, source_id, poi_id) -> Result<String> removing single POI (ID not reused); remove_pois_by_category(project_dir, source_id, category) -> Result<Vec<String>> removing all matching POIs. Error enum: SourceNotFound, PoiNotFound, InvalidCategory, IoError. Helpers: pois_path(), load_or_create(), save_pois(), next_poi_id(). Export mod poi in lib.rs. Implements REQ-054, REQ-057, REQ-063, REQ-066.")
+  (acceptance "add_poi creates file on first call, appends on subsequent; IDs are sequential per source; remove does not reuse IDs; list returns all POIs; file format matches REQ-066 JSON schema"))
+
+(meta task-a3-resolve
+  (phase "A")
+  (description "Add PoiPoint resolution to ar-edit-core/src/resolve.rs or poi.rs: resolve_poi_point(point, transcript, index) -> Result<u64> returning milliseconds. Word(idx) -> transcript.segments[].words[idx].start_ms; Scene(idx) -> index.scenes[idx].start_ms; Time(ms) -> ms passthrough. Validate bounds: word index < word_count, scene index < scene_count, time_ms <= source duration. Implements REQ-055.")
+  (acceptance "Each point type resolves to correct ms; out-of-bounds returns error (TEST-060)"))
+
+(meta task-a4-tests-core
+  (phase "A")
+  (description "Write tests in ar-edit-core/tests/: TEST-059 (SourcePois roundtrip serde for all point types), TEST-060 (PoiPoint resolution to ms with transcript/index fixtures), TEST-061 (category validation rejects unknown strings), TEST-071 (on-disk JSON matches REQ-066 schema with externally-tagged point enum).")
+  (acceptance "All 4 tests pass; no whisper.cpp or ffmpeg dependency in tests"))
+
+;; Phase A readiness
+(normally r-ready-a1-model (and task-a1-model no-deps-a1-model) ready-a1-model)
+(normally r-ready-a2-poi-module (and task-a2-poi-module completed-a1-model) ready-a2-poi-module)
+(normally r-ready-a3-resolve (and task-a3-resolve completed-a1-model) ready-a3-resolve)
+(normally r-ready-a4-tests-core (and task-a4-tests-core completed-a2-poi-module completed-a3-resolve) ready-a4-tests-core)
+
+;; =============================================================================
+;; PHASE B: CLI Commands
+;; Delivers: ar-edit poi add, ar-edit poi list, ar-edit poi remove
+;; =============================================================================
+
+(given task-b1-cli-args)
+(given task-b2-cli-dispatch)
+(given task-b3-tests-cli)
+
+(meta task-b1-cli-args
+  (phase "B")
+  (description "Add POI subcommands to ar-edit/src/cli/mod.rs using clap derive. Poi enum with Add/List/Remove variants. PoiAddArgs: source_id (positional), --at-word/--at-scene/--at-ms (mutually exclusive via conflicts_with_all), --category (required, validated), --note (optional). PoiListArgs: source_id (optional positional), --category (optional filter). PoiRemoveArgs: source_id (positional), --id and --category (mutually exclusive, one required). Add Poi variant to Commands enum.")
+  (acceptance "ar-edit poi add/list/remove parse correctly; mutually exclusive flags enforced at parse time; --help shows usage"))
+
+(meta task-b2-cli-dispatch
+  (phase "B")
+  (description "Wire POI CLI handlers in ar-edit/src/main.rs. cmd_poi_add: parse point type from flags, validate category (exit 3 on invalid per CON-011), validate source exists (exit 1), validate bounds (exit 2), call core::poi::add_poi, print human-readable or --json output matching CON-011. cmd_poi_list: call list_pois or list_all_pois, resolve each POI to ms, extract surrounding transcript context (~80 chars), print table or --json. cmd_poi_remove: dispatch to remove_poi or remove_pois_by_category, print result or --json. Implements REQ-057, REQ-060, REQ-063.")
+  (acceptance "Exit codes match CON-011 (0 success, 1 source/poi not found, 2 bounds error, 3 invalid category); --json output matches contract schemas; human output shows POI ID, point, category, note"))
+
+(meta task-b3-tests-cli
+  (phase "B")
+  (description "Write integration tests: TEST-062 (CLI POI creation for each point type, sequential IDs, JSON output matches CON-011), TEST-065 (POI listing with resolved timestamps and context, --category filter, --json output), TEST-068 (single and bulk removal, ID non-reuse verified by subsequent add).")
+  (acceptance "All 3 tests pass; tests use tempdir projects with pre-created manifest and transcript fixtures"))
+
+;; Phase B readiness
+(normally r-ready-b1-cli-args (and task-b1-cli-args completed-a1-model) ready-b1-cli-args)
+(normally r-ready-b2-cli-dispatch (and task-b2-cli-dispatch completed-a2-poi-module completed-a3-resolve completed-b1-cli-args) ready-b2-cli-dispatch)
+(normally r-ready-b3-tests-cli (and task-b3-tests-cli completed-b2-cli-dispatch) ready-b3-tests-cli)
+
+;; =============================================================================
+;; PHASE C: Display + Interleave
+;; Delivers: --with-pois flag on transcripts read, edit show --with-pois,
+;;           POI-in-transcript interleaving, agent JSON consumption
+;; =============================================================================
+
+(given task-c1-interleave)
+(given task-c2-transcript-flag)
+(given task-c3-edit-show)
+(given task-c4-tests-display)
+
+(meta task-c1-interleave
+  (phase "C")
+  (description "Add POI interleaving to ar-edit-core/src/display.rs. Create ResolvedPoi struct (id, source_id, point, category, note, created, resolved_ms, context). Extend TranscriptItem enum (or create new variant) to include Poi. Implement interleave_transcript_with_pois(transcript, resolved_pois) -> InterleavedTranscript that inserts POI markers at word positions as bracketed tags (e.g. [highlight], [issue]). For --json, nest full POI objects at their positions. Pure function, no I/O. Implements REQ-061.")
+  (acceptance "POIs appear at correct word positions in interleaved output; categories shown as bracketed tags; JSON output includes full POI objects"))
+
+(meta task-c2-transcript-flag
+  (phase "C")
+  (description "Add --with-pois flag to transcripts read subcommand in cli/mod.rs. In main.rs handler: when flag set, load POIs for source, resolve to ms, interleave with transcript, render. Support combined --with-markers --with-pois. For --json, include pois array at resolved positions per REQ-062.")
+  (acceptance "ar-edit transcripts read <src> --with-pois shows inline POI annotations; combines with --with-markers; --json includes positioned POI data (TEST-066, TEST-067)"))
+
+(meta task-c3-edit-show
+  (phase "C")
+  (description "Add --with-pois flag to edit show subcommand. For each shot in the edit, find POIs from the shot's source that fall within the shot's time range. Display POI category and note inline with shot transcript text. For --json, nest full POI objects under each shot. Implements REQ-065.")
+  (acceptance "ar-edit edit show <edit> --with-pois shows POIs within each shot's range; --json nests POI objects under shots (TEST-070)"))
+
+(meta task-c4-tests-display
+  (phase "C")
+  (description "Write tests: TEST-066 (transcript interleaving with POIs at correct positions), TEST-067 (agent JSON consumption via poi list --json and transcripts read --json --with-pois), TEST-070 (edit show --with-pois displays POIs within shot ranges).")
+  (acceptance "All 3 tests pass; interleaving is position-accurate; JSON output is agent-consumable"))
+
+;; Phase C readiness
+(normally r-ready-c1-interleave (and task-c1-interleave completed-a3-resolve completed-a2-poi-module) ready-c1-interleave)
+(normally r-ready-c2-transcript-flag (and task-c2-transcript-flag completed-c1-interleave completed-b2-cli-dispatch) ready-c2-transcript-flag)
+(normally r-ready-c3-edit-show (and task-c3-edit-show completed-c1-interleave completed-b2-cli-dispatch) ready-c3-edit-show)
+(normally r-ready-c4-tests-display (and task-c4-tests-display completed-c2-transcript-flag completed-c3-edit-show) ready-c4-tests-display)
+
+;; =============================================================================
+;; PHASE D: TUI Integration
+;; Delivers: POI creation via 'i' key in TUI, playback POI creation,
+;;           edit playback → source POI resolution
+;; =============================================================================
+
+(given task-d1-tui-poi)
+(given task-d2-playback-poi)
+(given task-d3-tests-tui)
+
+(meta task-d1-tui-poi
+  (phase "D")
+  (description "Implement TUI POI creation per REQ-058. On 'i' keypress in transcript/scene panel: show single-key category menu (h=highlight, i=issue, t=transition, c=cue, n=note), create POI at cursor word/scene index, optional inline note entry. Add POI gutter indicators in transcript panel showing category symbols at annotated words. Implements REQ-058.")
+  (acceptance "Pressing 'i' opens category picker; POI created at cursor position; POI indicators visible in transcript panel (TEST-063)"))
+
+(meta task-d2-playback-poi
+  (phase "D")
+  (description "Implement playback POI creation per REQ-059 and REQ-064. During VLC/ffplay playback: 'i' key captures current playback timestamp, resolves to nearest word index if transcript exists (nearest = word whose [start_ms, end_ms] contains timestamp, or closest by start_ms), otherwise stores as time_ms. Category defaults to 'note', editable after. For edit playback (REQ-064): map edit timeline position to source_id + source_ms, store POI against source. Implements REQ-059, REQ-064.")
+  (acceptance "POI created during playback at correct timestamp; word resolution accurate; edit playback POI maps to correct source (TEST-064, TEST-069)"))
+
+(meta task-d3-tests-tui
+  (phase "D")
+  (description "Write tests: TEST-063 (TUI POI creation at cursor position), TEST-064 (playback POI with timestamp-to-word resolution), TEST-069 (edit playback POI resolves to source coordinates). Note: TUI tests may be integration-level or manual verification.")
+  (acceptance "Playback resolution tests pass; TUI interaction verified"))
+
+;; Phase D readiness
+(normally r-ready-d1-tui-poi (and task-d1-tui-poi completed-b2-cli-dispatch completed-a2-poi-module) ready-d1-tui-poi)
+(normally r-ready-d2-playback-poi (and task-d2-playback-poi completed-d1-tui-poi) ready-d2-playback-poi)
+(normally r-ready-d3-tests-tui (and task-d3-tests-tui completed-d1-tui-poi completed-d2-playback-poi) ready-d3-tests-tui)
+
+;; =============================================================================
+;; Assignment rules — all tasks assigned to claude
+;; =============================================================================
+
+;; Phase A
+(normally r-assign-a1 (and ready-a1-model agent-claude-available) assign-to-a1-model-claude)
+(normally r-assign-a2 (and ready-a2-poi-module agent-claude-available) assign-to-a2-poi-module-claude)
+(normally r-assign-a3 (and ready-a3-resolve agent-claude-available) assign-to-a3-resolve-claude)
+(normally r-assign-a4 (and ready-a4-tests-core agent-claude-available) assign-to-a4-tests-core-claude)
+
+;; Phase B
+(normally r-assign-b1 (and ready-b1-cli-args agent-claude-available) assign-to-b1-cli-args-claude)
+(normally r-assign-b2 (and ready-b2-cli-dispatch agent-claude-available) assign-to-b2-cli-dispatch-claude)
+(normally r-assign-b3 (and ready-b3-tests-cli agent-claude-available) assign-to-b3-tests-cli-claude)
+
+;; Phase C
+(normally r-assign-c1 (and ready-c1-interleave agent-claude-available) assign-to-c1-interleave-claude)
+(normally r-assign-c2 (and ready-c2-transcript-flag agent-claude-available) assign-to-c2-transcript-flag-claude)
+(normally r-assign-c3 (and ready-c3-edit-show agent-claude-available) assign-to-c3-edit-show-claude)
+(normally r-assign-c4 (and ready-c4-tests-display agent-claude-available) assign-to-c4-tests-display-claude)
+
+;; Phase D
+(normally r-assign-d1 (and ready-d1-tui-poi agent-claude-available) assign-to-d1-tui-poi-claude)
+(normally r-assign-d2 (and ready-d2-playback-poi agent-claude-available) assign-to-d2-playback-poi-claude)
+(normally r-assign-d3 (and ready-d3-tests-tui agent-claude-available) assign-to-d3-tests-tui-claude)
+
+;; =============================================================================
+;; Rule metadata
+;; =============================================================================
+
+(meta r-ready-a1-model
+  (description "Model types have no dependencies — can start immediately")
+  (justification "PoiPoint, PoiCategory, Poi, SourcePois are pure data types"))
+
+(meta r-ready-a2-poi-module
+  (description "POI CRUD requires model types")
+  (justification "poi.rs uses Poi, PoiPoint, PoiCategory, SourcePois from models"))
+
+(meta r-ready-a3-resolve
+  (description "Point resolution requires model types")
+  (justification "resolve_poi_point takes PoiPoint and returns ms"))
+
+(meta r-ready-a4-tests-core
+  (description "Core tests require both CRUD and resolution")
+  (justification "TEST-059..061,071 exercise poi.rs and resolve functions"))
+
+(meta r-ready-b1-cli-args
+  (description "CLI arg structs require model types for PoiCategory validation")
+  (justification "Clap args reference PoiCategory and PoiPoint variants"))
+
+(meta r-ready-b2-cli-dispatch
+  (description "CLI dispatch requires core module, resolution, and parsed args")
+  (justification "Handlers call poi::add_poi, resolve_poi_point, use CLI arg structs"))
+
+(meta r-ready-c1-interleave
+  (description "Interleaving requires resolved POIs")
+  (justification "Pure function merging ResolvedPoi into transcript word stream"))
+
+(meta r-ready-d1-tui-poi
+  (description "TUI POI creation requires core module and CLI dispatch pattern")
+  (justification "TUI calls same core functions as CLI, needs dispatch wired"))
