@@ -230,6 +230,82 @@ pub struct Marker {
 }
 
 // ---------------------------------------------------------------------------
+// Points of Interest (annotations/src-NNN.pois.json) — SPEC-002, ADR-005
+// ---------------------------------------------------------------------------
+
+/// A single point in a source, mirroring ShotRange but for instants not ranges.
+///
+/// Serialises with serde's default externally-tagged format:
+/// ```json
+/// { "word": 45 }
+/// { "scene": 3 }
+/// { "time_ms": 62500 }
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PoiPoint {
+    Word(u32),
+    Scene(u32),
+    TimeMs(u64),
+}
+
+/// Controlled vocabulary for POI categories (REQ-056).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PoiCategory {
+    Highlight,
+    Issue,
+    Transition,
+    Cue,
+    Note,
+}
+
+impl std::fmt::Display for PoiCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Highlight => write!(f, "highlight"),
+            Self::Issue => write!(f, "issue"),
+            Self::Transition => write!(f, "transition"),
+            Self::Cue => write!(f, "cue"),
+            Self::Note => write!(f, "note"),
+        }
+    }
+}
+
+impl std::str::FromStr for PoiCategory {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "highlight" => Ok(Self::Highlight),
+            "issue" => Ok(Self::Issue),
+            "transition" => Ok(Self::Transition),
+            "cue" => Ok(Self::Cue),
+            "note" => Ok(Self::Note),
+            other => Err(format!(
+                "unknown POI category '{other}'; valid categories: highlight, issue, transition, cue, note"
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Poi {
+    pub id: String,
+    pub point: PoiPoint,
+    pub category: PoiCategory,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub created: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SourcePois {
+    pub source_id: String,
+    pub pois: Vec<Poi>,
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -668,5 +744,150 @@ mod tests {
 
         let back: Shot = serde_json::from_value(json).unwrap();
         assert_eq!(back, shot);
+    }
+
+    // -- PoiPoint -------------------------------------------------------------
+
+    #[test]
+    fn poi_point_word_roundtrip() {
+        let point = PoiPoint::Word(45);
+        let json = serde_json::to_value(&point).unwrap();
+        assert_eq!(json, json!({ "word": 45 }));
+
+        let back: PoiPoint = serde_json::from_value(json).unwrap();
+        assert_eq!(back, point);
+    }
+
+    #[test]
+    fn poi_point_scene_roundtrip() {
+        let point = PoiPoint::Scene(3);
+        let json = serde_json::to_value(&point).unwrap();
+        assert_eq!(json, json!({ "scene": 3 }));
+
+        let back: PoiPoint = serde_json::from_value(json).unwrap();
+        assert_eq!(back, point);
+    }
+
+    #[test]
+    fn poi_point_time_ms_roundtrip() {
+        let point = PoiPoint::TimeMs(62500);
+        let json = serde_json::to_value(&point).unwrap();
+        assert_eq!(json, json!({ "time_ms": 62500 }));
+
+        let back: PoiPoint = serde_json::from_value(json).unwrap();
+        assert_eq!(back, point);
+    }
+
+    // -- PoiCategory ----------------------------------------------------------
+
+    #[test]
+    fn poi_category_serde_roundtrip() {
+        for (cat, expected) in [
+            (PoiCategory::Highlight, "highlight"),
+            (PoiCategory::Issue, "issue"),
+            (PoiCategory::Transition, "transition"),
+            (PoiCategory::Cue, "cue"),
+            (PoiCategory::Note, "note"),
+        ] {
+            let json = serde_json::to_value(cat).unwrap();
+            assert_eq!(json, json!(expected));
+            let back: PoiCategory = serde_json::from_value(json).unwrap();
+            assert_eq!(back, cat);
+        }
+    }
+
+    #[test]
+    fn poi_category_from_str_valid() {
+        assert_eq!("highlight".parse::<PoiCategory>().unwrap(), PoiCategory::Highlight);
+        assert_eq!("issue".parse::<PoiCategory>().unwrap(), PoiCategory::Issue);
+        assert_eq!("transition".parse::<PoiCategory>().unwrap(), PoiCategory::Transition);
+        assert_eq!("cue".parse::<PoiCategory>().unwrap(), PoiCategory::Cue);
+        assert_eq!("note".parse::<PoiCategory>().unwrap(), PoiCategory::Note);
+    }
+
+    #[test]
+    fn poi_category_from_str_rejects_unknown() {
+        let err = "unknown".parse::<PoiCategory>().unwrap_err();
+        assert!(err.contains("unknown POI category"));
+        assert!(err.contains("highlight"));
+    }
+
+    #[test]
+    fn poi_category_display() {
+        assert_eq!(PoiCategory::Highlight.to_string(), "highlight");
+        assert_eq!(PoiCategory::Issue.to_string(), "issue");
+        assert_eq!(PoiCategory::Transition.to_string(), "transition");
+        assert_eq!(PoiCategory::Cue.to_string(), "cue");
+        assert_eq!(PoiCategory::Note.to_string(), "note");
+    }
+
+    // -- SourcePois -----------------------------------------------------------
+
+    #[test]
+    fn source_pois_from_spec_json() {
+        let input = json!({
+            "source_id": "src-001",
+            "pois": [
+                {
+                    "id": "poi-001",
+                    "point": { "word": 45 },
+                    "category": "highlight",
+                    "note": "Perfect delivery of the key statistic",
+                    "created": "2026-03-13T10:30:00Z"
+                },
+                {
+                    "id": "poi-002",
+                    "point": { "time_ms": 62500 },
+                    "category": "issue",
+                    "note": "Microphone bump",
+                    "created": "2026-03-13T10:31:15Z"
+                },
+                {
+                    "id": "poi-003",
+                    "point": { "scene": 4 },
+                    "category": "transition",
+                    "created": "2026-03-13T10:32:00Z"
+                }
+            ]
+        });
+
+        let pois: SourcePois = serde_json::from_value(input).unwrap();
+        assert_eq!(pois.source_id, "src-001");
+        assert_eq!(pois.pois.len(), 3);
+
+        assert_eq!(pois.pois[0].point, PoiPoint::Word(45));
+        assert_eq!(pois.pois[0].category, PoiCategory::Highlight);
+        assert_eq!(
+            pois.pois[0].note.as_deref(),
+            Some("Perfect delivery of the key statistic")
+        );
+
+        assert_eq!(pois.pois[1].point, PoiPoint::TimeMs(62500));
+        assert_eq!(pois.pois[1].category, PoiCategory::Issue);
+
+        assert_eq!(pois.pois[2].point, PoiPoint::Scene(4));
+        assert_eq!(pois.pois[2].category, PoiCategory::Transition);
+        assert_eq!(pois.pois[2].note, None);
+
+        let json = serde_json::to_value(&pois).unwrap();
+        let back: SourcePois = serde_json::from_value(json).unwrap();
+        assert_eq!(back, pois);
+    }
+
+    #[test]
+    fn poi_note_omitted_when_none() {
+        let poi = Poi {
+            id: "poi-001".into(),
+            point: PoiPoint::Word(10),
+            category: PoiCategory::Cue,
+            note: None,
+            created: "2026-03-13T10:00:00Z".parse().unwrap(),
+        };
+
+        let json = serde_json::to_value(&poi).unwrap();
+        assert!(json.get("note").is_none());
+
+        let back: Poi = serde_json::from_value(json).unwrap();
+        assert_eq!(back, poi);
     }
 }
