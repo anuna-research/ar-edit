@@ -326,11 +326,24 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
 
                     match playback::launch_player(&player, &req) {
                         Ok(mut child) => {
-                            if ipc_path.is_some() {
-                                // mpv: wait with position capture support
-                                eprintln!("Playing... press 'q' to quit mpv");
+                            if let (Some(ref ipc), Some(ref src_id)) =
+                                (&ipc_path, &req.source_id)
+                            {
+                                let pois = monitor_playback_with_poi(
+                                    &mut child,
+                                    ipc,
+                                    src_id,
+                                    &app.project_dir,
+                                );
+                                if !pois.is_empty() {
+                                    app.status_message = format!(
+                                        "Created {} POI(s) during playback",
+                                        pois.len(),
+                                    );
+                                }
+                            } else {
+                                let _ = child.wait();
                             }
-                            let _ = child.wait();
                         }
                         Err(e) => {
                             app.status_message = format!("Play failed: {e}");
@@ -355,6 +368,162 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
             return Ok(());
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Interactive playback with POI creation (REQ-059)
+// ---------------------------------------------------------------------------
+
+/// Monitor mpv playback, capturing POI keypresses.
+///
+/// While mpv plays in its own window, we put the terminal in raw mode (no
+/// alternate screen) to capture single keypresses. Press `i` to drop a POI
+/// at the current playback position, `q` to quit mpv.
+///
+/// Returns the IDs of any POIs created.
+fn monitor_playback_with_poi(
+    child: &mut std::process::Child,
+    ipc_socket: &std::path::Path,
+    source_id: &str,
+    project_dir: &std::path::Path,
+) -> Vec<String> {
+    use ar_edit_core::display::format_time;
+    use ar_edit_core::models::{PoiCategory, PoiPoint, Transcript};
+    use ar_edit_core::resolve::find_nearest_word;
+    use crossterm::event::{self, Event, KeyCode, KeyEvent};
+
+    let mut pois_created = Vec::new();
+
+    // Load transcript once (best-effort)
+    let transcript: Option<Transcript> = {
+        let path = project_dir
+            .join("transcripts")
+            .join(format!("{source_id}.transcript.json"));
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|data| serde_json::from_str(&data).ok())
+    };
+
+    // Print instructions
+    eprintln!();
+    eprintln!("  \x1b[1;36m\u{25b6} Playing {source_id}\x1b[0m");
+    eprintln!("  \x1b[33mi\x1b[0m mark POI   \x1b[33mq\x1b[0m quit mpv");
+    eprintln!();
+
+    // Wait briefly for mpv IPC socket to become available
+    for _ in 0..10 {
+        if ipc_socket.exists() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    // Enable raw mode to capture single keypresses
+    let raw_mode = enable_raw_mode().is_ok();
+
+    loop {
+        // Check if mpv has exited
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(_) => break,
+        }
+
+        // Poll for keypresses (100ms timeout)
+        if !event::poll(Duration::from_millis(100)).unwrap_or(false) {
+            continue;
+        }
+
+        let Ok(Event::Key(KeyEvent { code, .. })) = event::read() else {
+            continue;
+        };
+
+        match code {
+            KeyCode::Char('q') => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
+            }
+            KeyCode::Char('i') => {
+                // Get current playback position from mpv
+                let Some(timestamp_ms) = playback::mpv_get_position(ipc_socket) else {
+                    eprintln!("  \x1b[31m\u{2717} Could not read playback position\x1b[0m");
+                    continue;
+                };
+
+                // Show category prompt
+                eprint!(
+                    "  \x1b[1mCategory:\x1b[0m \x1b[33mh\x1b[0m=highlight \
+                     \x1b[33mi\x1b[0m=issue \x1b[33mt\x1b[0m=transition \
+                     \x1b[33mc\x1b[0m=cue \x1b[33mn\x1b[0m=note \
+                     \x1b[2m(Esc=cancel)\x1b[0m "
+                );
+
+                // Wait for category keypress
+                let category = loop {
+                    if let Ok(Event::Key(KeyEvent { code: cat, .. })) = event::read() {
+                        match cat {
+                            KeyCode::Char('h') => break Some(PoiCategory::Highlight),
+                            KeyCode::Char('i') => break Some(PoiCategory::Issue),
+                            KeyCode::Char('t') => break Some(PoiCategory::Transition),
+                            KeyCode::Char('c') => break Some(PoiCategory::Cue),
+                            KeyCode::Char('n') => break Some(PoiCategory::Note),
+                            KeyCode::Esc => break None,
+                            _ => {}
+                        }
+                    }
+                };
+
+                let Some(category) = category else {
+                    eprintln!("\x1b[2mcancelled\x1b[0m");
+                    continue;
+                };
+
+                // Resolve timestamp to word index if transcript available
+                let point = match &transcript {
+                    Some(t) => match find_nearest_word(timestamp_ms, t) {
+                        Some(word_idx) => PoiPoint::Word(word_idx),
+                        None => PoiPoint::TimeMs(timestamp_ms),
+                    },
+                    None => PoiPoint::TimeMs(timestamp_ms),
+                };
+
+                // Create the POI
+                match ar_edit_core::poi::add_poi(
+                    project_dir,
+                    source_id,
+                    point.clone(),
+                    category.clone(),
+                    None,
+                ) {
+                    Ok(poi) => {
+                        let word_info = match &point {
+                            PoiPoint::Word(idx) => format!(" (word {idx})"),
+                            PoiPoint::Scene(idx) => format!(" (scene {idx})"),
+                            PoiPoint::TimeMs(_) => String::new(),
+                        };
+                        eprintln!(
+                            "  \x1b[1;32m\u{2713} {}\x1b[0m [{category}] @ {}{word_info}",
+                            poi.id,
+                            format_time(timestamp_ms),
+                        );
+                        pois_created.push(poi.id);
+                    }
+                    Err(e) => {
+                        eprintln!("  \x1b[31m\u{2717} POI failed: {e}\x1b[0m");
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Restore terminal state
+    if raw_mode {
+        let _ = disable_raw_mode();
+    }
+
+    pois_created
 }
 
 // ---------------------------------------------------------------------------

@@ -521,7 +521,8 @@ fn do_play(app: &mut App) {
                 file,
                 start_ms,
                 end_ms,
-                ipc_socket: None, // Will be set by event loop for mpv
+                ipc_socket: None,
+                source_id: Some(source_id.clone()),
             });
             app.status_message = format!("Playing {shot_id}...");
         }

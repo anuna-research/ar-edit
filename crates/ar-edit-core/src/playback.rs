@@ -87,6 +87,8 @@ pub struct PlayRequest {
     pub end_ms: Option<u64>,
     /// Optional IPC socket path for mpv position capture.
     pub ipc_socket: Option<PathBuf>,
+    /// Source ID for POI creation during playback.
+    pub source_id: Option<String>,
 }
 
 /// Launch a player subprocess for the given request.
@@ -359,6 +361,7 @@ mod tests {
             start_ms: 5500,
             end_ms: None,
             ipc_socket: None,
+            source_id: None,
         };
         let mut cmd = Command::new(&player.path);
         cmd.arg(&req.file);
@@ -381,6 +384,7 @@ mod tests {
             start_ms: 5500,
             end_ms: Some(10000),
             ipc_socket: None,
+            source_id: None,
         };
         // Verify duration calculation
         let duration_secs = req.end_ms.unwrap().saturating_sub(req.start_ms) as f64 / 1000.0;
@@ -403,6 +407,7 @@ mod tests {
             start_ms: 1000,
             end_ms: Some(5000),
             ipc_socket: None,
+            source_id: None,
         };
         let req2 = req.clone();
         assert_eq!(req.start_ms, req2.start_ms);

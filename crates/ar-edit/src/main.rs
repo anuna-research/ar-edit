@@ -1335,6 +1335,7 @@ fn cmd_play_full(
         start_ms: 0,
         end_ms: None,
         ipc_socket: None,
+        source_id: None,
     };
 
     if !cli.json {
@@ -1658,6 +1659,7 @@ fn build_source_play_request(
         start_ms,
         end_ms: None,
         ipc_socket: None,
+        source_id: None,
     })
 }
 
@@ -1699,6 +1701,7 @@ fn build_edit_play_request(
         start_ms,
         end_ms: Some(end_ms),
         ipc_socket: None,
+        source_id: None,
     })
 }
 
