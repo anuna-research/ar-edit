@@ -140,7 +140,7 @@ pub fn launch_player(player: &Player, req: &PlayRequest) -> Result<Child, Playba
         }
         PlayerKind::Vlc => {
             // Enable HTTP interface for precise position queries during POI capture
-            if req.marker_file.is_some() {
+            if req.source_id.is_some() {
                 cmd.arg("--extraintf").arg("http");
                 cmd.arg(format!("--http-port={}", VLC_HTTP_PORT));
                 cmd.arg("--http-password=ar-edit");
@@ -165,6 +165,26 @@ pub fn launch_player(player: &Player, req: &PlayRequest) -> Result<Child, Playba
     }
 
     let child = cmd.spawn()?;
+
+    // On macOS, activate the player app so its window comes to the front.
+    #[cfg(target_os = "macos")]
+    {
+        let app_name = match player.kind {
+            PlayerKind::Mpv => "mpv",
+            PlayerKind::Vlc => "VLC",
+            PlayerKind::Ffplay => "ffplay",
+        };
+        // Brief delay to let the window appear before activating
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let _ = Command::new("osascript")
+            .arg("-e")
+            .arg(format!(
+                "tell application \"System Events\" to set frontmost of \
+                 process \"{app_name}\" to true"
+            ))
+            .spawn();
+    }
+
     Ok(child)
 }
 
