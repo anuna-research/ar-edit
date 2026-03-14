@@ -347,19 +347,19 @@ fn source_playback_vlc_args_start_only() {
     let start_secs = start_ms as f64 / 1000.0;
 
     let mut cmd = Command::new("/usr/bin/cvlc");
-    cmd.arg("/tmp/interview.mp4");
+    cmd.arg("--play-and-exit");
     cmd.arg(format!("--start-time={start_secs:.3}"));
     // No --stop-time for source playback
-    cmd.arg("vlc://quit");
+    cmd.arg("/tmp/interview.mp4");
 
     let args: Vec<_> = cmd
         .get_args()
         .map(|a| a.to_str().unwrap().to_string())
         .collect();
 
-    assert_eq!(args[0], "/tmp/interview.mp4");
+    assert_eq!(args[0], "--play-and-exit");
     assert_eq!(args[1], "--start-time=18.000");
-    assert_eq!(args[2], "vlc://quit");
+    assert_eq!(args[2], "/tmp/interview.mp4");
     // No --stop-time arg
     assert_eq!(args.len(), 3);
 }

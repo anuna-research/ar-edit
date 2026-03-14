@@ -69,18 +69,18 @@ pub fn detect_player() -> Result<Player, PlaybackError> {
                 kind,
             });
         }
-    }
 
-    // Check for macOS .app bundle installations
-    #[cfg(target_os = "macos")]
-    {
-        let vlc_app = PathBuf::from("/Applications/VLC.app/Contents/MacOS/VLC");
-        if vlc_app.exists() {
-            return Ok(Player {
-                name: "VLC".to_string(),
-                path: vlc_app,
-                kind: PlayerKind::Vlc,
-            });
+        // On macOS, check for .app bundle if the CLI binary isn't on PATH
+        #[cfg(target_os = "macos")]
+        if kind == PlayerKind::Vlc && name == "vlc" {
+            let vlc_app = PathBuf::from("/Applications/VLC.app/Contents/MacOS/VLC");
+            if vlc_app.exists() {
+                return Ok(Player {
+                    name: "VLC".to_string(),
+                    path: vlc_app,
+                    kind: PlayerKind::Vlc,
+                });
+            }
         }
     }
 
@@ -129,6 +129,8 @@ pub fn launch_player(player: &Player, req: &PlayRequest) -> Result<Child, Playba
                 let length_secs = (end_ms - req.start_ms) as f64 / 1000.0;
                 cmd.arg(format!("--length={length_secs:.3}"));
             }
+            // Constrain window so video + terminal are both visible
+            cmd.arg("--autofit-larger=60%x60%");
             // IPC socket path for position capture
             if let Some(ref ipc_path) = req.ipc_socket {
                 cmd.arg(format!("--input-ipc-server={}", ipc_path.display()));
@@ -139,19 +141,22 @@ pub fn launch_player(player: &Player, req: &PlayRequest) -> Result<Child, Playba
             }
         }
         PlayerKind::Vlc => {
-            // Enable HTTP interface for precise position queries during POI capture
             if req.source_id.is_some() {
+                // Enable HTTP interface for precise position queries during POI capture
                 cmd.arg("--extraintf").arg("http");
                 cmd.arg(format!("--http-port={}", VLC_HTTP_PORT));
                 cmd.arg("--http-password=ar-edit");
+                // Disable VLC's built-in hotkeys so pressing 'i' in the VLC
+                // window doesn't trigger "No subtitles found" confusion.
+                cmd.arg("--no-hotkeys");
             }
-            cmd.arg(&req.file);
+            cmd.arg("--play-and-exit");
             cmd.arg(format!("--start-time={start_secs:.3}"));
             if let Some(end_ms) = req.end_ms {
                 let end_secs = end_ms as f64 / 1000.0;
                 cmd.arg(format!("--stop-time={end_secs:.3}"));
             }
-            cmd.arg("vlc://quit");
+            cmd.arg(&req.file);
         }
         PlayerKind::Ffplay => {
             cmd.arg("-ss").arg(format!("{start_secs:.3}"));
@@ -163,6 +168,12 @@ pub fn launch_player(player: &Player, req: &PlayRequest) -> Result<Child, Playba
             cmd.arg(&req.file);
         }
     }
+
+    // Prevent the player from reading stdin (which would steal key events from
+    // our terminal-based POI capture) and suppress its stderr noise.
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::null());
 
     let child = cmd.spawn()?;
 
@@ -558,9 +569,9 @@ mod tests {
             source_id: None, mpv_script: None, marker_file: None,
         };
         let mut cmd = Command::new(&player.path);
-        cmd.arg(&req.file);
+        cmd.arg("--play-and-exit");
         cmd.arg(format!("--start-time={:.3}", req.start_ms as f64 / 1000.0));
-        cmd.arg("vlc://quit");
+        cmd.arg(&req.file);
         // Verify command builds without errors
         let prog = cmd.get_program().to_str().unwrap().to_string();
         assert_eq!(prog, "/usr/bin/cvlc");

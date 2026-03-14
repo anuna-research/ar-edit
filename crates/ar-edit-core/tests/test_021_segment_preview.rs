@@ -281,20 +281,20 @@ fn segment_preview_vlc_args_for_segment() {
     let end_secs = shot.end_ms as f64 / 1000.0;
 
     let mut cmd = Command::new(&player.path);
-    cmd.arg("/tmp/test.mp4");
+    cmd.arg("--play-and-exit");
     cmd.arg(format!("--start-time={start_secs:.3}"));
     cmd.arg(format!("--stop-time={end_secs:.3}"));
-    cmd.arg("vlc://quit");
+    cmd.arg("/tmp/test.mp4");
 
     let args: Vec<_> = cmd
         .get_args()
         .map(|a| a.to_str().unwrap().to_string())
         .collect();
 
-    assert_eq!(args[0], "/tmp/test.mp4");
+    assert_eq!(args[0], "--play-and-exit");
     assert_eq!(args[1], "--start-time=0.000");
     assert_eq!(args[2], "--stop-time=1.200");
-    assert_eq!(args[3], "vlc://quit");
+    assert_eq!(args[3], "/tmp/test.mp4");
 }
 
 #[test]

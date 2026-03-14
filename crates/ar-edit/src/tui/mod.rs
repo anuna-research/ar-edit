@@ -83,6 +83,10 @@ pub struct App {
     pub search_selected: ListState,
     pub search_query: String,
     pub search_type_filter: Option<TypeFilter>,
+    /// Image picker for terminal graphics protocol detection.
+    pub image_picker: Option<ratatui_image::picker::Picker>,
+    /// Cached thumbnail image state: (source_id, protocol).
+    pub thumbnail_cache: Option<(String, ratatui_image::protocol::StatefulProtocol)>,
 }
 
 impl App {
@@ -115,6 +119,8 @@ impl App {
             search_selected: ListState::default(),
             search_query: String::new(),
             search_type_filter: None,
+            image_picker: ratatui_image::picker::Picker::from_query_stdio().ok(),
+            thumbnail_cache: None,
         }
     }
 
@@ -451,7 +457,7 @@ fn monitor_playback_with_poi(
     if has_marker_file {
         eprintln!("  Press \x1b[33mi\x1b[0m in the player window to mark a POI");
     } else {
-        eprintln!("  Switch to this terminal, press \x1b[33mi\x1b[0m to mark POI, \x1b[33mq\x1b[0m to quit");
+        eprintln!("  \x1b[1;33m>>> Click this terminal window <<<\x1b[0m then press \x1b[33mi\x1b[0m to mark POI, \x1b[33mq\x1b[0m to quit");
     }
     eprintln!();
 
@@ -544,7 +550,8 @@ fn monitor_playback_with_poi(
             continue;
         }
 
-        let Ok(Event::Key(KeyEvent { code, .. })) = event::read() else {
+        let evt = event::read();
+        let Ok(Event::Key(KeyEvent { code, .. })) = evt else {
             continue;
         };
 
@@ -568,8 +575,8 @@ fn monitor_playback_with_poi(
             KeyCode::Char('i') if !has_marker_file => {
                 let timestamp_ms = match player_kind {
                     playback::PlayerKind::Vlc => {
-                        playback::vlc_http_get_position(playback::VLC_HTTP_PORT)
-                            .unwrap_or_else(|| {
+                        let pos = playback::vlc_http_get_position(playback::VLC_HTTP_PORT);
+                        pos.unwrap_or_else(|| {
                                 start_ms + playback_start.elapsed().as_millis() as u64
                             })
                     }
@@ -717,7 +724,23 @@ fn ui(f: &mut Frame, app: &mut App) {
         match app.focus {
             Focus::Sources => {
                 if let Some(source) = app.selected_source().cloned() {
-                    panels::sources::draw_detail(f, &source, transcript_area);
+                    // Load thumbnail if source changed or not yet cached
+                    let needs_load = match &app.thumbnail_cache {
+                        Some((id, _)) => *id != source.id,
+                        None => true,
+                    };
+                    if needs_load {
+                        if let Some(ref picker) = app.image_picker {
+                            app.thumbnail_cache =
+                                panels::sources::load_thumbnail(picker, &source, &app.project_dir);
+                        }
+                    }
+                    panels::sources::draw_detail(
+                        f,
+                        &source,
+                        &mut app.thumbnail_cache,
+                        transcript_area,
+                    );
                 } else {
                     let shot = selected_idx.and_then(|i| app.resolved_shots.get(i));
                     panels::transcript::draw(

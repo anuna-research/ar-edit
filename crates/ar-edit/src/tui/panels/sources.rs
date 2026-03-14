@@ -1,5 +1,8 @@
+use std::path::Path;
+
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui_image::StatefulImage;
 
 use ar_edit_core::display;
 use ar_edit_core::models::Source;
@@ -32,11 +35,18 @@ pub fn draw(f: &mut Frame, sources: &[Source], selected: &mut ListState, area: R
     f.render_stateful_widget(list, area, selected);
 }
 
-/// Render a detail view for a single source (transcript/index info).
-pub fn draw_detail(f: &mut Frame, source: &Source, area: Rect) {
+/// Render a detail view for a single source (transcript/index info + thumbnail).
+pub fn draw_detail(
+    f: &mut Frame,
+    source: &Source,
+    thumbnail_cache: &mut Option<(String, ratatui_image::protocol::StatefulProtocol)>,
+    area: Rect,
+) {
     let block = Block::default()
         .title(format!(" Source: {} ", source.id))
         .borders(Borders::ALL);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
 
     let duration = display::format_time(source.duration_ms);
     let (w, h) = source.resolution;
@@ -87,10 +97,51 @@ pub fn draw_detail(f: &mut Frame, source: &Source, area: Rect) {
         Span::raw(added),
     ]));
 
-    let paragraph = Paragraph::new(Text::from(lines))
-        .block(block)
-        .wrap(Wrap { trim: true });
-    f.render_widget(paragraph, area);
+    let text_height = lines.len() as u16;
+
+    // Render text info at the top
+    let text_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: text_height.min(inner.height),
+    };
+    let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true });
+    f.render_widget(paragraph, text_area);
+
+    // Render thumbnail below the text if we have one
+    if let Some((ref id, ref mut protocol)) = thumbnail_cache {
+        if *id == source.id && inner.height > text_height + 1 {
+            let img_area = Rect {
+                x: inner.x,
+                y: inner.y + text_height + 1,
+                width: inner.width,
+                height: inner.height.saturating_sub(text_height + 1),
+            };
+            let image_widget = StatefulImage::default();
+            f.render_stateful_widget(image_widget, img_area, protocol);
+        }
+    }
+}
+
+/// Load the first thumbnail for a source, returning the cached protocol state.
+pub fn load_thumbnail(
+    picker: &ratatui_image::picker::Picker,
+    source: &Source,
+    project_dir: &Path,
+) -> Option<(String, ratatui_image::protocol::StatefulProtocol)> {
+    // Try loading the source index to find thumbnails
+    let index = ar_edit_core::index::load_index(project_dir, &source.id).ok()?;
+    let thumb_path = if let Some(thumb) = index.thumbnails.first() {
+        project_dir.join(&thumb.path)
+    } else if let Some(scene) = index.scenes.first() {
+        project_dir.join(&scene.thumbnail)
+    } else {
+        return None;
+    };
+    let dyn_img = image::ImageReader::open(&thumb_path).ok()?.decode().ok()?;
+    let protocol = picker.new_resize_protocol(dyn_img);
+    Some((source.id.clone(), protocol))
 }
 
 // ---------------------------------------------------------------------------
