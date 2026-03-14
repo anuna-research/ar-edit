@@ -45,10 +45,12 @@ pub enum PlayerKind {
 
 /// Detect the best available video player.
 ///
-/// Resolution order (per ADR-003 / SPEC-001):
-///   1. `cvlc`  — VLC without GUI (preferred for scripted playback)
-///   2. `vlc`   — VLC with GUI
-///   3. `ffplay` — FFmpeg player (fallback)
+/// Resolution order:
+///   1. `mpv`   — mpv media player (preferred, best IPC support)
+///   2. `cvlc`  — VLC without GUI
+///   3. `vlc`   — VLC with GUI
+///   4. macOS VLC.app bundle — `/Applications/VLC.app/Contents/MacOS/VLC`
+///   5. `ffplay` — FFmpeg player (fallback)
 ///
 /// Returns `Err(PlaybackError::PlayerNotFound)` if none are found.
 pub fn detect_player() -> Result<Player, PlaybackError> {
@@ -65,6 +67,19 @@ pub fn detect_player() -> Result<Player, PlaybackError> {
                 name: name.to_string(),
                 path,
                 kind,
+            });
+        }
+    }
+
+    // Check for macOS .app bundle installations
+    #[cfg(target_os = "macos")]
+    {
+        let vlc_app = PathBuf::from("/Applications/VLC.app/Contents/MacOS/VLC");
+        if vlc_app.exists() {
+            return Ok(Player {
+                name: "VLC".to_string(),
+                path: vlc_app,
+                kind: PlayerKind::Vlc,
             });
         }
     }
@@ -124,10 +139,11 @@ pub fn launch_player(player: &Player, req: &PlayRequest) -> Result<Child, Playba
             }
         }
         PlayerKind::Vlc => {
-            // Enable Lua intf for in-player POI capture
+            // Enable HTTP interface for precise position queries during POI capture
             if req.marker_file.is_some() {
-                cmd.arg("--extraintf").arg("luaintf");
-                cmd.arg("--lua-intf").arg("ar_edit_poi");
+                cmd.arg("--extraintf").arg("http");
+                cmd.arg(format!("--http-port={}", VLC_HTTP_PORT));
+                cmd.arg("--http-password=ar-edit");
             }
             cmd.arg(&req.file);
             cmd.arg(format!("--start-time={start_secs:.3}"));
@@ -325,108 +341,83 @@ end)
 }
 
 // ---------------------------------------------------------------------------
-// VLC Lua intf script for in-player POI capture
+// VLC HTTP interface for position queries
 // ---------------------------------------------------------------------------
 
-/// Return the VLC user Lua intf directory for the current platform.
+/// Default VLC HTTP interface port used by ar-edit.
+pub const VLC_HTTP_PORT: u16 = 9090;
+
+/// Query VLC for the current playback position via its HTTP interface.
 ///
-/// - macOS: `~/Library/Application Support/org.videolan.vlc/lua/intf/`
-/// - Linux: `~/.local/share/vlc/lua/intf/`
-pub fn vlc_lua_intf_dir() -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
-    #[cfg(target_os = "macos")]
-    {
-        Some(
-            PathBuf::from(home)
-                .join("Library/Application Support/org.videolan.vlc/lua/intf"),
-        )
+/// VLC is launched with `--extraintf http --http-port <port> --http-password ar-edit`.
+/// Returns position in milliseconds, or None if VLC isn't responding.
+pub fn vlc_http_get_position(port: u16) -> Option<u64> {
+    // Use a minimal HTTP GET — avoid pulling in reqwest for this
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpStream;
+
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).ok()?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_millis(500)))
+        .ok()?;
+
+    // Basic auth: ":ar-edit" base64-encoded
+    let auth = base64_encode(b":ar-edit");
+    let request = format!(
+        "GET /requests/status.json HTTP/1.0\r\n\
+         Authorization: Basic {auth}\r\n\
+         Host: 127.0.0.1:{port}\r\n\
+         \r\n"
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+
+    // Read the full response
+    let mut response = String::new();
+    let reader = BufReader::new(&stream);
+    for line in reader.lines() {
+        match line {
+            Ok(l) => response.push_str(&l),
+            Err(_) => break,
+        }
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Some(PathBuf::from(home).join(".local/share/vlc/lua/intf"))
+
+    // Find the JSON body (after empty line in HTTP response)
+    // Look for "time" field in JSON
+    if let Some(json_start) = response.find('{') {
+        let json_str = &response[json_start..];
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(json_str) {
+            // VLC HTTP returns "time" in seconds (integer)
+            if let Some(time_secs) = json.get("time").and_then(|v| v.as_u64()) {
+                return Some(time_secs * 1000);
+            }
+        }
     }
+    None
 }
 
-/// Generate a VLC Lua intf script that captures POI keypresses in-player.
-///
-/// Uses `vlc.var.add_callback` on `key-pressed` to intercept keys within the
-/// VLC window. Press `i` to start, then `h/i/t/c/n` to pick a category.
-/// Position is read from VLC's input `time` variable (microseconds → ms).
-/// Writes `<timestamp_ms> <category>\n` to the marker file.
-pub fn generate_vlc_poi_script(marker_file: &Path) -> String {
-    format!(
-        r#"-- ar-edit POI marker script for VLC
-local marker_path = "{marker_file}"
-local pending_time = nil
-local waiting_for_category = false
-
-function descriptor()
-    return {{
-        title = "ar-edit POI",
-        version = "0.1",
-        capabilities = {{}}
-    }}
-end
-
-local function write_marker(category)
-    if pending_time == nil then return end
-    local ms = math.floor(pending_time / 1000)
-    local f = io.open(marker_path, "a")
-    if f then
-        f:write(string.format("%d %s\n", ms, category))
-        f:close()
-    end
-    local secs = ms / 1000
-    local t = string.format("%d:%02d.%d", math.floor(secs/60), math.floor(secs) % 60, math.floor((secs * 10) % 10))
-    vlc.osd.message("POI: " .. category .. " @ " .. t, 1)
-    pending_time = nil
-    waiting_for_category = false
-end
-
-function key_handler(var, old, new, data)
-    local key = new % 0x01000000
-
-    if not waiting_for_category then
-        if key == 105 then
-            local input = vlc.object.input()
-            if input then
-                pending_time = vlc.var.get(input, "time")
-                vlc.osd.message("[h]ighlight  [i]ssue  [t]ransition  [c]ue  [n]ote  (Esc cancel)", 1)
-                waiting_for_category = true
-            end
-        end
-    else
-        local categories = {{
-            [104] = "highlight",
-            [105] = "issue",
-            [116] = "transition",
-            [99]  = "cue",
-            [110] = "note"
-        }}
-        if key == 27 then
-            vlc.osd.message("cancelled", 1)
-            pending_time = nil
-            waiting_for_category = false
-        elseif categories[key] then
-            write_marker(categories[key])
-        end
-    end
-end
-
-function activate()
-    vlc.var.add_callback(vlc.object.libvlc(), "key-pressed", key_handler)
-    vlc.osd.message("ar-edit: press i to mark POI", 1)
-end
-
-function deactivate()
-    vlc.var.del_callback(vlc.object.libvlc(), "key-pressed", key_handler)
-end
-
-function input_changed() end
-function meta_changed() end
-"#,
-        marker_file = marker_file.display()
-    )
+/// Minimal base64 encoder (avoids pulling in a crate for this one use).
+fn base64_encode(input: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[(n >> 18 & 63) as usize] as char);
+        result.push(CHARS[(n >> 12 & 63) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[(n >> 6 & 63) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(n & 63) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
 }
 
 // ---------------------------------------------------------------------------

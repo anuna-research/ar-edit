@@ -321,33 +321,24 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
                         None
                     };
 
-                    // Set up in-player POI capture (Lua scripts for mpv and VLC)
-                    let mut vlc_lua_script: Option<PathBuf> = None;
-                    let marker_file = if req.source_id.is_some() {
+                    // Set up POI capture
+                    let marker_file = if req.source_id.is_some()
+                        && player.kind == playback::PlayerKind::Mpv
+                    {
+                        // mpv: Lua script captures keys in player window,
+                        // writes marks to a temp file we poll
                         let marker = std::env::temp_dir()
                             .join(format!("ar-edit-poi-{pid}.txt"));
-                        match player.kind {
-                            playback::PlayerKind::Mpv => {
-                                let script_path = std::env::temp_dir()
-                                    .join(format!("ar-edit-poi-{pid}.lua"));
-                                let lua = playback::generate_mpv_poi_script(&marker);
-                                let _ = std::fs::write(&script_path, lua);
-                                req.mpv_script = Some(script_path);
-                            }
-                            playback::PlayerKind::Vlc => {
-                                if let Some(intf_dir) = playback::vlc_lua_intf_dir() {
-                                    let _ = std::fs::create_dir_all(&intf_dir);
-                                    let script_path = intf_dir.join("ar_edit_poi.lua");
-                                    let lua = playback::generate_vlc_poi_script(&marker);
-                                    let _ = std::fs::write(&script_path, &lua);
-                                    vlc_lua_script = Some(script_path);
-                                }
-                            }
-                            playback::PlayerKind::Ffplay => {}
-                        }
+                        let script_path = std::env::temp_dir()
+                            .join(format!("ar-edit-poi-{pid}.lua"));
+                        let lua = playback::generate_mpv_poi_script(&marker);
+                        let _ = std::fs::write(&script_path, lua);
+                        req.mpv_script = Some(script_path);
                         req.marker_file = Some(marker.clone());
                         Some(marker)
                     } else {
+                        // VLC: terminal keys + HTTP position (precise)
+                        // ffplay: terminal keys + wall-clock (estimated)
                         None
                     };
 
@@ -358,6 +349,7 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
                             if let Some(ref src_id) = req.source_id {
                                 let pois = monitor_playback_with_poi(
                                     &mut child,
+                                    player.kind,
                                     ipc_path.as_deref(),
                                     marker_file.as_deref(),
                                     src_id,
@@ -379,14 +371,11 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
                         }
                     }
 
-                    // Clean up temp files (IPC socket, Lua scripts, marker file)
+                    // Clean up temp files (IPC socket, Lua script, marker file)
                     if let Some(ref path) = ipc_path {
                         let _ = std::fs::remove_file(path);
                     }
                     if let Some(ref path) = req.mpv_script {
-                        let _ = std::fs::remove_file(path);
-                    }
-                    if let Some(ref path) = vlc_lua_script {
                         let _ = std::fs::remove_file(path);
                     }
                     if let Some(ref path) = marker_file {
@@ -428,6 +417,7 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> anyhow::Result<()> {
 /// Returns the IDs of any POIs created.
 fn monitor_playback_with_poi(
     child: &mut std::process::Child,
+    player_kind: playback::PlayerKind,
     ipc_socket: Option<&std::path::Path>,
     marker_file: Option<&std::path::Path>,
     source_id: &str,
@@ -461,7 +451,7 @@ fn monitor_playback_with_poi(
     if has_marker_file {
         eprintln!("  Press \x1b[33mi\x1b[0m in the player window to mark a POI");
     } else {
-        eprintln!("  \x1b[33mi\x1b[0m mark POI (in terminal)   \x1b[33mq\x1b[0m quit player");
+        eprintln!("  Switch to this terminal, press \x1b[33mi\x1b[0m to mark POI, \x1b[33mq\x1b[0m to quit");
     }
     eprintln!();
 
@@ -574,10 +564,17 @@ fn monitor_playback_with_poi(
                 }
                 break;
             }
-            // Terminal-based POI capture (ffplay fallback — wall-clock only)
+            // Terminal-based POI capture (VLC via HTTP, ffplay via wall-clock)
             KeyCode::Char('i') if !has_marker_file => {
-                let timestamp_ms =
-                    start_ms + playback_start.elapsed().as_millis() as u64;
+                let timestamp_ms = match player_kind {
+                    playback::PlayerKind::Vlc => {
+                        playback::vlc_http_get_position(playback::VLC_HTTP_PORT)
+                            .unwrap_or_else(|| {
+                                start_ms + playback_start.elapsed().as_millis() as u64
+                            })
+                    }
+                    _ => start_ms + playback_start.elapsed().as_millis() as u64,
+                };
 
                 eprint!(
                     "  \x1b[1mCategory:\x1b[0m \x1b[33mh\x1b[0m=highlight \
