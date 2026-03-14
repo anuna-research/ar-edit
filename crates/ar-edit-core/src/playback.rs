@@ -167,22 +167,28 @@ pub fn launch_player(player: &Player, req: &PlayRequest) -> Result<Child, Playba
     let child = cmd.spawn()?;
 
     // On macOS, activate the player app so its window comes to the front.
+    // Skip for VLC/ffplay when POI capture is active — keep terminal focus
+    // so the user can press keys in the terminal.
     #[cfg(target_os = "macos")]
     {
-        let app_name = match player.kind {
-            PlayerKind::Mpv => "mpv",
-            PlayerKind::Vlc => "VLC",
-            PlayerKind::Ffplay => "ffplay",
-        };
-        // Brief delay to let the window appear before activating
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        let _ = Command::new("osascript")
-            .arg("-e")
-            .arg(format!(
-                "tell application \"System Events\" to set frontmost of \
-                 process \"{app_name}\" to true"
-            ))
-            .spawn();
+        let needs_terminal_focus = req.source_id.is_some()
+            && matches!(player.kind, PlayerKind::Vlc | PlayerKind::Ffplay);
+
+        if !needs_terminal_focus {
+            let app_name = match player.kind {
+                PlayerKind::Mpv => "mpv",
+                PlayerKind::Vlc => "VLC",
+                PlayerKind::Ffplay => "ffplay",
+            };
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let _ = Command::new("osascript")
+                .arg("-e")
+                .arg(format!(
+                    "tell application \"System Events\" to set frontmost of \
+                     process \"{app_name}\" to true"
+                ))
+                .spawn();
+        }
     }
 
     Ok(child)
