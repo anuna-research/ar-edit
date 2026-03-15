@@ -5,6 +5,7 @@ import Sources from './components/Sources';
 import SourceDetail from './components/SourceDetail';
 import StatusBar from './components/StatusBar';
 import { useProject } from './hooks/useProject';
+import { useRotation } from './hooks/useRotation';
 import { useKeyboard } from './hooks/useKeyboard';
 import type { Shot } from './types';
 
@@ -19,8 +20,13 @@ function App() {
     sources,
     transcript,
     reorderShot,
+    trimShot,
+    splitShot,
+    deleteShot,
     projectTitle,
   } = useProject();
+
+  const { rotations, getRotation, cycleRotation } = useRotation(sources);
 
   const selectedShot = editDocument?.shots.find((s) => s.id === selectedShotId) ?? null;
 
@@ -58,6 +64,10 @@ function App() {
           onSelectShot={selectShot}
           onReorderShot={reorderShot}
           onPlayShot={handlePlayShot}
+          onTrimShot={trimShot}
+          onSplitShot={splitShot}
+          onDeleteShot={deleteShot}
+          rotations={rotations}
         />
         <Transcript transcript={transcript} selectedShot={selectedShot} />
         <Sources
@@ -65,7 +75,12 @@ function App() {
           selectedSourceId={selectedSourceId}
           onSelectSource={setSelectedSourceId}
         />
-        <SourceDetail source={previewSource} playingShot={playingShot} />
+        <SourceDetail
+          source={previewSource}
+          playingShot={playingShot}
+          rotation={previewSource ? getRotation(previewSource.id) : 0}
+          onRotate={previewSource ? () => cycleRotation(previewSource.id) : undefined}
+        />
       </div>
       <StatusBar
         projectTitle={projectTitle}

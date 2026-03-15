@@ -1,0 +1,141 @@
+;; Web UI v2 — Timeline editing features
+
+(meta plan
+  (id "WEB-002")
+  (title "Web UI Timeline Editing Features")
+  (version "0.1.0")
+  (status "active")
+  (created "2026-03-15")
+  (author "agent:claude")
+  (description "Add proportional clip sizing, thumbnail overlays on clips, cut/shrink/extend editing, and video rotation to the web UI."))
+
+;; ─── Agents ───────────────────────────────────────────────────
+(given agent-claude-available)
+
+;; ─── Tasks ────────────────────────────────────────────────────
+
+(given task-proportional-clips)
+(given no-deps-proportional-clips)
+(meta task-proportional-clips
+  (description "Refactor timeline so clip blocks are sized proportionally to their actual runtime. Use real duration_ms from source metadata where available. Ensure the timeline scrolls horizontally when total duration exceeds viewport width. Clips should have a minimum width for usability but otherwise reflect true relative duration.")
+  (acceptance "A 30s clip is visually ~3x wider than a 10s clip. Timeline scrolls horizontally for long edits. Duration labels remain readable."))
+
+(given task-clip-thumbnails)
+(given no-deps-clip-thumbnails)
+(meta task-clip-thumbnails
+  (description "Render thumbnail images as backgrounds on timeline clip blocks. Add a backend endpoint GET /api/sources/{id}/thumbnail that returns the first available thumbnail for a source. On the frontend, each clip block shows the thumbnail as a background image with a dark overlay so text remains readable.")
+  (acceptance "Each clip in the timeline shows a thumbnail from its source video behind the text labels. Fallback to colored background when no thumbnail available."))
+
+(given task-clip-editing)
+(meta task-clip-editing
+  (description "Add clip editing operations to the timeline: (1) Cut — split a clip at a point into two clips. (2) Shrink — drag left/right edges to trim the clip range. (3) Extend — drag edges outward to extend the range. Add a context menu (right-click) on clips with Cut option. Add drag handles on clip edges for shrink/extend. Wire operations to update the edit document state via useProject.")
+  (acceptance "Right-click a clip shows Cut option that splits it. Dragging clip edges adjusts the range. Changes reflect in the timeline and transcript viewer immediately."))
+
+(given task-video-rotation)
+(meta task-video-rotation
+  (description "Add video rotation support: (1) Backend endpoint POST /api/sources/{id}/rotate with body {degrees: 90|180|270} that stores rotation metadata. (2) Backend endpoint GET /api/sources/{id}/metadata that returns source metadata including rotation. (3) Frontend: add a rotate button in the source detail panel. (4) Apply CSS transform rotate() to the video player and thumbnails based on stored rotation. Store rotation in a sidecar JSON file per source.")
+  (acceptance "User can click rotate button to cycle through 0/90/180/270 degrees. Video player and thumbnails display rotated. Rotation persists across page reloads."))
+
+;; ─── Readiness rules ──────────────────────────────────────────
+
+(normally r-ready-proportional-clips
+  (and task-proportional-clips no-deps-proportional-clips)
+  ready-proportional-clips)
+
+(normally r-ready-clip-thumbnails
+  (and task-clip-thumbnails no-deps-clip-thumbnails)
+  ready-clip-thumbnails)
+
+(normally r-ready-clip-editing
+  (and task-clip-editing completed-proportional-clips)
+  ready-clip-editing)
+
+(normally r-ready-video-rotation
+  (and task-video-rotation completed-clip-thumbnails)
+  ready-video-rotation)
+
+;; ─── Assignment rules ─────────────────────────────────────────
+
+(normally r-assign-proportional-clips
+  (and ready-proportional-clips agent-claude-available)
+  assign-to-proportional-clips-claude)
+
+(normally r-assign-clip-thumbnails
+  (and ready-clip-thumbnails agent-claude-available)
+  assign-to-clip-thumbnails-claude)
+
+(normally r-assign-clip-editing
+  (and ready-clip-editing agent-claude-available)
+  assign-to-clip-editing-claude)
+
+(normally r-assign-video-rotation
+  (and ready-video-rotation agent-claude-available)
+  assign-to-video-rotation-claude)
+
+;; ─── Rule metadata ────────────────────────────────────────────
+
+(meta r-ready-clip-editing
+  (description "Clip editing needs proportional layout first")
+  (justification "Drag handles on edges require accurate proportional sizing"))
+
+(meta r-ready-video-rotation
+  (description "Rotation needs thumbnails endpoint first")
+  (justification "Rotation transform must apply to both video player and clip thumbnails"))
+
+(claims agent:claude
+  :at "2026-03-15T12:27:12Z"
+  (given claim-v1-proportional-clips)
+  (normally r-cl-state-v1-proportional-clips claim-v1-proportional-clips state-claimed-v1-proportional-clips)
+  (normally r-cl-chain-v1-proportional-clips state-claimed-v1-proportional-clips claimed-proportional-clips)
+)
+
+;; Propagation rules: failures in 'proportional-clips' block downstream tasks
+(normally r-propagate-clip-editing-from-proportional-clips-failed failed-proportional-clips upstream-blocked-clip-editing)
+(normally r-propagate-clip-editing-from-proportional-clips-permanently-failed permanently-failed-proportional-clips upstream-blocked-clip-editing)
+(normally r-propagate-clip-editing-from-proportional-clips-stale-v1 stale-v1-proportional-clips upstream-blocked-clip-editing)
+(normally r-propagate-clip-editing-from-proportional-clips-timeout-v1 timeout-v1-proportional-clips upstream-blocked-clip-editing)
+(normally r-propagate-clip-editing-from-proportional-clips-blocked upstream-blocked-proportional-clips upstream-blocked-clip-editing)
+
+(claims agent:claude
+  :at "2026-03-15T12:27:12Z"
+  (given claim-v1-clip-thumbnails)
+  (normally r-cl-state-v1-clip-thumbnails claim-v1-clip-thumbnails state-claimed-v1-clip-thumbnails)
+  (normally r-cl-chain-v1-clip-thumbnails state-claimed-v1-clip-thumbnails claimed-clip-thumbnails)
+)
+
+;; Propagation rules: failures in 'clip-thumbnails' block downstream tasks
+(normally r-propagate-video-rotation-from-clip-thumbnails-failed failed-clip-thumbnails upstream-blocked-video-rotation)
+(normally r-propagate-video-rotation-from-clip-thumbnails-permanently-failed permanently-failed-clip-thumbnails upstream-blocked-video-rotation)
+(normally r-propagate-video-rotation-from-clip-thumbnails-stale-v1 stale-v1-clip-thumbnails upstream-blocked-video-rotation)
+(normally r-propagate-video-rotation-from-clip-thumbnails-timeout-v1 timeout-v1-clip-thumbnails upstream-blocked-video-rotation)
+(normally r-propagate-video-rotation-from-clip-thumbnails-blocked upstream-blocked-clip-thumbnails upstream-blocked-video-rotation)
+
+(claims agent:claude
+  :at "2026-03-15T12:29:43Z"
+  (given completed-proportional-clips))
+
+(claims agent:claude
+  :at "2026-03-15T12:29:43Z"
+  (given completed-clip-thumbnails))
+
+(claims agent:claude
+  :at "2026-03-15T12:29:47Z"
+  (given claim-v1-clip-editing)
+  (normally r-cl-state-v1-clip-editing claim-v1-clip-editing state-claimed-v1-clip-editing)
+  (normally r-cl-chain-v1-clip-editing state-claimed-v1-clip-editing claimed-clip-editing)
+)
+
+(claims agent:claude
+  :at "2026-03-15T12:29:47Z"
+  (given claim-v1-video-rotation)
+  (normally r-cl-state-v1-video-rotation claim-v1-video-rotation state-claimed-v1-video-rotation)
+  (normally r-cl-chain-v1-video-rotation state-claimed-v1-video-rotation claimed-video-rotation)
+)
+
+(claims agent:claude
+  :at "2026-03-15T12:34:49Z"
+  (given completed-clip-editing))
+
+(claims agent:claude
+  :at "2026-03-15T12:34:49Z"
+  (given completed-video-rotation))

@@ -77,6 +77,9 @@ pub async fn serve(project_dir: PathBuf, port: u16) -> anyhow::Result<()> {
         .route("/api/transcripts/{id}", get(get_transcript))
         .route("/api/play", post(post_play))
         .route("/api/sources/{id}/video", get(get_source_video))
+        .route("/api/sources/{id}/thumbnail", get(get_source_thumbnail))
+        .route("/api/sources/{id}/rotation", get(get_source_rotation))
+        .route("/api/sources/{id}/rotation", post(post_source_rotation))
         .nest_service("/api/thumbnails", ServeDir::new(&thumbnail_dir))
         .fallback_service(ServeDir::new(&static_dir))
         .layer(CorsLayer::permissive())
@@ -190,6 +193,90 @@ async fn get_source_video(
     let resp = service.try_call(req).await
         .map_err(|e| anyhow::anyhow!("failed to serve video: {}", e))?;
     Ok(resp.into_response())
+}
+
+// ---------------------------------------------------------------------------
+// Thumbnail endpoint
+// ---------------------------------------------------------------------------
+
+async fn get_source_thumbnail(
+    State(state): State<Arc<AppState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Response, AppError> {
+    let thumbnail_dir = state.project_dir.join("thumbnails");
+    if thumbnail_dir.is_dir() {
+        // Find the first thumbnail matching {source_id}_*.jpg
+        let prefix = format!("{}_", id);
+        if let Ok(entries) = std::fs::read_dir(&thumbnail_dir) {
+            let mut matches: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.starts_with(&prefix) && n.ends_with(".jpg"))
+                        .unwrap_or(false)
+                })
+                .collect();
+            matches.sort();
+            if let Some(path) = matches.first() {
+                let bytes = std::fs::read(path)?;
+                return Ok((
+                    StatusCode::OK,
+                    [("content-type", "image/jpeg")],
+                    bytes,
+                )
+                    .into_response());
+            }
+        }
+    }
+    Ok(StatusCode::NOT_FOUND.into_response())
+}
+
+// ---------------------------------------------------------------------------
+// Rotation endpoints
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct RotationResponse {
+    degrees: u16,
+}
+
+async fn get_source_rotation(
+    State(state): State<Arc<AppState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<impl IntoResponse, AppError> {
+    let path = state
+        .project_dir
+        .join("web-meta")
+        .join(format!("{id}.rotation.json"));
+    if path.exists() {
+        let data = std::fs::read_to_string(&path)?;
+        let rot: RotationResponse = serde_json::from_str(&data)?;
+        Ok(Json(rot))
+    } else {
+        Ok(Json(RotationResponse { degrees: 0 }))
+    }
+}
+
+async fn post_source_rotation(
+    State(state): State<Arc<AppState>>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<RotationResponse>,
+) -> Result<impl IntoResponse, AppError> {
+    let degrees = body.degrees;
+    if degrees != 0 && degrees != 90 && degrees != 180 && degrees != 270 {
+        return Err(AppError(anyhow::anyhow!(
+            "degrees must be 0, 90, 180, or 270 (got {})",
+            degrees
+        )));
+    }
+    let meta_dir = state.project_dir.join("web-meta");
+    std::fs::create_dir_all(&meta_dir)?;
+    let path = meta_dir.join(format!("{id}.rotation.json"));
+    let data = serde_json::to_string_pretty(&RotationResponse { degrees })?;
+    std::fs::write(&path, data)?;
+    Ok(Json(RotationResponse { degrees }))
 }
 
 // ---------------------------------------------------------------------------

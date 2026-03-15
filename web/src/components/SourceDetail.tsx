@@ -5,6 +5,10 @@ interface SourceDetailProps {
   source: Source | null;
   /** If a shot is playing, jump to its time range */
   playingShot?: Shot | null;
+  /** Current rotation in degrees (0/90/180/270) */
+  rotation?: number;
+  /** Cycle rotation to next value */
+  onRotate?: () => void;
 }
 
 function formatDuration(ms?: number): string {
@@ -33,7 +37,7 @@ function StatusBadge({ label, value }: { label: string; value?: boolean }) {
   );
 }
 
-export default function SourceDetail({ source, playingShot }: SourceDetailProps) {
+export default function SourceDetail({ source, playingShot, rotation = 0, onRotate }: SourceDetailProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoError, setVideoError] = useState(false);
   const prevSourceId = useRef<string | null>(null);
@@ -69,7 +73,7 @@ export default function SourceDetail({ source, playingShot }: SourceDetailProps)
       ) : (
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
           {/* Video player */}
-          <div className="rounded overflow-hidden bg-black aspect-video flex items-center justify-center">
+          <div className="relative rounded overflow-hidden bg-black aspect-video flex items-center justify-center">
             {videoError ? (
               <span className="text-neutral-600 text-sm">Cannot play video in browser</span>
             ) : (
@@ -79,8 +83,27 @@ export default function SourceDetail({ source, playingShot }: SourceDetailProps)
                 src={`/api/sources/${source.id}/video`}
                 controls
                 className="w-full h-full"
+                style={{
+                  transform: rotation ? `rotate(${rotation}deg)` : undefined,
+                  ...(rotation === 90 || rotation === 270
+                    ? { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', scale: 'calc(9/16)' }
+                    : {}),
+                  transition: 'transform 0.2s ease',
+                }}
                 onError={() => setVideoError(true)}
               />
+            )}
+            {onRotate && (
+              <button
+                className="absolute top-2 right-2 z-20 w-7 h-7 flex items-center justify-center rounded bg-neutral-900/70 hover:bg-neutral-700 text-neutral-300 hover:text-white text-sm transition-colors"
+                title={`Rotate (currently ${rotation}\u00B0)`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRotate();
+                }}
+              >
+                &#x21bb;
+              </button>
             )}
           </div>
 

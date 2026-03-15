@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import type { EditDocument, EditDocumentRaw, Source, Transcript, Manifest } from '../types';
+import type { EditDocument, EditDocumentRaw, Source, ShotRange, Transcript, Manifest } from '../types';
 import { normaliseShot } from '../types';
 
 export interface UseProjectReturn {
@@ -11,6 +11,9 @@ export interface UseProjectReturn {
   selectedSource: Source | undefined;
   transcript: Transcript | null;
   reorderShot: (fromIndex: number, toIndex: number) => void;
+  trimShot: (shotId: string, newRange: ShotRange) => void;
+  splitShot: (shotId: string, splitMs: number) => void;
+  deleteShot: (shotId: string) => void;
   projectTitle: string | null;
 }
 
@@ -103,6 +106,69 @@ export function useProject(): UseProjectReturn {
     });
   }, []);
 
+  const trimShot = useCallback((shotId: string, newRange: ShotRange) => {
+    setEditDocument((prev) => {
+      if (!prev) return prev;
+      const shots = prev.shots.map((s) =>
+        s.id === shotId ? { ...s, range: newRange } : s,
+      );
+      return { ...prev, shots };
+    });
+  }, []);
+
+  const splitShot = useCallback((shotId: string, splitMs: number) => {
+    setEditDocument((prev) => {
+      if (!prev) return prev;
+      const idx = prev.shots.findIndex((s) => s.id === shotId);
+      if (idx === -1) return prev;
+      const shot = prev.shots[idx];
+      const r = shot.range;
+
+      let leftRange: ShotRange;
+      let rightRange: ShotRange;
+
+      switch (r.type) {
+        case 'time': {
+          if (splitMs <= r.from_ms || splitMs >= r.to_ms) return prev;
+          leftRange = { type: 'time', from_ms: r.from_ms, to_ms: splitMs };
+          rightRange = { type: 'time', from_ms: splitMs, to_ms: r.to_ms };
+          break;
+        }
+        case 'words': {
+          // splitMs is treated as a word index for word-based ranges
+          const splitWord = Math.round(splitMs);
+          if (splitWord <= r.from || splitWord > r.to) return prev;
+          leftRange = { type: 'words', from: r.from, to: splitWord - 1 };
+          rightRange = { type: 'words', from: splitWord, to: r.to };
+          break;
+        }
+        case 'scenes': {
+          const splitScene = Math.round(splitMs);
+          if (splitScene <= r.from || splitScene > r.to) return prev;
+          leftRange = { type: 'scenes', from: r.from, to: splitScene - 1 };
+          rightRange = { type: 'scenes', from: splitScene, to: r.to };
+          break;
+        }
+      }
+
+      const leftShot = { ...shot, id: `${shot.id}-a`, range: leftRange };
+      const rightShot = { ...shot, id: `${shot.id}-b`, range: rightRange };
+
+      const shots = [...prev.shots];
+      shots.splice(idx, 1, leftShot, rightShot);
+      return { ...prev, shots };
+    });
+  }, []);
+
+  const deleteShot = useCallback((shotId: string) => {
+    setEditDocument((prev) => {
+      if (!prev) return prev;
+      const shots = prev.shots.filter((s) => s.id !== shotId);
+      return { ...prev, shots };
+    });
+    setSelectedShotId((prev) => (prev === shotId ? null : prev));
+  }, []);
+
   return {
     editDocument,
     editNames,
@@ -112,6 +178,9 @@ export function useProject(): UseProjectReturn {
     selectedSource,
     transcript,
     reorderShot,
+    trimShot,
+    splitShot,
+    deleteShot,
     projectTitle,
   };
 }
