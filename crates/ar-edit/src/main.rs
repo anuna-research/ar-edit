@@ -1,6 +1,8 @@
 mod cli;
 #[cfg(feature = "tui")]
 mod tui;
+#[cfg(feature = "web")]
+mod web;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -342,6 +344,21 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             {
                 anyhow::bail!(
                     "TUI support is not enabled. Rebuild with: cargo build --features tui"
+                )
+            }
+        }
+        Commands::Serve { port } => {
+            #[cfg(feature = "web")]
+            {
+                let project_dir = PathBuf::from(".");
+                let rt = tokio::runtime::Runtime::new()?;
+                rt.block_on(web::serve(project_dir, *port))
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let _ = port;
+                anyhow::bail!(
+                    "Web server support is not enabled. Rebuild with: cargo build --features web"
                 )
             }
         }

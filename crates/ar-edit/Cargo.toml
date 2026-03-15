@@ -7,6 +7,7 @@ license.workspace = true
 [features]
 default = ["tui"]
 tui = ["dep:ratatui", "dep:crossterm"]
+web = ["dep:axum", "dep:tower-http"]
 
 [dependencies]
 ar-edit-core.workspace = true
@@ -20,8 +21,8 @@ anyhow.workspace = true
 clap_complete.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-ratatui-image = { version = "4", default-features = false, features = ["crossterm"] }
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+axum = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
 
 [dev-dependencies]
 assert_cmd.workspace = true

@@ -1,0 +1,230 @@
+;; Web UI Prototype for ar-edit
+;; A browser-based editor with timeline, transcript, and source panels
+
+(meta plan
+  (id "WEB-001")
+  (title "Web UI Prototype with Timeline")
+  (version "0.1.0")
+  (status "active")
+  (created "2026-03-15")
+  (author "agent:claude")
+  (description "Prototype a web UI for the ar-edit transcript-based video editor. Core deliverable: an interactive timeline component for arranging shots, with source browser and transcript viewer. Reuses ar-edit-core via a lightweight Rust web server."))
+
+;; ─── Agents ───────────────────────────────────────────────────
+(given agent-claude-available)
+
+;; ─── Tasks ────────────────────────────────────────────────────
+
+;; Phase 1: Backend API
+(given task-api-server)
+(given no-deps-api-server)
+(meta task-api-server
+  (description "Add an Axum web server to ar-edit that exposes project data as JSON REST endpoints: GET /api/manifest, GET /api/sources, GET /api/edits/:name, GET /api/transcripts/:id, GET /api/thumbnails/:path. Serve static files from an embedded dist/ directory.")
+  (acceptance "Server starts on a configurable port, all endpoints return correct JSON matching existing ar-edit-core types, thumbnails served as images"))
+
+;; Phase 2: Frontend scaffold
+(given task-frontend-scaffold)
+(meta task-frontend-scaffold
+  (description "Set up a minimal frontend project in web/ using TypeScript, React, and Vite. Include TailwindCSS for styling. Create the app shell with a layout matching the TUI: timeline (top-left), transcript (top-right), sources (bottom-left), source detail (bottom-right), and status bar. Use fetch() to load data from the API server.")
+  (acceptance "App builds with vite, renders the 4-panel layout with placeholder content, fetches and displays manifest data from the API"))
+
+;; Phase 3: Timeline component (the core deliverable)
+(given task-timeline)
+(meta task-timeline
+  (description "Build the interactive timeline component. Render shots as horizontal blocks proportional to duration on a time-ruler. Support: click to select, drag to reorder, visual indication of selected shot, shot labels (source + range info), total duration display. Wire selection to update transcript and source detail panels.")
+  (acceptance "Timeline renders all shots from an edit document, shots are selectable and reorderable via drag-and-drop, selection syncs to other panels, time ruler shows accurate durations"))
+
+;; Phase 4: Source browser panel
+(given task-source-browser)
+(meta task-source-browser
+  (description "Build the source browser panel. List all registered sources with transcription/indexing status indicators. Click a source to show its detail (metadata, thumbnail preview). Support adding a shot from a source to the timeline.")
+  (acceptance "Sources listed with status badges, clicking shows detail with thumbnail, can trigger add-shot action"))
+
+;; Phase 5: Transcript viewer panel
+(given task-transcript-viewer)
+(meta task-transcript-viewer
+  (description "Build the transcript viewer panel. When a shot is selected in the timeline, display its transcript context with the selected range highlighted. Support word-level, scene-level, and time-range display modes matching the TUI behavior.")
+  (acceptance "Transcript displays for selected shot, word ranges show highlighted words, scene ranges show scene list, auto-scrolls to relevant content"))
+
+;; Phase 6: Playback integration
+(given task-playback)
+(meta task-playback
+  (description "Add basic playback controls: play selected shot via the API (triggers server-side VLC/mpv launch), show playback position on the timeline as a scrubber/playhead. Add keyboard shortcuts matching TUI conventions (p to play, j/k to navigate).")
+  (acceptance "Play button triggers playback of selected shot, playhead visible on timeline, keyboard shortcuts work"))
+
+;; ─── Readiness rules ──────────────────────────────────────────
+
+(normally r-ready-api-server
+  (and task-api-server no-deps-api-server)
+  ready-api-server)
+
+(normally r-ready-frontend-scaffold
+  (and task-frontend-scaffold completed-api-server)
+  ready-frontend-scaffold)
+
+(normally r-ready-timeline
+  (and task-timeline completed-frontend-scaffold)
+  ready-timeline)
+
+(normally r-ready-source-browser
+  (and task-source-browser completed-frontend-scaffold)
+  ready-source-browser)
+
+(normally r-ready-transcript-viewer
+  (and task-transcript-viewer completed-timeline)
+  ready-transcript-viewer)
+
+(normally r-ready-playback
+  (and task-playback completed-timeline)
+  ready-playback)
+
+;; ─── Assignment rules ─────────────────────────────────────────
+
+(normally r-assign-api-server
+  (and ready-api-server agent-claude-available)
+  assign-to-api-server-claude)
+
+(normally r-assign-frontend-scaffold
+  (and ready-frontend-scaffold agent-claude-available)
+  assign-to-frontend-scaffold-claude)
+
+(normally r-assign-timeline
+  (and ready-timeline agent-claude-available)
+  assign-to-timeline-claude)
+
+(normally r-assign-source-browser
+  (and ready-source-browser agent-claude-available)
+  assign-to-source-browser-claude)
+
+(normally r-assign-transcript-viewer
+  (and ready-transcript-viewer agent-claude-available)
+  assign-to-transcript-viewer-claude)
+
+(normally r-assign-playback
+  (and ready-playback agent-claude-available)
+  assign-to-playback-claude)
+
+;; ─── Rule metadata ────────────────────────────────────────────
+
+(meta r-ready-api-server
+  (description "API server has no dependencies, can start immediately")
+  (justification "Backend must exist before frontend can fetch data"))
+
+(meta r-ready-frontend-scaffold
+  (description "Frontend scaffold needs API server to fetch real data")
+  (justification "Build against real endpoints from the start, not mocks"))
+
+(meta r-ready-timeline
+  (description "Timeline is the core deliverable, built on the scaffold")
+  (justification "Central component that other panels wire into"))
+
+(meta r-ready-source-browser
+  (description "Source browser can be built in parallel with timeline")
+  (justification "Independent panel, only needs the scaffold"))
+
+(meta r-ready-transcript-viewer
+  (description "Transcript viewer needs timeline for selection state")
+  (justification "Displays context for the timeline's selected shot"))
+
+(meta r-ready-playback
+  (description "Playback needs timeline for playhead display")
+  (justification "Playhead position rendered on the timeline ruler"))
+
+(claims agent:claude
+  :at "2026-03-15T05:39:06Z"
+  (given claim-v1-api-server)
+  (normally r-cl-state-v1-api-server claim-v1-api-server state-claimed-v1-api-server)
+  (normally r-cl-chain-v1-api-server state-claimed-v1-api-server claimed-api-server)
+)
+
+;; Propagation rules: failures in 'api-server' block downstream tasks
+(normally r-propagate-frontend-scaffold-from-api-server-failed failed-api-server upstream-blocked-frontend-scaffold)
+(normally r-propagate-frontend-scaffold-from-api-server-permanently-failed permanently-failed-api-server upstream-blocked-frontend-scaffold)
+(normally r-propagate-frontend-scaffold-from-api-server-stale-v1 stale-v1-api-server upstream-blocked-frontend-scaffold)
+(normally r-propagate-frontend-scaffold-from-api-server-timeout-v1 timeout-v1-api-server upstream-blocked-frontend-scaffold)
+(normally r-propagate-frontend-scaffold-from-api-server-blocked upstream-blocked-api-server upstream-blocked-frontend-scaffold)
+
+;; Transitive propagation: upstream-blocked cascades through dependency chain
+(normally r-propagate-source-browser-from-frontend-scaffold-blocked upstream-blocked-frontend-scaffold upstream-blocked-source-browser)
+(normally r-propagate-timeline-from-frontend-scaffold-blocked upstream-blocked-frontend-scaffold upstream-blocked-timeline)
+(normally r-propagate-playback-from-timeline-blocked upstream-blocked-timeline upstream-blocked-playback)
+(normally r-propagate-transcript-viewer-from-timeline-blocked upstream-blocked-timeline upstream-blocked-transcript-viewer)
+
+(claims agent:claude
+  :at "2026-03-15T05:44:24Z"
+  (given completed-api-server))
+
+(claims agent:claude
+  :at "2026-03-15T05:44:31Z"
+  (given claim-v1-frontend-scaffold)
+  (normally r-cl-state-v1-frontend-scaffold claim-v1-frontend-scaffold state-claimed-v1-frontend-scaffold)
+  (normally r-cl-chain-v1-frontend-scaffold state-claimed-v1-frontend-scaffold claimed-frontend-scaffold)
+)
+
+;; Propagation rules: failures in 'frontend-scaffold' block downstream tasks
+(normally r-propagate-source-browser-from-frontend-scaffold-failed failed-frontend-scaffold upstream-blocked-source-browser)
+(normally r-propagate-source-browser-from-frontend-scaffold-permanently-failed permanently-failed-frontend-scaffold upstream-blocked-source-browser)
+(normally r-propagate-source-browser-from-frontend-scaffold-stale-v1 stale-v1-frontend-scaffold upstream-blocked-source-browser)
+(normally r-propagate-source-browser-from-frontend-scaffold-timeout-v1 timeout-v1-frontend-scaffold upstream-blocked-source-browser)
+(normally r-propagate-timeline-from-frontend-scaffold-failed failed-frontend-scaffold upstream-blocked-timeline)
+(normally r-propagate-timeline-from-frontend-scaffold-permanently-failed permanently-failed-frontend-scaffold upstream-blocked-timeline)
+(normally r-propagate-timeline-from-frontend-scaffold-stale-v1 stale-v1-frontend-scaffold upstream-blocked-timeline)
+(normally r-propagate-timeline-from-frontend-scaffold-timeout-v1 timeout-v1-frontend-scaffold upstream-blocked-timeline)
+
+(claims agent:claude
+  :at "2026-03-15T05:46:46Z"
+  (given completed-frontend-scaffold))
+
+(claims agent:claude
+  :at "2026-03-15T05:46:49Z"
+  (given claim-v1-timeline)
+  (normally r-cl-state-v1-timeline claim-v1-timeline state-claimed-v1-timeline)
+  (normally r-cl-chain-v1-timeline state-claimed-v1-timeline claimed-timeline)
+)
+
+;; Propagation rules: failures in 'timeline' block downstream tasks
+(normally r-propagate-playback-from-timeline-failed failed-timeline upstream-blocked-playback)
+(normally r-propagate-playback-from-timeline-permanently-failed permanently-failed-timeline upstream-blocked-playback)
+(normally r-propagate-playback-from-timeline-stale-v1 stale-v1-timeline upstream-blocked-playback)
+(normally r-propagate-playback-from-timeline-timeout-v1 timeout-v1-timeline upstream-blocked-playback)
+(normally r-propagate-transcript-viewer-from-timeline-failed failed-timeline upstream-blocked-transcript-viewer)
+(normally r-propagate-transcript-viewer-from-timeline-permanently-failed permanently-failed-timeline upstream-blocked-transcript-viewer)
+(normally r-propagate-transcript-viewer-from-timeline-stale-v1 stale-v1-timeline upstream-blocked-transcript-viewer)
+(normally r-propagate-transcript-viewer-from-timeline-timeout-v1 timeout-v1-timeline upstream-blocked-transcript-viewer)
+
+(claims agent:claude
+  :at "2026-03-15T05:46:49Z"
+  (given claim-v1-source-browser)
+  (normally r-cl-state-v1-source-browser claim-v1-source-browser state-claimed-v1-source-browser)
+  (normally r-cl-chain-v1-source-browser state-claimed-v1-source-browser claimed-source-browser)
+)
+
+(claims agent:claude
+  :at "2026-03-15T05:49:19Z"
+  (given completed-timeline))
+
+(claims agent:claude
+  :at "2026-03-15T05:49:19Z"
+  (given completed-source-browser))
+
+(claims agent:claude
+  :at "2026-03-15T05:49:23Z"
+  (given claim-v1-transcript-viewer)
+  (normally r-cl-state-v1-transcript-viewer claim-v1-transcript-viewer state-claimed-v1-transcript-viewer)
+  (normally r-cl-chain-v1-transcript-viewer state-claimed-v1-transcript-viewer claimed-transcript-viewer)
+)
+
+(claims agent:claude
+  :at "2026-03-15T05:49:23Z"
+  (given claim-v1-playback)
+  (normally r-cl-state-v1-playback claim-v1-playback state-claimed-v1-playback)
+  (normally r-cl-chain-v1-playback state-claimed-v1-playback claimed-playback)
+)
+
+(claims agent:claude
+  :at "2026-03-15T05:52:36Z"
+  (given completed-transcript-viewer))
+
+(claims agent:claude
+  :at "2026-03-15T05:52:36Z"
+  (given completed-playback))

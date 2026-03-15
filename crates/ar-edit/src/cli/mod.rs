@@ -137,6 +137,13 @@ pub enum Commands {
     /// Launch the interactive terminal UI
     Tui,
 
+    /// Start the web API server
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value = "3001")]
+        port: u16,
+    },
+
     /// Generate shell completions
     Completions {
         /// Target shell
