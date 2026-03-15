@@ -1,14 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
-import type { Source, Shot } from '../types';
+import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
+import type { Source } from '../types';
+
+/** Imperative API for controlling playback from parent */
+export interface VideoHandle {
+  /** Seek to a source-local time and optionally play. Returns true if same-source (instant). */
+  seekAndPlay: (sourceId: string, sec: number, play: boolean) => boolean;
+}
 
 interface SourceDetailProps {
   source: Source | null;
-  /** If a shot is playing, jump to its time range */
-  playingShot?: Shot | null;
-  /** Current rotation in degrees (0/90/180/270) */
+  seekToSec?: number | null;
+  autoPlay?: boolean;
+  onTimeUpdate?: (sec: number) => void;
+  onPlayStateChange?: (playing: boolean) => void;
   rotation?: number;
-  /** Cycle rotation to next value */
   onRotate?: () => void;
+  nextSourceId?: string | null;
 }
 
 function formatDuration(ms?: number): string {
@@ -37,29 +44,101 @@ function StatusBadge({ label, value }: { label: string; value?: boolean }) {
   );
 }
 
-export default function SourceDetail({ source, playingShot, rotation = 0, onRotate }: SourceDetailProps) {
+const SourceDetail = forwardRef<VideoHandle, SourceDetailProps>(function SourceDetail({
+  source,
+  seekToSec,
+  autoPlay,
+  onTimeUpdate,
+  onPlayStateChange,
+  rotation = 0,
+  onRotate,
+  nextSourceId,
+}, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoError, setVideoError] = useState(false);
-  const prevSourceId = useRef<string | null>(null);
+  const seekingRef = useRef(false);
+  const pendingRef = useRef<{ sec: number; play: boolean } | null>(null);
+  const currentSrcRef = useRef<string | null>(null);
 
-  // Reset video error when source changes
+  // Imperative API: seek directly on the video element (no state roundtrip)
+  useImperativeHandle(ref, () => ({
+    seekAndPlay(sourceId: string, sec: number, play: boolean): boolean {
+      const video = videoRef.current;
+      if (!video) return false;
+      const expectedSrc = `/api/sources/${sourceId}/video`;
+      if (currentSrcRef.current === expectedSrc && video.readyState >= 2) {
+        // Same source, already loaded — instant seek
+        seekingRef.current = true;
+        video.currentTime = sec;
+        if (play && video.paused) video.play().catch(() => {});
+        setTimeout(() => { seekingRef.current = false; }, 50);
+        return true;
+      }
+      // Different source — need to go through state
+      return false;
+    },
+  }), []);
+
+  // Change video source without remounting the element
   useEffect(() => {
-    if (source?.id !== prevSourceId.current) {
+    const video = videoRef.current;
+    if (!video || !source) return;
+    const newSrc = `/api/sources/${source.id}/video`;
+    if (currentSrcRef.current !== newSrc) {
+      currentSrcRef.current = newSrc;
+      video.src = newSrc;
+      video.load();
       setVideoError(false);
-      prevSourceId.current = source?.id ?? null;
     }
   }, [source?.id]);
 
-  // Seek to shot time range when playingShot changes
+  // React to seek commands
   useEffect(() => {
+    if (seekToSec == null) return;
     const video = videoRef.current;
-    if (!video || !playingShot) return;
+    if (!video) return;
 
-    if (playingShot.range.type === 'time') {
-      video.currentTime = playingShot.range.from_ms / 1000;
+    const doSeek = () => {
+      seekingRef.current = true;
+      video.currentTime = seekToSec;
+      if (autoPlay) {
+        video.play().catch(() => {});
+      } else if (!autoPlay && !video.paused) {
+        video.pause();
+      }
+      setTimeout(() => { seekingRef.current = false; }, 50);
+    };
+
+    if (video.readyState >= 2) {
+      doSeek();
+    } else {
+      // Defer until video is ready
+      pendingRef.current = { sec: seekToSec, play: !!autoPlay };
+    }
+  }, [seekToSec, autoPlay]);
+
+  const handleCanPlay = useCallback(() => {
+    const pending = pendingRef.current;
+    if (!pending) return;
+    pendingRef.current = null;
+    const video = videoRef.current;
+    if (!video) return;
+    seekingRef.current = true;
+    video.currentTime = pending.sec;
+    if (pending.play) {
       video.play().catch(() => {});
     }
-  }, [playingShot]);
+    setTimeout(() => { seekingRef.current = false; }, 50);
+  }, []);
+
+  const handleTimeUpdate = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || seekingRef.current) return;
+    onTimeUpdate?.(video.currentTime);
+  }, [onTimeUpdate]);
+
+  const handlePlay = useCallback(() => onPlayStateChange?.(true), [onPlayStateChange]);
+  const handlePause = useCallback(() => onPlayStateChange?.(false), [onPlayStateChange]);
 
   return (
     <div className="flex flex-col border border-neutral-700 rounded-md overflow-hidden">
@@ -79,18 +158,21 @@ export default function SourceDetail({ source, playingShot, rotation = 0, onRota
             ) : (
               <video
                 ref={videoRef}
-                key={source.id}
-                src={`/api/sources/${source.id}/video`}
+                preload="auto"
                 controls
                 className="w-full h-full"
                 style={{
                   transform: rotation ? `rotate(${rotation}deg)` : undefined,
                   ...(rotation === 90 || rotation === 270
-                    ? { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', scale: 'calc(9/16)' }
+                    ? { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' as const, scale: 'calc(9/16)' }
                     : {}),
                   transition: 'transform 0.2s ease',
                 }}
                 onError={() => setVideoError(true)}
+                onCanPlay={handleCanPlay}
+                onTimeUpdate={handleTimeUpdate}
+                onPlay={handlePlay}
+                onPause={handlePause}
               />
             )}
             {onRotate && (
@@ -106,6 +188,15 @@ export default function SourceDetail({ source, playingShot, rotation = 0, onRota
               </button>
             )}
           </div>
+
+          {/* Preload next source video (hidden) */}
+          {nextSourceId && nextSourceId !== source.id && (
+            <link
+              rel="preload"
+              href={`/api/sources/${nextSourceId}/video`}
+              as="video"
+            />
+          )}
 
           {/* Source info */}
           <div className="space-y-1.5">
@@ -129,4 +220,6 @@ export default function SourceDetail({ source, playingShot, rotation = 0, onRota
       )}
     </div>
   );
-}
+});
+
+export default SourceDetail;

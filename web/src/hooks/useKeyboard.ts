@@ -22,12 +22,14 @@ export interface UseKeyboardOptions {
   editDocument: EditDocument | null;
   selectedShotId: string | null;
   selectShot: (id: string | null) => void;
+  onTogglePlay?: () => void;
 }
 
 export function useKeyboard({
   editDocument,
   selectedShotId,
   selectShot,
+  onTogglePlay,
 }: UseKeyboardOptions): void {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -58,6 +60,11 @@ export function useKeyboard({
           selectShot(shots[prevIndex].id);
           break;
         }
+        case ' ': {
+          // Space = play/pause
+          onTogglePlay?.();
+          break;
+        }
         case 'Escape': {
           selectShot(null);
           break;
@@ -71,5 +78,5 @@ export function useKeyboard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editDocument, selectedShotId, selectShot]);
+  }, [editDocument, selectedShotId, selectShot, onTogglePlay]);
 }

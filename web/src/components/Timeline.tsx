@@ -94,6 +94,14 @@ interface TimelineProps {
   onDeleteShot?: (shotId: string) => void;
   /** Map of source ID to rotation degrees (0/90/180/270) */
   rotations?: Map<string, number>;
+  /** Controlled playhead position in timeline-global ms */
+  playheadMs?: number | null;
+  /** Called when user moves the playhead (scrub/click) */
+  onPlayheadChange?: (ms: number) => void;
+  /** Whether the edit is currently playing */
+  isPlaying?: boolean;
+  /** Toggle play/pause for the whole edit */
+  onTogglePlay?: () => void;
 }
 
 export default function Timeline({
@@ -107,6 +115,10 @@ export default function Timeline({
   onSplitShot,
   onDeleteShot,
   rotations,
+  isPlaying,
+  onTogglePlay,
+  playheadMs: controlledPlayheadMs,
+  onPlayheadChange,
 }: TimelineProps) {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const dragIndexRef = useRef<number | null>(null);
@@ -116,8 +128,16 @@ export default function Timeline({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [trimTooltip, setTrimTooltip] = useState<TrimTooltipState | null>(null);
   const [pxPerSec, setPxPerSec] = useState(DEFAULT_PX_PER_SEC);
-  const [playheadMs, setPlayheadMs] = useState<number | null>(null);
+  const [internalPlayheadMs, setInternalPlayheadMs] = useState<number | null>(null);
+  // Use controlled value if provided, otherwise internal
+  const playheadMs = controlledPlayheadMs ?? internalPlayheadMs;
+  const updatePlayhead = useCallback((ms: number) => {
+    setInternalPlayheadMs(ms);
+    onPlayheadChange?.(ms);
+  }, [onPlayheadChange]);
+  const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const rulerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
 
   // Edge-drag state stored in ref (no re-renders during drag — tooltip is separate)
   const edgeDragRef = useRef<EdgeDragState | null>(null);
@@ -191,7 +211,7 @@ export default function Timeline({
     for (let i = 0; i < idx; i++) {
       elapsed += durations[i] ?? 0;
     }
-    setPlayheadMs(elapsed);
+    updatePlayhead(elapsed);
   }, [selectedShotId, editDocument, durations]);
 
   // Compute per-clip pixel widths and total scrollable content width
@@ -279,18 +299,44 @@ export default function Timeline({
     [totalMs, clipWidths, clipOffsets, durations],
   );
 
-  // Handle ruler click to place playhead
-  const handleRulerClick = useCallback(
-    (e: React.MouseEvent) => {
-      const ruler = rulerRef.current;
-      if (!ruler) return;
-      const rect = ruler.getBoundingClientRect();
-      const scrollLeft = ruler.parentElement?.parentElement?.scrollLeft ?? 0;
-      const localX = e.clientX - rect.left + scrollLeft;
-      setPlayheadMs(pxToTime(localX));
+  // Convert a mouse event clientX to a timeline time, accounting for scroll
+  const clientXToTime = useCallback(
+    (clientX: number): number => {
+      const inner = innerRef.current;
+      if (!inner) return 0;
+      const rect = inner.getBoundingClientRect();
+      const localX = clientX - rect.left;
+      return Math.max(0, Math.min(totalMs, pxToTime(localX)));
     },
-    [pxToTime],
+    [pxToTime, totalMs],
   );
+
+  // Handle ruler mousedown — starts playhead drag
+  const handleRulerMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      updatePlayhead(clientXToTime(e.clientX));
+      setIsDraggingPlayhead(true);
+    },
+    [clientXToTime],
+  );
+
+  // Playhead drag: mousemove/mouseup on window
+  useEffect(() => {
+    if (!isDraggingPlayhead) return;
+    const onMove = (e: MouseEvent) => {
+      updatePlayhead(clientXToTime(e.clientX));
+    };
+    const onUp = () => {
+      setIsDraggingPlayhead(false);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [isDraggingPlayhead, clientXToTime]);
 
   // Generate ruler marks
   const rulerMarks = useMemo(() => {
@@ -507,6 +553,15 @@ export default function Timeline({
       <div className="px-3 py-1.5 bg-neutral-800 border-b border-neutral-700 text-xs font-semibold uppercase tracking-wider text-neutral-400 flex items-center justify-between">
         <span>Timeline</span>
         <div className="flex items-center gap-2">
+          {onTogglePlay && totalMs > 0 && (
+            <button
+              className="w-6 h-6 flex items-center justify-center rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-200 text-sm"
+              title={isPlaying ? 'Pause (Space)' : 'Play edit (Space)'}
+              onClick={onTogglePlay}
+            >
+              {isPlaying ? '\u23F8' : '\u25B6'}
+            </button>
+          )}
           {totalMs > 0 && (
             <span className="text-neutral-500 normal-case tracking-normal font-normal mr-2">
               {shots.length} shot{shots.length !== 1 ? 's' : ''} &middot; {formatDuration(totalMs)}
@@ -560,12 +615,12 @@ export default function Timeline({
           className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden p-2"
         >
           {/* Inner wrapper sized to the full scrollable width */}
-          <div className="relative" style={{ width: contentWidth > 0 ? `${contentWidth}px` : '100%' }}>
+          <div ref={innerRef} className="relative" style={{ width: contentWidth > 0 ? `${contentWidth}px` : '100%' }}>
             {/* Time ruler — clickable to place playhead */}
             <div
               ref={rulerRef}
               className="relative h-6 border-b border-neutral-700/50 mb-1 cursor-pointer"
-              onClick={handleRulerClick}
+              onMouseDown={handleRulerMouseDown}
             >
               {rulerMarks.map((t) => {
                 const px = timeToPx(t);
@@ -618,6 +673,12 @@ export default function Timeline({
                     borderTop: '6px solid #ef4444',
                   }}
                 />
+                {/* Current time label */}
+                <div
+                  className="absolute top-6 -translate-x-1/2 bg-red-600 text-white text-[10px] font-mono px-1 py-0.5 rounded whitespace-nowrap"
+                >
+                  {formatDuration(playheadMs)}
+                </div>
               </div>
             )}
 
