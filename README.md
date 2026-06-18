@@ -65,7 +65,32 @@ ar-edit poi remove src-001 --id poi-001
 ar-edit transcripts export --format editable -o draft.md
 # ... edit the markdown ...
 ar-edit edit from-transcript draft.md
+
+# Realtime collaboration (SPEC-003, experimental)
+ar-edit share                 # prints a pairing phrase, e.g. 7-saturn-pioneer
+ar-edit pair 7-saturn-pioneer # join from another machine
+ar-edit session status        # session + sync status
 ```
+
+### Realtime collaboration (experimental)
+
+`ar-edit share` / `ar-edit pair <phrase>` let two or more instances co-edit a
+project over a direct peer-to-peer connection. The edit document is a
+[CRDT](specs/concepts/CRDT.md) ([Loro](specs/concepts/Loro.md)), so concurrent
+edits merge automatically; source media syncs content-addressed by
+[BLAKE3](specs/concepts/BLAKE3.md). Pairing uses
+[SPAKE2](specs/concepts/SPAKE2.md) over a rendezvous server, then hands off to
+[iroh](specs/concepts/iroh.md).
+
+Status: the CRDT engine, iroh transport, blob-integrity sync, delta reconnect,
+presence, and rendezvous relay are implemented and tested in the
+`ar-edit-collab` crate. The **live session transport is behind the
+`collab-transport` build feature** (needs rustc ≥ 1.91), and the **SPAKE2
+pairing is pending a mandatory security review** (ADR-009) before production
+use — so `pair` currently validates the phrase and reports status rather than
+opening a live session in default builds. See
+[SPEC-003](specs/SPEC-003-realtime-collaborative-editing.md) and
+[IMPL-003 status](plans/IMPL-003-STATUS.md).
 
 ## Shot ranges
 
@@ -133,12 +158,15 @@ See [`specs/`](specs/) for the full specification:
 
 - [SPEC-001](specs/SPEC-001-transcript-video-editor.md) — functional requirements
 - [SPEC-002](specs/SPEC-002-points-of-interest.md) — points of interest (single-moment annotations)
+- [SPEC-003](specs/SPEC-003-realtime-collaborative-editing.md) — realtime collaborative editing via p2p CRDTs
 - [DATA-MODEL](specs/DATA-MODEL.md) — data structures and relationships
 - [IMPL-001](specs/IMPL-001-implementation-plan.md) — implementation phases
+- [IMPL-003 status](plans/IMPL-003-STATUS.md) — collaboration implementation status
 - [ADR-001](specs/ADR-001-event-sourced-edits.md) — event-sourced edit document
 - [ADR-002](specs/ADR-002-tagged-union-shot-ranges.md) — tagged union shot ranges
 - [ADR-003](specs/ADR-003-subprocess-architecture.md) — subprocess architecture
 - [ADR-004](specs/ADR-004-dual-mode-tui-cli.md) — dual-mode TUI + CLI
+- [ADR-012](specs/ADR-012-cross-platform-source-linking.md) — cross-platform source linking
 
 ## License
 

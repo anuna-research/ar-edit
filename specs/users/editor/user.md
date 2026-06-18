@@ -19,7 +19,7 @@ A content creator, journalist, or video producer who works with multiple video s
 ## Constraints
 
 - **Technical proficiency**: Comfortable with CLI tools and terminal workflows; not necessarily a professional video editor
-- **Environment**: macOS or Linux workstation with ffmpeg, VLC, and whisper.cpp installed locally
+- **Environment**: macOS, Linux, or Windows 10+ workstation with ffmpeg, VLC, and whisper.cpp installed locally (platform support is specified in [[SPEC-001-transcript-video-editor#NFR-015]])
 - **Accessibility**: Relies on text-based interfaces; may use screen readers or keyboard-only navigation
 - **Hardware**: Has a machine capable of running whisper.cpp models (at minimum the `base` model); may not have a GPU
 - **Time pressure**: Wants to produce edits in minutes, not hours; transcript-based editing is chosen precisely because it is faster than timeline scrubbing

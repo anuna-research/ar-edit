@@ -1,0 +1,595 @@
+;; =============================================================================
+;; IMPL-003: Realtime Collaborative Editing via P2P CRDTs
+;; Implementation plan derived from SPEC-003 (ADR-007..012, CON-012..016).
+;; Two phases:
+;;   P (pure core)  — Loro CRDT model, migration, LangSec recognisers,
+;;                    reconciliation, per-actor undo. Buildable now: depends
+;;                    only on loro/blake3/spake2 + ar-edit-core (no iroh).
+;;   S (shell)      — iroh transport, rendezvous, SPAKE2 live, blob sync,
+;;                    presence, CLI, rendezvous server. BLOCKED on this host:
+;;                    the iroh/quinn/rustls build tree + 2 GB transfer exceed
+;;                    available disk (~700 MB). Tracked under SPEC-003 OQ-7.
+;; =============================================================================
+
+(meta plan
+  (id "IMPL-003")
+  (title "Realtime Collaborative Editing via P2P CRDTs")
+  (version "1.0.0")
+  (status "active")
+  (created "2026-06-18")
+  (author "agent:claude")
+  (spec "SPEC-003")
+  (description "Reformulate the edit document as a Loro CRDT and add p2p collaboration. Phase P (pure core, 9 tasks) is buildable now and verified with property/fuzz tests; Phase S (effectful shell, 7 tasks) is blocked on disk/transport (OQ-7) and scaffolded behind trait boundaries."))
+
+;; =============================================================================
+;; Agent
+;; =============================================================================
+
+(given agent-claude-available)
+
+;; =============================================================================
+;; PHASE P: Pure Core (buildable now — no iroh, no network, no disk transfer)
+;; Purity Boundary Map "pure core": CRDT merge/materialise, recognisers,
+;; reconciliation, migration. Dependencies: loro, blake3, spake2, ar-edit-core.
+;; =============================================================================
+
+(given task-p0-scaffold)
+(given no-deps-p0-scaffold)
+(given task-p1-crdt-model)
+(given task-p2-materialise)
+(given task-p3-migrate)
+(given task-p4-undo)
+(given task-p5-phrase)
+(given task-p6-wire)
+(given task-p7-reconcile)
+(given task-p8-tests)
+
+(meta task-p0-scaffold
+  (phase "P")
+  (description "Create crate crates/ar-edit-collab; add to workspace members; add workspace deps loro=1, blake3=1, spake2=0.4; depend on ar-edit-core. Module layout per SPEC-003 Purity Boundary Map: core/ (pure: crdt, materialise, migrate, recognise, reconcile, ids) and shell/ (effectful, stubs for now). lib.rs re-exports core. Add a module-level doc comment stating the dependency rule (core MUST NOT import shell or iroh) and a #[cfg(test)] arch guard or comment. Ensures cargo build -p ar-edit-collab compiles without pulling the iroh tree.")
+  (acceptance "cargo build -p ar-edit-collab succeeds; ar-edit-collab depends on ar-edit-core but NOT on iroh/tokio; core modules compile with zero I/O imports"))
+
+(meta task-p1-crdt-model
+  (phase "P")
+  (description "core/crdt.rs: model the edit document as a Loro doc. Shot ORDER as a MovableList<shot-id> (string ids); per-shot fields (source, range) in a top-level LoroMap keyed by shot-id; notes as an append-only LoroList keyed per shot; markers and POIs as LoroMaps keyed by stable id (observed-remove via Loro deletion). Public API: CollabDoc::new(actor_id), add_shot/remove_shot/move_shot/trim_shot/add_note mutators that mirror ar-edit-core::edit semantics but commit to Loro; export_snapshot()->Vec<u8>, import(&[u8]), version()->VersionVector, export_from(&vv)->delta bytes. Range serialised to match ar-edit-core ShotRange (externally-tagged lowercase). Implements REQ-079, REQ-080, REQ-081, REQ-082.")
+  (acceptance "Mutators build a Loro doc; move preserves shot id (no delete+insert); export/import round-trips; two docs sharing changes converge (deep value equal)"))
+
+(meta task-p2-materialise
+  (phase "P")
+  (description "core/materialise.rs: pure fn materialise(&CollabDoc) -> ar_edit_core::models::EditSnapshot (and a to_edit_document() producing the on-disk JSON view). Reads the MovableList order, joins per-shot field maps and notes, reconstructs Vec<Shot> with id/source/range/notes. Deterministic: same CRDT state -> identical EditSnapshot. Implements REQ-079.")
+  (acceptance "materialise is a pure deterministic function; output Shot order matches MovableList order; ranges/notes reconstructed; JSON equals the equivalent single-player snapshot (TEST-092, TEST-093)"))
+
+(meta task-p3-migrate
+  (phase "P")
+  (description "core/migrate.rs: pure fn from_event_sourced(&EditDocument) -> CollabDoc. Replay ops[0..=head] (or use the cached snapshot) into a fresh one-actor CollabDoc such that materialise(result) == input.snapshot. Single-player path: a one-actor CollabDoc is the canonical form (REQ-088). Implements REQ-088, supports ADR-011.")
+  (acceptance "For fixture event-sourced docs, materialise(from_event_sourced(d)) == d.snapshot exactly (TEST-109); one-actor doc behaves identically to single-player (TEST-110)"))
+
+(meta task-p4-undo
+  (phase "P")
+  (description "core/undo.rs: wrap Loro UndoManager scoped to the local actor. undo()/redo() revert/replay only the local actor's own changes, producing inverse changes that propagate as ordinary deltas. Redefines REQ-046/047 for collaborative mode. Implements REQ-086.")
+  (acceptance "Local undo reverts only local changes, never a remote actor's change (TEST-105, TEST-106); single-actor undo/redo observationally matches existing head-pointer behaviour"))
+
+(meta task-p5-phrase
+  (phase "P")
+  (description "core/recognise/phrase.rs: LangSec recogniser for the pairing phrase per CON-013 ABNF (channel '-' word '-' word). Compile an audited wordlist (PGP word list or >=256 phonetically-distinct words) at build time. parse(&str)->Result<Phrase{channel:u16, words:[WordId;2]}, ParseError>: verify channel in 0..=999 and each word in wordlist; NO normalisation/repair; reject malformed before emitting typed value. Also generate(rng)->Phrase using a CSPRNG for REQ-067. Implements REQ-067, REQ-069 (parse side), CON-013.")
+  (acceptance "Valid phrases parse to typed Phrase; malformed/non-wordlist/out-of-range rejected with no side effect; generator emits grammar-conformant phrases from CSPRNG (TEST-074, TEST-075)"))
+
+(meta task-p6-wire
+  (phase "P")
+  (description "core/recognise/wire.rs: LangSec recognisers for the length-prefixed, externally-tagged frames of CON-014 (rendezvous), CON-015 (sync envelope: version+tag+payload, version mismatch rejected), CON-016 (source-sync: MANIFEST/WANT/HAVE/CONFLICT, blake3-hash exactly 32 octets). Each: parse &[u8]->Result<Frame, ParseError> with a max-length cap (default 64 KiB) rejected without buffering; unknown tag/version -> error, no partial dispatch. DELTA/PAKE/TICKET payloads remain opaque bytes. Implements CON-014, CON-015, CON-016 recognition; supports REQ-070/084/074/076.")
+  (acceptance "Well-formed frames parse to typed enums; oversized/unknown-tag/short-hash/version-mismatch frames rejected fail-closed; fuzzing the parsers finds no panic and no accept-should-reject (TEST-075 pattern extended)"))
+
+(meta task-p7-reconcile
+  (phase "P")
+  (description "core/reconcile.rs + core/ids.rs: (1) reconcile(local_manifest, remote_manifest) -> Result<MergedManifest, Conflict> mapping each src-id to one blake3 hash; same id + different hash => Conflict (no silent overwrite) per REQ-074. (2) blake3 integrity helper verify_blob(expected:&Hash, bytes:&[u8])->bool for REQ-076 (pure; the receive/quarantine I/O is shell). (3) actor-id ordering: derive ActorId from a node public key; total_order over concurrent changes by actor id for deterministic tie-break (REQ-072), without implying causality. Implements REQ-072, REQ-074, REQ-076 (pure parts).")
+  (acceptance "Reconciliation merges disjoint/identical inventories; same-id/different-hash yields Conflict; verify_blob accepts matching, rejects mismatched; actor-id order is total and deterministic (TEST-082, TEST-083, TEST-085, TEST-086, TEST-088, TEST-089 pure parts)"))
+
+(meta task-p8-tests
+  (phase "P")
+  (description "tests/: property + example tests for the pure core. Convergence/SEC: concurrent insert/move/move-same/move+field/3-peer different-orders -> deep-value equality (TEST-094..102, TEST-101 SEC). Migration snapshot identity (TEST-109, TEST-110). Per-actor undo (TEST-105, TEST-106). Recogniser fuzz/negative (TEST-075, TEST-078, plus CON-015/016 negatives). Reconciliation + integrity (TEST-085/086/088/089). Use deterministic seeds; no network, no whisper/ffmpeg. Implements the pure-core slice of the SPEC-003 traceability matrix.")
+  (acceptance "cargo test -p ar-edit-collab is green; every pure-core REQ has >=1 passing test per applicable type; convergence properties hold across randomized orderings"))
+
+;; Phase P readiness
+(normally r-ready-p0-scaffold (and task-p0-scaffold no-deps-p0-scaffold) ready-p0-scaffold)
+(normally r-ready-p1-crdt-model (and task-p1-crdt-model completed-p0-scaffold) ready-p1-crdt-model)
+(normally r-ready-p2-materialise (and task-p2-materialise completed-p1-crdt-model) ready-p2-materialise)
+(normally r-ready-p3-migrate (and task-p3-migrate completed-p2-materialise) ready-p3-migrate)
+(normally r-ready-p4-undo (and task-p4-undo completed-p1-crdt-model) ready-p4-undo)
+(normally r-ready-p5-phrase (and task-p5-phrase completed-p0-scaffold) ready-p5-phrase)
+(normally r-ready-p6-wire (and task-p6-wire completed-p0-scaffold) ready-p6-wire)
+(normally r-ready-p7-reconcile (and task-p7-reconcile completed-p0-scaffold) ready-p7-reconcile)
+(normally r-ready-p8-tests (and task-p8-tests completed-p2-materialise completed-p3-migrate completed-p4-undo completed-p5-phrase completed-p6-wire completed-p7-reconcile) ready-p8-tests)
+
+;; =============================================================================
+;; PHASE S: Effectful Shell (BLOCKED — host disk cannot build the iroh tree;
+;; deferred to SPEC-003 OQ-7). Scaffolded behind trait boundaries in P0.
+;; =============================================================================
+
+(given task-s1-iroh-transport)
+(given task-s2-rendezvous-spake2)
+(given task-s3-blob-sync)
+(given task-s4-presence)
+(given task-s5-offline-reconnect)
+(given task-s6-cli)
+(given task-s7-rendezvous-server)
+
+(meta task-s1-iroh-transport
+  (phase "S")
+  (description "shell/transport.rs: iroh endpoint, direct connection, bidirectional control stream carrying CON-015 envelopes; broadcast local deltas, apply remote deltas to CollabDoc. Implements REQ-071, REQ-084.")
+  (acceptance "Local commit appears on a connected peer via incremental delta (no full resend); message-inspection confirms DELTA framing (TEST-103)"))
+
+(meta task-s2-rendezvous-spake2
+  (phase "S")
+  (description "shell/pairing.rs: rendezvous client (CON-014), SPAKE2 live handshake keyed by the parsed Phrase, NodeTicket exchange, handoff to direct iroh, channel lockout. NO-GO crypto area: audited impl + human expert + cross-model review required. Implements REQ-068, REQ-069, REQ-070, REQ-071, NFR-014.")
+  (acceptance "Matching phrase -> direct connection; wrong phrase -> fail closed, no project bytes; rendezvous never sees key/data (TEST-079, TEST-080, TEST-081, TEST-117)"))
+
+(meta task-s3-blob-sync
+  (phase "S")
+  (description "shell/sync.rs: iroh-blobs content-addressed media + derived-artefact replication; integrity gate (recompute blake3 before writing to sources/, quarantine on mismatch); sync-before-edit gating + progress. Implements REQ-075, REQ-076, REQ-077, REQ-078.")
+  (acceptance "Missing blobs transfer, identical-hash skip, resume across reconnect; corrupted blob rejected/never written; edit gated until synced (TEST-087, TEST-089, TEST-091)"))
+
+(meta task-s4-presence
+  (phase "S")
+  (description "shell/presence.rs: ephemeral peer presence + membership lifecycle over CON-015 PRESENCE frames; never persisted to the edit doc. Implements REQ-073, REQ-085.")
+  (acceptance "Peers see connected set + selected shot; presence disappears on disconnect; not persisted (TEST-084, TEST-104)"))
+
+(meta task-s5-offline-reconnect
+  (phase "S")
+  (description "shell/reconnect.rs: version-vector delta sync; offline edits accumulate and converge on reconnect with delta-only exchange. Implements REQ-087.")
+  (acceptance "Offline edits converge on reconnect, no loss, no full resend (TEST-107, TEST-108)"))
+
+(meta task-s6-cli
+  (phase "S")
+  (description "ar-edit binary: ar-edit share / pair <phrase> / session status|peers|leave wired to the shell; --json output per CON-012; phrase rejected before any network action. Implements CON-012, surfaces REQ-067..073.")
+  (acceptance "CLI commands match CON-012 contracts incl. exit codes; malformed phrase exits 1 with no socket opened (TEST-078)"))
+
+(meta task-s7-rendezvous-server
+  (phase "S")
+  (description "Standalone rendezvous server binary implementing CON-014: channel match, opaque PAKE/ticket relay, frame-length cap, error model. Never interprets project data. Deployment model is SPEC-003 OQ-3.")
+  (acceptance "Two clients match on a channel and complete handshake relay; server observes zero project bytes; oversized/unknown frames rejected (TEST-081)"))
+
+;; Phase S readiness — each needs the pure core it builds on AND the (external)
+;; disk/transport precondition tracked as OQ-7.
+(given oq7-transport-host-available)  ;; NOT given until disk/transport host exists
+(normally r-ready-s1 (and task-s1-iroh-transport completed-p1-crdt-model oq7-transport-host-available) ready-s1-iroh-transport)
+(normally r-ready-s2 (and task-s2-rendezvous-spake2 completed-p5-phrase completed-p6-wire oq7-transport-host-available) ready-s2-rendezvous-spake2)
+(normally r-ready-s3 (and task-s3-blob-sync completed-p7-reconcile oq7-transport-host-available) ready-s3-blob-sync)
+(normally r-ready-s4 (and task-s4-presence completed-s1-iroh-transport oq7-transport-host-available) ready-s4-presence)
+(normally r-ready-s5 (and task-s5-offline-reconnect completed-s1-iroh-transport oq7-transport-host-available) ready-s5-offline-reconnect)
+(normally r-ready-s6 (and task-s6-cli completed-s2-rendezvous-spake2 completed-s3-blob-sync oq7-transport-host-available) ready-s6-cli)
+(normally r-ready-s7 (and task-s7-rendezvous-server completed-p6-wire oq7-transport-host-available) ready-s7-rendezvous-server)
+
+;; =============================================================================
+;; Assignment rules — all tasks assigned to claude
+;; =============================================================================
+
+(normally r-assign-p0 (and ready-p0-scaffold agent-claude-available) assign-to-p0-scaffold-claude)
+(normally r-assign-p1 (and ready-p1-crdt-model agent-claude-available) assign-to-p1-crdt-model-claude)
+(normally r-assign-p2 (and ready-p2-materialise agent-claude-available) assign-to-p2-materialise-claude)
+(normally r-assign-p3 (and ready-p3-migrate agent-claude-available) assign-to-p3-migrate-claude)
+(normally r-assign-p4 (and ready-p4-undo agent-claude-available) assign-to-p4-undo-claude)
+(normally r-assign-p5 (and ready-p5-phrase agent-claude-available) assign-to-p5-phrase-claude)
+(normally r-assign-p6 (and ready-p6-wire agent-claude-available) assign-to-p6-wire-claude)
+(normally r-assign-p7 (and ready-p7-reconcile agent-claude-available) assign-to-p7-reconcile-claude)
+(normally r-assign-p8 (and ready-p8-tests agent-claude-available) assign-to-p8-tests-claude)
+(normally r-assign-s1 (and ready-s1-iroh-transport agent-claude-available) assign-to-s1-iroh-transport-claude)
+(normally r-assign-s2 (and ready-s2-rendezvous-spake2 agent-claude-available) assign-to-s2-rendezvous-spake2-claude)
+(normally r-assign-s3 (and ready-s3-blob-sync agent-claude-available) assign-to-s3-blob-sync-claude)
+(normally r-assign-s4 (and ready-s4-presence agent-claude-available) assign-to-s4-presence-claude)
+(normally r-assign-s5 (and ready-s5-offline-reconnect agent-claude-available) assign-to-s5-offline-reconnect-claude)
+(normally r-assign-s6 (and ready-s6-cli agent-claude-available) assign-to-s6-cli-claude)
+(normally r-assign-s7 (and ready-s7-rendezvous-server agent-claude-available) assign-to-s7-rendezvous-server-claude)
+
+(claims agent:claude
+  :at "2026-06-18T13:56:36Z"
+  (given claim-v1-p0-scaffold)
+  (normally r-cl-state-v1-p0-scaffold claim-v1-p0-scaffold state-claimed-v1-p0-scaffold)
+  (normally r-cl-chain-v1-p0-scaffold state-claimed-v1-p0-scaffold claimed-p0-scaffold)
+)
+
+;; Propagation rules: failures in 'p0-scaffold' block downstream tasks
+(normally r-propagate-p1-crdt-model-from-p0-scaffold-failed failed-p0-scaffold upstream-blocked-p1-crdt-model)
+(normally r-propagate-p1-crdt-model-from-p0-scaffold-permanently-failed permanently-failed-p0-scaffold upstream-blocked-p1-crdt-model)
+(normally r-propagate-p1-crdt-model-from-p0-scaffold-stale-v1 stale-v1-p0-scaffold upstream-blocked-p1-crdt-model)
+(normally r-propagate-p1-crdt-model-from-p0-scaffold-timeout-v1 timeout-v1-p0-scaffold upstream-blocked-p1-crdt-model)
+(normally r-propagate-p1-crdt-model-from-p0-scaffold-blocked upstream-blocked-p0-scaffold upstream-blocked-p1-crdt-model)
+(normally r-propagate-p5-phrase-from-p0-scaffold-failed failed-p0-scaffold upstream-blocked-p5-phrase)
+(normally r-propagate-p5-phrase-from-p0-scaffold-permanently-failed permanently-failed-p0-scaffold upstream-blocked-p5-phrase)
+(normally r-propagate-p5-phrase-from-p0-scaffold-stale-v1 stale-v1-p0-scaffold upstream-blocked-p5-phrase)
+(normally r-propagate-p5-phrase-from-p0-scaffold-timeout-v1 timeout-v1-p0-scaffold upstream-blocked-p5-phrase)
+(normally r-propagate-p5-phrase-from-p0-scaffold-blocked upstream-blocked-p0-scaffold upstream-blocked-p5-phrase)
+(normally r-propagate-p6-wire-from-p0-scaffold-failed failed-p0-scaffold upstream-blocked-p6-wire)
+(normally r-propagate-p6-wire-from-p0-scaffold-permanently-failed permanently-failed-p0-scaffold upstream-blocked-p6-wire)
+(normally r-propagate-p6-wire-from-p0-scaffold-stale-v1 stale-v1-p0-scaffold upstream-blocked-p6-wire)
+(normally r-propagate-p6-wire-from-p0-scaffold-timeout-v1 timeout-v1-p0-scaffold upstream-blocked-p6-wire)
+(normally r-propagate-p6-wire-from-p0-scaffold-blocked upstream-blocked-p0-scaffold upstream-blocked-p6-wire)
+(normally r-propagate-p7-reconcile-from-p0-scaffold-failed failed-p0-scaffold upstream-blocked-p7-reconcile)
+(normally r-propagate-p7-reconcile-from-p0-scaffold-permanently-failed permanently-failed-p0-scaffold upstream-blocked-p7-reconcile)
+(normally r-propagate-p7-reconcile-from-p0-scaffold-stale-v1 stale-v1-p0-scaffold upstream-blocked-p7-reconcile)
+(normally r-propagate-p7-reconcile-from-p0-scaffold-timeout-v1 timeout-v1-p0-scaffold upstream-blocked-p7-reconcile)
+(normally r-propagate-p7-reconcile-from-p0-scaffold-blocked upstream-blocked-p0-scaffold upstream-blocked-p7-reconcile)
+
+;; Transitive propagation: upstream-blocked cascades through dependency chain
+(normally r-propagate-p2-materialise-from-p1-crdt-model-blocked upstream-blocked-p1-crdt-model upstream-blocked-p2-materialise)
+(normally r-propagate-p4-undo-from-p1-crdt-model-blocked upstream-blocked-p1-crdt-model upstream-blocked-p4-undo)
+(normally r-propagate-s1-iroh-transport-from-p1-crdt-model-blocked upstream-blocked-p1-crdt-model upstream-blocked-s1-iroh-transport)
+(normally r-propagate-p8-tests-from-p5-phrase-blocked upstream-blocked-p5-phrase upstream-blocked-p8-tests)
+(normally r-propagate-s2-rendezvous-spake2-from-p5-phrase-blocked upstream-blocked-p5-phrase upstream-blocked-s2-rendezvous-spake2)
+(normally r-propagate-p8-tests-from-p6-wire-blocked upstream-blocked-p6-wire upstream-blocked-p8-tests)
+(normally r-propagate-s2-rendezvous-spake2-from-p6-wire-blocked upstream-blocked-p6-wire upstream-blocked-s2-rendezvous-spake2)
+(normally r-propagate-s7-rendezvous-server-from-p6-wire-blocked upstream-blocked-p6-wire upstream-blocked-s7-rendezvous-server)
+(normally r-propagate-p8-tests-from-p7-reconcile-blocked upstream-blocked-p7-reconcile upstream-blocked-p8-tests)
+(normally r-propagate-s3-blob-sync-from-p7-reconcile-blocked upstream-blocked-p7-reconcile upstream-blocked-s3-blob-sync)
+(normally r-propagate-p3-migrate-from-p2-materialise-blocked upstream-blocked-p2-materialise upstream-blocked-p3-migrate)
+(normally r-propagate-p8-tests-from-p2-materialise-blocked upstream-blocked-p2-materialise upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p4-undo-blocked upstream-blocked-p4-undo upstream-blocked-p8-tests)
+(normally r-propagate-s4-presence-from-s1-iroh-transport-blocked upstream-blocked-s1-iroh-transport upstream-blocked-s4-presence)
+(normally r-propagate-s5-offline-reconnect-from-s1-iroh-transport-blocked upstream-blocked-s1-iroh-transport upstream-blocked-s5-offline-reconnect)
+(normally r-propagate-s6-cli-from-s2-rendezvous-spake2-blocked upstream-blocked-s2-rendezvous-spake2 upstream-blocked-s6-cli)
+(normally r-propagate-s6-cli-from-s3-blob-sync-blocked upstream-blocked-s3-blob-sync upstream-blocked-s6-cli)
+(normally r-propagate-p8-tests-from-p3-migrate-blocked upstream-blocked-p3-migrate upstream-blocked-p8-tests)
+
+(claims agent:claude
+  :at "2026-06-18T14:00:23Z"
+  (given completed-p0-scaffold))
+
+(claims agent:claude
+  :at "2026-06-18T14:00:30Z"
+  (given claim-v1-p1-crdt-model)
+  (normally r-cl-state-v1-p1-crdt-model claim-v1-p1-crdt-model state-claimed-v1-p1-crdt-model)
+  (normally r-cl-chain-v1-p1-crdt-model state-claimed-v1-p1-crdt-model claimed-p1-crdt-model)
+)
+
+;; Propagation rules: failures in 'p1-crdt-model' block downstream tasks
+(normally r-propagate-p2-materialise-from-p1-crdt-model-failed failed-p1-crdt-model upstream-blocked-p2-materialise)
+(normally r-propagate-p2-materialise-from-p1-crdt-model-permanently-failed permanently-failed-p1-crdt-model upstream-blocked-p2-materialise)
+(normally r-propagate-p2-materialise-from-p1-crdt-model-stale-v1 stale-v1-p1-crdt-model upstream-blocked-p2-materialise)
+(normally r-propagate-p2-materialise-from-p1-crdt-model-timeout-v1 timeout-v1-p1-crdt-model upstream-blocked-p2-materialise)
+(normally r-propagate-p4-undo-from-p1-crdt-model-failed failed-p1-crdt-model upstream-blocked-p4-undo)
+(normally r-propagate-p4-undo-from-p1-crdt-model-permanently-failed permanently-failed-p1-crdt-model upstream-blocked-p4-undo)
+(normally r-propagate-p4-undo-from-p1-crdt-model-stale-v1 stale-v1-p1-crdt-model upstream-blocked-p4-undo)
+(normally r-propagate-p4-undo-from-p1-crdt-model-timeout-v1 timeout-v1-p1-crdt-model upstream-blocked-p4-undo)
+(normally r-propagate-s1-iroh-transport-from-p1-crdt-model-failed failed-p1-crdt-model upstream-blocked-s1-iroh-transport)
+(normally r-propagate-s1-iroh-transport-from-p1-crdt-model-permanently-failed permanently-failed-p1-crdt-model upstream-blocked-s1-iroh-transport)
+(normally r-propagate-s1-iroh-transport-from-p1-crdt-model-stale-v1 stale-v1-p1-crdt-model upstream-blocked-s1-iroh-transport)
+(normally r-propagate-s1-iroh-transport-from-p1-crdt-model-timeout-v1 timeout-v1-p1-crdt-model upstream-blocked-s1-iroh-transport)
+
+(claims agent:claude
+  :at "2026-06-18T14:04:17Z"
+  (given completed-p1-crdt-model))
+
+(claims agent:claude
+  :at "2026-06-18T14:04:17Z"
+  (given claim-v1-p2-materialise)
+  (normally r-cl-state-v1-p2-materialise claim-v1-p2-materialise state-claimed-v1-p2-materialise)
+  (normally r-cl-chain-v1-p2-materialise state-claimed-v1-p2-materialise claimed-p2-materialise)
+)
+
+;; Propagation rules: failures in 'p2-materialise' block downstream tasks
+(normally r-propagate-p3-migrate-from-p2-materialise-failed failed-p2-materialise upstream-blocked-p3-migrate)
+(normally r-propagate-p3-migrate-from-p2-materialise-permanently-failed permanently-failed-p2-materialise upstream-blocked-p3-migrate)
+(normally r-propagate-p3-migrate-from-p2-materialise-stale-v1 stale-v1-p2-materialise upstream-blocked-p3-migrate)
+(normally r-propagate-p3-migrate-from-p2-materialise-timeout-v1 timeout-v1-p2-materialise upstream-blocked-p3-migrate)
+(normally r-propagate-p8-tests-from-p2-materialise-failed failed-p2-materialise upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p2-materialise-permanently-failed permanently-failed-p2-materialise upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p2-materialise-stale-v1 stale-v1-p2-materialise upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p2-materialise-timeout-v1 timeout-v1-p2-materialise upstream-blocked-p8-tests)
+
+(claims agent:claude
+  :at "2026-06-18T14:04:17Z"
+  (given completed-p2-materialise))
+
+(claims agent:claude
+  :at "2026-06-18T14:04:17Z"
+  (given claim-v1-p3-migrate)
+  (normally r-cl-state-v1-p3-migrate claim-v1-p3-migrate state-claimed-v1-p3-migrate)
+  (normally r-cl-chain-v1-p3-migrate state-claimed-v1-p3-migrate claimed-p3-migrate)
+)
+
+;; Propagation rules: failures in 'p3-migrate' block downstream tasks
+(normally r-propagate-p8-tests-from-p3-migrate-failed failed-p3-migrate upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p3-migrate-permanently-failed permanently-failed-p3-migrate upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p3-migrate-stale-v1 stale-v1-p3-migrate upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p3-migrate-timeout-v1 timeout-v1-p3-migrate upstream-blocked-p8-tests)
+
+(claims agent:claude
+  :at "2026-06-18T14:04:17Z"
+  (given completed-p3-migrate))
+
+(claims agent:claude
+  :at "2026-06-18T14:04:17Z"
+  (given discovered-disk-freed-6gb))
+
+(claims agent:claude
+  :at "2026-06-18T14:05:10Z"
+  (given claim-v1-p4-undo)
+  (normally r-cl-state-v1-p4-undo claim-v1-p4-undo state-claimed-v1-p4-undo)
+  (normally r-cl-chain-v1-p4-undo state-claimed-v1-p4-undo claimed-p4-undo)
+)
+
+;; Propagation rules: failures in 'p4-undo' block downstream tasks
+(normally r-propagate-p8-tests-from-p4-undo-failed failed-p4-undo upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p4-undo-permanently-failed permanently-failed-p4-undo upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p4-undo-stale-v1 stale-v1-p4-undo upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p4-undo-timeout-v1 timeout-v1-p4-undo upstream-blocked-p8-tests)
+
+(claims agent:claude
+  :at "2026-06-18T14:05:10Z"
+  (given claim-v1-p5-phrase)
+  (normally r-cl-state-v1-p5-phrase claim-v1-p5-phrase state-claimed-v1-p5-phrase)
+  (normally r-cl-chain-v1-p5-phrase state-claimed-v1-p5-phrase claimed-p5-phrase)
+)
+
+;; Propagation rules: failures in 'p5-phrase' block downstream tasks
+(normally r-propagate-p8-tests-from-p5-phrase-failed failed-p5-phrase upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p5-phrase-permanently-failed permanently-failed-p5-phrase upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p5-phrase-stale-v1 stale-v1-p5-phrase upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p5-phrase-timeout-v1 timeout-v1-p5-phrase upstream-blocked-p8-tests)
+(normally r-propagate-s2-rendezvous-spake2-from-p5-phrase-failed failed-p5-phrase upstream-blocked-s2-rendezvous-spake2)
+(normally r-propagate-s2-rendezvous-spake2-from-p5-phrase-permanently-failed permanently-failed-p5-phrase upstream-blocked-s2-rendezvous-spake2)
+(normally r-propagate-s2-rendezvous-spake2-from-p5-phrase-stale-v1 stale-v1-p5-phrase upstream-blocked-s2-rendezvous-spake2)
+(normally r-propagate-s2-rendezvous-spake2-from-p5-phrase-timeout-v1 timeout-v1-p5-phrase upstream-blocked-s2-rendezvous-spake2)
+
+(claims agent:claude
+  :at "2026-06-18T14:05:10Z"
+  (given claim-v1-p6-wire)
+  (normally r-cl-state-v1-p6-wire claim-v1-p6-wire state-claimed-v1-p6-wire)
+  (normally r-cl-chain-v1-p6-wire state-claimed-v1-p6-wire claimed-p6-wire)
+)
+
+;; Propagation rules: failures in 'p6-wire' block downstream tasks
+(normally r-propagate-p8-tests-from-p6-wire-failed failed-p6-wire upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p6-wire-permanently-failed permanently-failed-p6-wire upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p6-wire-stale-v1 stale-v1-p6-wire upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p6-wire-timeout-v1 timeout-v1-p6-wire upstream-blocked-p8-tests)
+(normally r-propagate-s2-rendezvous-spake2-from-p6-wire-failed failed-p6-wire upstream-blocked-s2-rendezvous-spake2)
+(normally r-propagate-s2-rendezvous-spake2-from-p6-wire-permanently-failed permanently-failed-p6-wire upstream-blocked-s2-rendezvous-spake2)
+(normally r-propagate-s2-rendezvous-spake2-from-p6-wire-stale-v1 stale-v1-p6-wire upstream-blocked-s2-rendezvous-spake2)
+(normally r-propagate-s2-rendezvous-spake2-from-p6-wire-timeout-v1 timeout-v1-p6-wire upstream-blocked-s2-rendezvous-spake2)
+(normally r-propagate-s7-rendezvous-server-from-p6-wire-failed failed-p6-wire upstream-blocked-s7-rendezvous-server)
+(normally r-propagate-s7-rendezvous-server-from-p6-wire-permanently-failed permanently-failed-p6-wire upstream-blocked-s7-rendezvous-server)
+(normally r-propagate-s7-rendezvous-server-from-p6-wire-stale-v1 stale-v1-p6-wire upstream-blocked-s7-rendezvous-server)
+(normally r-propagate-s7-rendezvous-server-from-p6-wire-timeout-v1 timeout-v1-p6-wire upstream-blocked-s7-rendezvous-server)
+
+(claims agent:claude
+  :at "2026-06-18T14:05:10Z"
+  (given claim-v1-p7-reconcile)
+  (normally r-cl-state-v1-p7-reconcile claim-v1-p7-reconcile state-claimed-v1-p7-reconcile)
+  (normally r-cl-chain-v1-p7-reconcile state-claimed-v1-p7-reconcile claimed-p7-reconcile)
+)
+
+;; Propagation rules: failures in 'p7-reconcile' block downstream tasks
+(normally r-propagate-p8-tests-from-p7-reconcile-failed failed-p7-reconcile upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p7-reconcile-permanently-failed permanently-failed-p7-reconcile upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p7-reconcile-stale-v1 stale-v1-p7-reconcile upstream-blocked-p8-tests)
+(normally r-propagate-p8-tests-from-p7-reconcile-timeout-v1 timeout-v1-p7-reconcile upstream-blocked-p8-tests)
+(normally r-propagate-s3-blob-sync-from-p7-reconcile-failed failed-p7-reconcile upstream-blocked-s3-blob-sync)
+(normally r-propagate-s3-blob-sync-from-p7-reconcile-permanently-failed permanently-failed-p7-reconcile upstream-blocked-s3-blob-sync)
+(normally r-propagate-s3-blob-sync-from-p7-reconcile-stale-v1 stale-v1-p7-reconcile upstream-blocked-s3-blob-sync)
+(normally r-propagate-s3-blob-sync-from-p7-reconcile-timeout-v1 timeout-v1-p7-reconcile upstream-blocked-s3-blob-sync)
+
+(claims agent:claude
+  :at "2026-06-18T14:10:50Z"
+  (given completed-p4-undo))
+
+(claims agent:claude
+  :at "2026-06-18T14:10:50Z"
+  (given completed-p5-phrase))
+
+(claims agent:claude
+  :at "2026-06-18T14:10:50Z"
+  (given completed-p6-wire))
+
+(claims agent:claude
+  :at "2026-06-18T14:10:50Z"
+  (given completed-p7-reconcile))
+
+(claims agent:claude
+  :at "2026-06-18T14:10:50Z"
+  (given claim-v1-p8-tests)
+  (normally r-cl-state-v1-p8-tests claim-v1-p8-tests state-claimed-v1-p8-tests)
+  (normally r-cl-chain-v1-p8-tests state-claimed-v1-p8-tests claimed-p8-tests)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:10:50Z"
+  (given completed-p8-tests))
+
+(claims agent:claude
+  :at "2026-06-18T14:11:49Z"
+  (given claim-v1-s1-iroh-transport)
+  (normally r-cl-state-v1-s1-iroh-transport claim-v1-s1-iroh-transport state-claimed-v1-s1-iroh-transport)
+  (normally r-cl-chain-v1-s1-iroh-transport state-claimed-v1-s1-iroh-transport claimed-s1-iroh-transport)
+)
+
+;; Propagation rules: failures in 's1-iroh-transport' block downstream tasks
+(normally r-propagate-s4-presence-from-s1-iroh-transport-failed failed-s1-iroh-transport upstream-blocked-s4-presence)
+(normally r-propagate-s4-presence-from-s1-iroh-transport-permanently-failed permanently-failed-s1-iroh-transport upstream-blocked-s4-presence)
+(normally r-propagate-s4-presence-from-s1-iroh-transport-stale-v1 stale-v1-s1-iroh-transport upstream-blocked-s4-presence)
+(normally r-propagate-s4-presence-from-s1-iroh-transport-timeout-v1 timeout-v1-s1-iroh-transport upstream-blocked-s4-presence)
+(normally r-propagate-s5-offline-reconnect-from-s1-iroh-transport-failed failed-s1-iroh-transport upstream-blocked-s5-offline-reconnect)
+(normally r-propagate-s5-offline-reconnect-from-s1-iroh-transport-permanently-failed permanently-failed-s1-iroh-transport upstream-blocked-s5-offline-reconnect)
+(normally r-propagate-s5-offline-reconnect-from-s1-iroh-transport-stale-v1 stale-v1-s1-iroh-transport upstream-blocked-s5-offline-reconnect)
+(normally r-propagate-s5-offline-reconnect-from-s1-iroh-transport-timeout-v1 timeout-v1-s1-iroh-transport upstream-blocked-s5-offline-reconnect)
+
+(claims agent:claude
+  :at "2026-06-18T14:18:24Z"
+  (given claim-v1-s7-rendezvous-server)
+  (normally r-cl-state-v1-s7-rendezvous-server claim-v1-s7-rendezvous-server state-claimed-v1-s7-rendezvous-server)
+  (normally r-cl-chain-v1-s7-rendezvous-server state-claimed-v1-s7-rendezvous-server claimed-s7-rendezvous-server)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:18:24Z"
+  (given completed-s7-rendezvous-server))
+
+(claims agent:claude
+  :at "2026-06-18T14:18:24Z"
+  (given block-v1-s1-iroh-transport)
+  (normally r-bl-state-v1-s1-iroh-transport block-v1-s1-iroh-transport state-blocked-v1-s1-iroh-transport)
+  (normally r-bl-chain-v1-s1-iroh-transport state-blocked-v1-s1-iroh-transport blocked-s1-iroh-transport)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:18:24Z"
+  (given block-v1-s2-rendezvous-spake2)
+  (normally r-bl-state-v1-s2-rendezvous-spake2 block-v1-s2-rendezvous-spake2 state-blocked-v1-s2-rendezvous-spake2)
+  (normally r-bl-chain-v1-s2-rendezvous-spake2 state-blocked-v1-s2-rendezvous-spake2 blocked-s2-rendezvous-spake2)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:18:24Z"
+  (given block-v1-s3-blob-sync)
+  (normally r-bl-state-v1-s3-blob-sync block-v1-s3-blob-sync state-blocked-v1-s3-blob-sync)
+  (normally r-bl-chain-v1-s3-blob-sync state-blocked-v1-s3-blob-sync blocked-s3-blob-sync)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:18:24Z"
+  (given block-v1-s4-presence)
+  (normally r-bl-state-v1-s4-presence block-v1-s4-presence state-blocked-v1-s4-presence)
+  (normally r-bl-chain-v1-s4-presence state-blocked-v1-s4-presence blocked-s4-presence)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:18:24Z"
+  (given block-v1-s5-offline-reconnect)
+  (normally r-bl-state-v1-s5-offline-reconnect block-v1-s5-offline-reconnect state-blocked-v1-s5-offline-reconnect)
+  (normally r-bl-chain-v1-s5-offline-reconnect state-blocked-v1-s5-offline-reconnect blocked-s5-offline-reconnect)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:18:24Z"
+  (given block-v1-s6-cli)
+  (normally r-bl-state-v1-s6-cli block-v1-s6-cli state-blocked-v1-s6-cli)
+  (normally r-bl-chain-v1-s6-cli state-blocked-v1-s6-cli blocked-s6-cli)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:30:02Z"
+  (given unblock-v2-s1-iroh-transport)
+  (normally r-ubl-state-v2-s1-iroh-transport unblock-v2-s1-iroh-transport state-unblocked-v2-s1-iroh-transport)
+  (normally r-ubl-cancel-v1-s1-iroh-transport unblock-v2-s1-iroh-transport (not state-blocked-v1-s1-iroh-transport))
+  (prefer r-ubl-cancel-v1-s1-iroh-transport r-bl-state-v1-s1-iroh-transport)
+  (normally r-ubl-unblocked-v2-s1-iroh-transport unblock-v2-s1-iroh-transport (not blocked-s1-iroh-transport))
+  (prefer r-ubl-unblocked-v2-s1-iroh-transport r-bl-chain-v1-s1-iroh-transport)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:30:02Z"
+  (given completed-s1-iroh-transport))
+
+(claims agent:claude
+  :at "2026-06-18T14:30:02Z"
+  (given claim-v1-s2-rendezvous-spake2)
+  (normally r-cl-state-v1-s2-rendezvous-spake2 claim-v1-s2-rendezvous-spake2 state-claimed-v1-s2-rendezvous-spake2)
+  (normally r-cl-chain-v1-s2-rendezvous-spake2 state-claimed-v1-s2-rendezvous-spake2 claimed-s2-rendezvous-spake2)
+)
+
+;; Propagation rules: failures in 's2-rendezvous-spake2' block downstream tasks
+(normally r-propagate-s6-cli-from-s2-rendezvous-spake2-failed failed-s2-rendezvous-spake2 upstream-blocked-s6-cli)
+(normally r-propagate-s6-cli-from-s2-rendezvous-spake2-permanently-failed permanently-failed-s2-rendezvous-spake2 upstream-blocked-s6-cli)
+(normally r-propagate-s6-cli-from-s2-rendezvous-spake2-stale-v1 stale-v1-s2-rendezvous-spake2 upstream-blocked-s6-cli)
+(normally r-propagate-s6-cli-from-s2-rendezvous-spake2-timeout-v1 timeout-v1-s2-rendezvous-spake2 upstream-blocked-s6-cli)
+
+(claims agent:claude
+  :at "2026-06-18T14:31:53Z"
+  (given completed-s2-rendezvous-spake2))
+
+(claims agent:claude
+  :at "2026-06-18T14:31:53Z"
+  (given requires-audited-crypto-review-s2))
+
+(claims agent:claude
+  :at "2026-06-18T14:31:53Z"
+  (given unblock-v2-s5-offline-reconnect)
+  (normally r-ubl-state-v2-s5-offline-reconnect unblock-v2-s5-offline-reconnect state-unblocked-v2-s5-offline-reconnect)
+  (normally r-ubl-cancel-v1-s5-offline-reconnect unblock-v2-s5-offline-reconnect (not state-blocked-v1-s5-offline-reconnect))
+  (prefer r-ubl-cancel-v1-s5-offline-reconnect r-bl-state-v1-s5-offline-reconnect)
+  (normally r-ubl-unblocked-v2-s5-offline-reconnect unblock-v2-s5-offline-reconnect (not blocked-s5-offline-reconnect))
+  (prefer r-ubl-unblocked-v2-s5-offline-reconnect r-bl-chain-v1-s5-offline-reconnect)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:31:53Z"
+  (given claim-v1-s5-offline-reconnect)
+  (normally r-cl-state-v1-s5-offline-reconnect claim-v1-s5-offline-reconnect state-claimed-v1-s5-offline-reconnect)
+  (normally r-cl-chain-v1-s5-offline-reconnect state-claimed-v1-s5-offline-reconnect claimed-s5-offline-reconnect)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:32:33Z"
+  (given completed-s5-offline-reconnect))
+
+(claims agent:claude
+  :at "2026-06-18T14:32:33Z"
+  (given unblock-v2-s4-presence)
+  (normally r-ubl-state-v2-s4-presence unblock-v2-s4-presence state-unblocked-v2-s4-presence)
+  (normally r-ubl-cancel-v1-s4-presence unblock-v2-s4-presence (not state-blocked-v1-s4-presence))
+  (prefer r-ubl-cancel-v1-s4-presence r-bl-state-v1-s4-presence)
+  (normally r-ubl-unblocked-v2-s4-presence unblock-v2-s4-presence (not blocked-s4-presence))
+  (prefer r-ubl-unblocked-v2-s4-presence r-bl-chain-v1-s4-presence)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:32:33Z"
+  (given claim-v1-s4-presence)
+  (normally r-cl-state-v1-s4-presence claim-v1-s4-presence state-claimed-v1-s4-presence)
+  (normally r-cl-chain-v1-s4-presence state-claimed-v1-s4-presence claimed-s4-presence)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:33:37Z"
+  (given completed-s4-presence))
+
+(claims agent:claude
+  :at "2026-06-18T14:33:37Z"
+  (given unblock-v2-s3-blob-sync)
+  (normally r-ubl-state-v2-s3-blob-sync unblock-v2-s3-blob-sync state-unblocked-v2-s3-blob-sync)
+  (normally r-ubl-cancel-v1-s3-blob-sync unblock-v2-s3-blob-sync (not state-blocked-v1-s3-blob-sync))
+  (prefer r-ubl-cancel-v1-s3-blob-sync r-bl-state-v1-s3-blob-sync)
+  (normally r-ubl-unblocked-v2-s3-blob-sync unblock-v2-s3-blob-sync (not blocked-s3-blob-sync))
+  (prefer r-ubl-unblocked-v2-s3-blob-sync r-bl-chain-v1-s3-blob-sync)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:33:37Z"
+  (given claim-v1-s3-blob-sync)
+  (normally r-cl-state-v1-s3-blob-sync claim-v1-s3-blob-sync state-claimed-v1-s3-blob-sync)
+  (normally r-cl-chain-v1-s3-blob-sync state-claimed-v1-s3-blob-sync claimed-s3-blob-sync)
+)
+
+;; Propagation rules: failures in 's3-blob-sync' block downstream tasks
+(normally r-propagate-s6-cli-from-s3-blob-sync-failed failed-s3-blob-sync upstream-blocked-s6-cli)
+(normally r-propagate-s6-cli-from-s3-blob-sync-permanently-failed permanently-failed-s3-blob-sync upstream-blocked-s6-cli)
+(normally r-propagate-s6-cli-from-s3-blob-sync-stale-v1 stale-v1-s3-blob-sync upstream-blocked-s6-cli)
+(normally r-propagate-s6-cli-from-s3-blob-sync-timeout-v1 timeout-v1-s3-blob-sync upstream-blocked-s6-cli)
+
+(claims agent:claude
+  :at "2026-06-18T14:35:40Z"
+  (given completed-s3-blob-sync))
+
+(claims agent:claude
+  :at "2026-06-18T14:35:40Z"
+  (given deferred-iroh-blobs-dedup-resume-optimization))
+
+(claims agent:claude
+  :at "2026-06-18T14:35:40Z"
+  (given unblock-v2-s6-cli)
+  (normally r-ubl-state-v2-s6-cli unblock-v2-s6-cli state-unblocked-v2-s6-cli)
+  (normally r-ubl-cancel-v1-s6-cli unblock-v2-s6-cli (not state-blocked-v1-s6-cli))
+  (prefer r-ubl-cancel-v1-s6-cli r-bl-state-v1-s6-cli)
+  (normally r-ubl-unblocked-v2-s6-cli unblock-v2-s6-cli (not blocked-s6-cli))
+  (prefer r-ubl-unblocked-v2-s6-cli r-bl-chain-v1-s6-cli)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:35:40Z"
+  (given claim-v1-s6-cli)
+  (normally r-cl-state-v1-s6-cli claim-v1-s6-cli state-claimed-v1-s6-cli)
+  (normally r-cl-chain-v1-s6-cli state-claimed-v1-s6-cli claimed-s6-cli)
+)
+
+(claims agent:claude
+  :at "2026-06-18T14:39:10Z"
+  (given completed-s6-cli))

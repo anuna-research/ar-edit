@@ -66,3 +66,42 @@
 **Failure Modes**:
 - Halving by word count produces an awkward cut mid-sentence → Agent uses sentence boundary detection from transcript
 - Moving segments creates a jarring topic transition → Agent could insert a brief pause/fade (future feature)
+
+---
+
+## Happy Path 3: Agent Joins a Live Session
+
+Source: [[SPEC-003-realtime-collaborative-editing]]. An agent joins a human's
+live session to assemble an edit while the human watches.
+
+**Task**: A human shares a session; the agent joins, assembles a rough cut from
+markers, and the human watches shots appear live and gives feedback.
+
+**Preconditions**:
+- Human has a project with transcribed/indexed sources and some `select` markers
+- The agent process can drive `ar-edit` via CLI + `--json` and reach the rendezvous
+
+**Steps**:
+
+1. Human: `ar-edit share` → pairing phrase; passes it to the agent
+2. Agent: `ar-edit pair <phrase> --json` → on a malformed phrase, exits 1 with no
+   network action; on success, joins and reports `actor_id` + sync progress as JSON
+3. Agent: `ar-edit markers --json` and `ar-edit transcripts read <src> --json` to
+   read the human's selects
+4. Agent issues `ar-edit edit add-segment ...` calls; each commit propagates to the
+   human's timeline live
+5. Human drops a shot note "too long"; agent reads it via
+   `ar-edit edit show <edit> --json` and trims the shot
+6. Agent and human edits merge without conflict (CRDT); `ar-edit session status
+   --json` reports `synced: true`
+
+**Postconditions**:
+- The shared edit converges identically for both participants
+- Every collaboration action the agent took was via CLI + structured output
+- Concurrent human/agent edits to the same edit merged with no loss
+
+**Failure Modes**:
+- Agent references a source not yet synced → edit mutation is gated until sync
+  readiness, with a structured error
+- Agent disconnects mid-assembly → its already-committed shots remain; it can
+  rejoin and resume via delta sync

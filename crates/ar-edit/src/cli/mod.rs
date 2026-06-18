@@ -46,8 +46,34 @@ pub struct Cli {
 // Commands
 // ---------------------------------------------------------------------------
 
+/// Subcommands for an active collaborative session (SPEC-003 CON-012).
+#[derive(Subcommand)]
+pub enum SessionCommand {
+    /// Show session and sync status
+    Status,
+    /// List connected peers
+    Peers,
+    /// Leave the current session
+    Leave,
+}
+
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Open this project for realtime collaboration; prints a pairing phrase (SPEC-003)
+    Share,
+
+    /// Join a collaborative session with a pairing phrase (SPEC-003)
+    Pair {
+        /// Pairing phrase in the form <num>-<word>-<word>
+        phrase: String,
+    },
+
+    /// Inspect or leave the current collaborative session (SPEC-003)
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
+
     /// Create a new project directory
     Init {
         /// Project name (becomes the directory name)

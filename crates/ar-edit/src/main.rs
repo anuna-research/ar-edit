@@ -11,7 +11,7 @@ use ar_edit_core::playback;
 use clap::Parser;
 use cli::{
     exit_code, Cli, Commands, EditCommand, IndexCommand, PlayArgs, RangeArgs, SchemaCommand,
-    SearchType, TranscriptsCommand,
+    SearchType, SessionCommand, TranscriptsCommand,
 };
 
 use std::thread;
@@ -112,6 +112,71 @@ fn main() {
 
 fn run(cli: &Cli) -> anyhow::Result<()> {
     match &cli.command {
+        // ---- Realtime collaboration (SPEC-003) ----
+        Commands::Share => {
+            let phrase = ar_edit_collab::recognise::phrase::generate_secure();
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "phrase": phrase.render(),
+                        "channel": phrase.channel,
+                        "note": "establishing the live session needs --features collab-transport and the ADR-009-reviewed SPAKE2 pairing",
+                    })
+                );
+            } else {
+                println!(
+                    "Share this pairing phrase with your collaborator:\n\n    {}\n\nThey join with:  ar-edit pair {}",
+                    phrase.render(),
+                    phrase.render()
+                );
+            }
+            Ok(())
+        }
+        Commands::Pair { phrase } => {
+            // LangSec (CON-013): fully recognise the phrase BEFORE any network
+            // action; a malformed phrase fails closed with exit code 1 and
+            // opens no socket (SPEC-003 TEST-078).
+            match ar_edit_collab::recognise::phrase::parse(phrase) {
+                Ok(p) => {
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "phrase": p.render(),
+                                "channel": p.channel,
+                                "status": "phrase-valid",
+                                "note": "live session join requires the collab-transport build + reviewed SPAKE2 (ADR-009)",
+                            })
+                        );
+                    } else {
+                        println!(
+                            "Pairing phrase accepted (channel {}). Live session join requires a \
+                             collab-transport build and the reviewed SPAKE2 pairing (ADR-009).",
+                            p.channel
+                        );
+                    }
+                    Ok(())
+                }
+                Err(e) => anyhow::bail!("invalid pairing phrase '{phrase}': {e}"),
+            }
+        }
+        Commands::Session { command } => {
+            let what = match command {
+                SessionCommand::Status => "status",
+                SessionCommand::Peers => "peers",
+                SessionCommand::Leave => "leave",
+            };
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "session": serde_json::Value::Null, "request": what, "status": "no active session" })
+                );
+            } else {
+                println!("No active collaborative session.");
+            }
+            Ok(())
+        }
         Commands::Init { name } => {
             let path = PathBuf::from(name);
             let manifest = ar_edit_core::project::init(&path)?;

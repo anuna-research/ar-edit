@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ar-edit-core", "crates/ar-edit"]
+members = ["crates/ar-edit-core", "crates/ar-edit", "crates/ar-edit-collab"]
 resolver = "2"
 
 [workspace.package]
@@ -21,8 +21,19 @@ thiserror = "2"
 which = "7"
 regex = "1"
 
+# Collaboration (SPEC-003) — pure core deps (no iroh)
+loro = "1"
+blake3 = "1"
+spake2 = "0.4"
+rand = "0.8"
+# Collaboration shell deps (Phase S; behind the `transport` feature)
+iroh = "1"
+iroh-blobs = "0.103"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+
 # Binary
 ar-edit-core = { path = "crates/ar-edit-core" }
+ar-edit-collab = { path = "crates/ar-edit-collab" }
 clap = { version = "4", features = ["derive"] }
 ratatui = "0.29"
 crossterm = "0.28"
