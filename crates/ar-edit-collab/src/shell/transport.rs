@@ -14,7 +14,8 @@ use crate::ids::ActorId;
 use crate::pairing::{self, SessionKey};
 use crate::recognise::phrase::Phrase;
 use crate::recognise::wire::{self, SyncEnvelope, PROTOCOL_VERSION};
-use iroh::endpoint::{Builder, RecvStream, SendStream};
+use super::discovery::Discovery;
+use iroh::endpoint::{Builder, Connection, RecvStream, SendStream};
 use iroh::{Endpoint, EndpointAddr};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -177,7 +178,7 @@ impl Transport {
         &self,
         to: EndpointAddr,
         phrase: &Phrase,
-    ) -> Result<SessionKey, TransportError> {
+    ) -> Result<(Connection, SessionKey), TransportError> {
         let conn = self.endpoint.connect(to, COLLAB_ALPN).await.map_err(iroh_err)?;
 
         // PAKE message exchange on one bi-stream.
@@ -193,16 +194,18 @@ impl Transport {
         let (mut s2, mut r2) = conn.open_bi().await.map_err(iroh_err)?;
         write_tagged(&mut s2, TAG_CONFIRM, &key.confirm_tag()).await?;
         let peer_tag = read_confirm(&mut r2).await?;
-        let verify = key.verify_peer(&peer_tag);
-        // Close explicitly (both outcomes) so the responder's `closed().await`
-        // returns and it does not drop the endpoint before we read its confirm.
-        conn.close(0u32.into(), b"paired");
-        verify.map_err(|e| TransportError::Pairing(e.to_string()))?;
-        Ok(key)
+        key.verify_peer(&peer_tag)
+            .map_err(|e| TransportError::Pairing(e.to_string()))?;
+        // Keep the connection open for the session (both peers hold it, so
+        // neither drops the endpoint mid-handshake).
+        Ok((conn, key))
     }
 
     /// Run the SPAKE2 pairing handshake as the **accepter** (REQ-070, CON-014).
-    pub async fn pair_as_responder(&self, phrase: &Phrase) -> Result<SessionKey, TransportError> {
+    pub async fn pair_as_responder(
+        &self,
+        phrase: &Phrase,
+    ) -> Result<(Connection, SessionKey), TransportError> {
         let incoming = self
             .endpoint
             .accept()
@@ -221,12 +224,50 @@ impl Transport {
         let (mut s2, mut r2) = conn.accept_bi().await.map_err(iroh_err)?;
         let peer_tag = read_confirm(&mut r2).await?;
         write_tagged(&mut s2, TAG_CONFIRM, &key.confirm_tag()).await?;
-        let verify = key.verify_peer(&peer_tag);
-        // Wait for the initiator to close before returning, so our confirm is
-        // delivered and our endpoint stays alive until the peer has read it.
-        conn.closed().await;
-        verify.map_err(|e| TransportError::Pairing(e.to_string()))?;
-        Ok(key)
+        key.verify_peer(&peer_tag)
+            .map_err(|e| TransportError::Pairing(e.to_string()))?;
+        Ok((conn, key))
+    }
+
+    /// **Host** a collaborative session (SPEC-003 REQ-068): publish a discovery
+    /// record under `phrase`, accept a joining peer, complete SPAKE2, and return
+    /// the paired [`Session`].
+    pub async fn host_session(
+        &self,
+        discovery: &Discovery,
+        phrase: &Phrase,
+    ) -> Result<Session, TransportError> {
+        discovery
+            .publish(phrase, &self.dial_addr()?)
+            .await
+            .map_err(|e| TransportError::Pairing(e.to_string()))?;
+        let (conn, key) = self.pair_as_responder(phrase).await?;
+        Ok(Session { conn, key })
+    }
+
+    /// **Join** a collaborative session (SPEC-003 REQ-069): discover the host by
+    /// `phrase`, dial, complete SPAKE2, and return the paired [`Session`].
+    /// Retries discovery briefly to absorb publish/lookup propagation.
+    pub async fn join_session(
+        &self,
+        discovery: &Discovery,
+        phrase: &Phrase,
+    ) -> Result<Session, TransportError> {
+        let mut addr = None;
+        for _ in 0..50 {
+            if let Some(a) = discovery
+                .lookup(phrase)
+                .await
+                .map_err(|e| TransportError::Pairing(e.to_string()))?
+            {
+                addr = Some(a);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let addr = addr.ok_or_else(|| TransportError::Pairing("peer not found".into()))?;
+        let (conn, key) = self.pair_as_initiator(addr, phrase).await?;
+        Ok(Session { conn, key })
     }
 
     /// Close the endpoint.
@@ -265,6 +306,42 @@ async fn read_confirm(r: &mut RecvStream) -> Result<[u8; 32], TransportError> {
     payload
         .try_into()
         .map_err(|_| TransportError::Pairing("confirmation tag must be 32 bytes".into()))
+}
+
+/// A paired collaborative session: SPAKE2 has agreed a key over the direct iroh
+/// connection, which now carries CON-015 CRDT sync (SPEC-003 REQ-070 + REQ-084).
+pub struct Session {
+    conn: Connection,
+    key: SessionKey,
+}
+
+impl Session {
+    /// The agreed SPAKE2 session key.
+    pub fn key(&self) -> &SessionKey {
+        &self.key
+    }
+
+    /// Push a CRDT delta to the peer over the paired connection (REQ-084).
+    pub async fn push_delta(&self, delta: &[u8]) -> Result<(), TransportError> {
+        let (mut s, _r) = self.conn.open_bi().await.map_err(iroh_err)?;
+        s.write_all(&encode_delta(delta)).await.map_err(iroh_err)?;
+        s.finish().map_err(iroh_err)?;
+        Ok(())
+    }
+
+    /// Receive one CRDT delta from the peer and apply it to `doc` (REQ-084).
+    pub async fn pull_delta_into(&self, doc: &CollabDoc) -> Result<(), TransportError> {
+        let (_s, mut r) = self.conn.accept_bi().await.map_err(iroh_err)?;
+        let bytes = r.read_to_end(64 * 1024 * 1024).await.map_err(iroh_err)?;
+        match wire::parse_sync_envelope(&bytes)
+            .map_err(|e| TransportError::Envelope(e.to_string()))?
+        {
+            SyncEnvelope::Delta(payload) => doc
+                .import(payload)
+                .map_err(|e| TransportError::Import(e.to_string())),
+            other => Err(TransportError::Envelope(format!("expected DELTA, got {other:?}"))),
+        }
+    }
 }
 
 /// Wrap a delta blob in a CON-015 DELTA envelope.

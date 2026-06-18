@@ -65,8 +65,8 @@ async fn spake2_over_iroh_agrees_on_matching_phrase() {
 
     let p = phrase.clone();
     let h = tokio::spawn(async move { responder.pair_as_responder(&p).await });
-    let key_i = initiator.pair_as_initiator(addr, &phrase).await.unwrap();
-    let key_r = h.await.unwrap().unwrap();
+    let (_conn_i, key_i) = initiator.pair_as_initiator(addr, &phrase).await.unwrap();
+    let (_conn_r, key_r) = h.await.unwrap().unwrap();
 
     assert_eq!(
         key_i.bytes(),

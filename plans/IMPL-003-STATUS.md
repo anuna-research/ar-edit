@@ -4,9 +4,20 @@ Implementation of [[SPEC-003-realtime-collaborative-editing]] via
 `plans/IMPL-003-collab.spl`. Crate: `crates/ar-edit-collab` (+ CLI in
 `crates/ar-edit`).
 
-**Status: 17/17 tasks done. 35 tests passing.** The full serverless pairing
-vertical is implemented and tested: discover by phrase (pkarr/DHT) → dial over
-iroh → SPAKE2 authenticated key agreement over that connection → sync.
+**Status: 17/17 tasks done. 35 tests passing** (as of the last clean build).
+The full serverless pairing vertical is implemented: discover by phrase
+(pkarr/DHT) → dial over iroh → SPAKE2 authenticated key agreement over that
+connection → sync.
+
+**Session capstone (`transport::Session`, `host_session`/`join_session`):**
+implemented — composes discovery + SPAKE2-over-iroh + delta sync over the
+paired connection, with an end-to-end test (`tests/session.rs`). ⚠ Its test
+(and any transport-feature rebuild) is currently **blocked by host disk**: the
+machine is at 332 MiB free / 191 GB used of 228 GB, and the iroh build tree
+needs ~5–6 GB. The pieces the capstone composes were verified earlier this
+session (discovery: `tests/discovery.rs`; SPAKE2-over-iroh: `tests/transport.rs`).
+Run `cargo test -p ar-edit-collab --features transport` (rustc ≥ 1.91) once
+disk is freed to validate the capstone. Tracked under OQ-7.
 
 ## Test matrix
 
