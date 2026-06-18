@@ -64,9 +64,16 @@ async fn spake2_over_iroh_agrees_on_matching_phrase() {
     let phrase = phrase::generate_secure();
 
     let p = phrase.clone();
-    let h = tokio::spawn(async move { responder.pair_as_responder(&p).await });
+    // Keep the responder Transport (endpoint) alive past the handshake by
+    // returning it from the task — otherwise it drops and resets the connection
+    // before the initiator reads the confirm. (A real session holds it open.)
+    let h = tokio::spawn(async move {
+        let res = responder.pair_as_responder(&p).await;
+        (responder, res)
+    });
     let (_conn_i, key_i) = initiator.pair_as_initiator(addr, &phrase).await.unwrap();
-    let (_conn_r, key_r) = h.await.unwrap().unwrap();
+    let (_responder, res_r) = h.await.unwrap();
+    let (_conn_r, key_r) = res_r.unwrap();
 
     assert_eq!(
         key_i.bytes(),

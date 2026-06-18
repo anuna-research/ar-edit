@@ -4,29 +4,32 @@ Implementation of [[SPEC-003-realtime-collaborative-editing]] via
 `plans/IMPL-003-collab.spl`. Crate: `crates/ar-edit-collab` (+ CLI in
 `crates/ar-edit`).
 
-**Status: 17/17 tasks done. 35 tests passing** (as of the last clean build).
-The full serverless pairing vertical is implemented: discover by phrase
-(pkarr/DHT) → dial over iroh → SPAKE2 authenticated key agreement over that
-connection → sync.
+**Status: 17/17 tasks done. 36 tests passing — full matrix executed.** The full
+serverless pairing vertical is implemented and **verified end-to-end**: discover
+by phrase (pkarr/DHT) → dial over iroh → SPAKE2 authenticated key agreement over
+that connection → CRDT sync.
 
 **Session capstone (`transport::Session`, `host_session`/`join_session`):**
-implemented — composes discovery + SPAKE2-over-iroh + delta sync over the
-paired connection, with an end-to-end test (`tests/session.rs`).
+implemented and **executed** — `tests/session.rs::host_join_and_sync_full_session`
+passes: a host opens a session under a phrase, a joiner discovers it by that
+phrase alone, pairs via SPAKE2 over iroh, and a CRDT edit syncs; both peers
+agree on the session key.
 
-Verification level reached on this host:
-- **Compiles:** `cargo check --tests -p ar-edit-collab --features transport`
-  passes (exit 0, rustc 1.93) — the whole transport feature *and* every test
-  file, including `tests/session.rs`, type-check.
-- **Components executed + passing** (run earlier this session, before the disk
-  filled): discovery (`tests/discovery.rs`, discover→dial→delta) and
-  SPAKE2-over-iroh (`tests/transport.rs`, agrees / fails-closed). The capstone
-  composes exactly these verified flows.
-- **Not executed:** the composed `tests/session.rs` run — blocked by host disk.
-  The APFS container has ~136 MB free; a full link of the iroh tree needs
-  ~1.5–2 GB (no-debuginfo) and the only reclaimable snapshots are pending
-  macOS-update snapshots (left untouched). Free ~2 GB, then:
-  `RUSTC=<rustup-stable> CARGO_PROFILE_DEV_DEBUG=0 cargo test -p ar-edit-collab --features transport`
-  Tracked under OQ-7.
+**How the transport suite was run on a full host:** the machine's APFS container
+had ~136 MB free (the disk-freed blocks were trapped in pending macOS-update
+copy-on-write snapshots, which were left untouched). Rather than delete the
+user's data, the iroh build tree was compiled **in a 5 GB RAM disk** (16 GB RAM
+available) with `CARGO_TARGET_DIR` and `TMPDIR` pointed at it:
+```
+DEV=$(hdiutil attach -nomount ram://10485760 | awk '{print $1}')
+diskutil erasevolume APFS rdcargo "$DEV"
+RUSTC=<rustup-stable>/rustc TMPDIR=/Volumes/rdcargo/tmp \
+  CARGO_PROFILE_DEV_DEBUG=0 CARGO_TARGET_DIR=/Volumes/rdcargo/target \
+  <rustup-stable>/cargo test -p ar-edit-collab --features transport --offline --tests
+# → 31 passed, 0 failed (+ rendezvous 2, CLI 3 = 36 total)
+```
+The same command reproduces it (rustc ≥ 1.91). The real-DHT/relay round-trip
+(vs the hermetic in-process backend) remains OQ-7.
 
 ## Test matrix
 
