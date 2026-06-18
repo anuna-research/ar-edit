@@ -4,7 +4,9 @@ Implementation of [[SPEC-003-realtime-collaborative-editing]] via
 `plans/IMPL-003-collab.spl`. Crate: `crates/ar-edit-collab` (+ CLI in
 `crates/ar-edit`).
 
-**Status: 17/17 tasks done. 33 tests passing.**
+**Status: 17/17 tasks done. 35 tests passing.** The full serverless pairing
+vertical is implemented and tested: discover by phrase (pkarr/DHT) → dial over
+iroh → SPAKE2 authenticated key agreement over that connection → sync.
 
 ## Test matrix
 
@@ -12,7 +14,7 @@ Implementation of [[SPEC-003-realtime-collaborative-editing]] via
 |-------|-------|-------|
 | Pure core (crdt, materialise, migrate, undo, recognise, reconcile, pairing, presence) | default (any rustc) | 23 |
 | Rendezvous relay | `--features rendezvous` (tokio) | 2 |
-| iroh transport + blob integrity + **pkarr discovery** | `--features transport` (rustc ≥ 1.91) | 5 |
+| iroh transport + blob + pkarr discovery + **SPAKE2-over-iroh** | `--features transport` (rustc ≥ 1.91) | 7 |
 | Collaboration CLI | `ar-edit` binary | 3 |
 
 Reproduce:
@@ -39,7 +41,7 @@ RUSTC=~/.rustup/toolchains/stable-*/bin/rustc \
 | p7 | `reconcile.rs`, `ids.rs` | 072/074/076 | manifest merge/conflict, BLAKE3 gate |
 | p8 | `tests/*` | 083 (SEC) etc. | property/example suite |
 | s1 | `shell/transport.rs` (iroh 1.0) | 071/084 | **delta propagates over a real iroh QUIC loopback connection** |
-| s2 | `pairing.rs` (SPAKE2) | 070/NFR-014 | key agreement, wrong-phrase fail-closed, lockout — **⚠ pending crypto review** |
+| s2 | `pairing.rs` (SPAKE2) + `transport::pair_as_initiator/responder` (over iroh, CON-014) | 070/NFR-014 | key agreement, wrong-phrase fail-closed, lockout; **runs over a real iroh connection, tested end-to-end** — **⚠ still pending crypto review** |
 | s3 | `shell/transport.rs` (blob xfer) | 075/076 | content-addressed transfer; **tampered blob rejected fail-closed** |
 | s4 | `presence.rs` | 073/085 | ephemeral peer/cursor table |
 | s5 | delta-sync test | 087 | offline edits reconcile delta-only, no loss |

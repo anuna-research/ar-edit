@@ -657,7 +657,10 @@ phrases agree, mismatched fail closed, handshake ~0.2 ms); remains a no-go
 cryptographic area pending audited-impl + expert + cross-model review.
 **Revised v1.1.0:** the handshake now runs over the direct iroh connection
 established by [[SPEC-003-realtime-collaborative-editing#ADR-013]] discovery,
-not over a rendezvous-server channel.
+not over a rendezvous-server channel. The mechanism is **implemented and
+loopback-tested** (`ar-edit-collab` `transport::pair_as_initiator/responder`,
+CON-014: matching phrases agree on a session key over iroh, a wrong phrase
+fails key confirmation); production acceptance still pends the review below.
 
 **Context:** Users pair by communicating a short, low-entropy phrase
 out-of-band. The two instances must locate each other and bootstrap a strong

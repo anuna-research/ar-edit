@@ -11,8 +11,10 @@
 
 use crate::crdt::CollabDoc;
 use crate::ids::ActorId;
+use crate::pairing::{self, SessionKey};
+use crate::recognise::phrase::Phrase;
 use crate::recognise::wire::{self, SyncEnvelope, PROTOCOL_VERSION};
-use iroh::endpoint::Builder;
+use iroh::endpoint::{Builder, RecvStream, SendStream};
 use iroh::{Endpoint, EndpointAddr};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -22,6 +24,9 @@ pub const COLLAB_ALPN: &[u8] = b"ar-edit/collab/0";
 
 /// DELTA tag in the CON-015 envelope.
 const TAG_DELTA: u8 = 0x11;
+/// CON-014 pairing-handshake tags (over the direct iroh connection).
+const TAG_PAKE: u8 = 0x30;
+const TAG_CONFIRM: u8 = 0x31;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
@@ -35,6 +40,8 @@ pub enum TransportError {
     NoSocket,
     #[error("blob failed BLAKE3 integrity check — rejected")]
     Integrity,
+    #[error("pairing: {0}")]
+    Pairing(String),
 }
 
 fn iroh_err<E: std::fmt::Display>(e: E) -> TransportError {
@@ -162,10 +169,102 @@ impl Transport {
         }
     }
 
+    /// Run the SPAKE2 pairing handshake as the **dialer**, over a fresh direct
+    /// iroh connection to `to` (SPEC-003 REQ-070, CON-014). Returns the agreed
+    /// [`SessionKey`] only if key confirmation succeeds; a wrong phrase fails
+    /// closed. ⚠ NO-GO crypto path (ADR-009) — pending the mandated review.
+    pub async fn pair_as_initiator(
+        &self,
+        to: EndpointAddr,
+        phrase: &Phrase,
+    ) -> Result<SessionKey, TransportError> {
+        let conn = self.endpoint.connect(to, COLLAB_ALPN).await.map_err(iroh_err)?;
+
+        // PAKE message exchange on one bi-stream.
+        let (pending, msg_a) = pairing::start(phrase);
+        let (mut s, mut r) = conn.open_bi().await.map_err(iroh_err)?;
+        write_tagged(&mut s, TAG_PAKE, &msg_a).await?;
+        let msg_b = read_tagged(&mut r, TAG_PAKE).await?;
+        let key = pending
+            .finish(&msg_b)
+            .map_err(|e| TransportError::Pairing(e.to_string()))?;
+
+        // Key-confirmation exchange on a second bi-stream.
+        let (mut s2, mut r2) = conn.open_bi().await.map_err(iroh_err)?;
+        write_tagged(&mut s2, TAG_CONFIRM, &key.confirm_tag()).await?;
+        let peer_tag = read_confirm(&mut r2).await?;
+        let verify = key.verify_peer(&peer_tag);
+        // Close explicitly (both outcomes) so the responder's `closed().await`
+        // returns and it does not drop the endpoint before we read its confirm.
+        conn.close(0u32.into(), b"paired");
+        verify.map_err(|e| TransportError::Pairing(e.to_string()))?;
+        Ok(key)
+    }
+
+    /// Run the SPAKE2 pairing handshake as the **accepter** (REQ-070, CON-014).
+    pub async fn pair_as_responder(&self, phrase: &Phrase) -> Result<SessionKey, TransportError> {
+        let incoming = self
+            .endpoint
+            .accept()
+            .await
+            .ok_or_else(|| TransportError::Iroh("endpoint closed".into()))?;
+        let conn = incoming.await.map_err(iroh_err)?;
+
+        let (pending, msg_b) = pairing::start(phrase);
+        let (mut s, mut r) = conn.accept_bi().await.map_err(iroh_err)?;
+        let msg_a = read_tagged(&mut r, TAG_PAKE).await?;
+        write_tagged(&mut s, TAG_PAKE, &msg_b).await?;
+        let key = pending
+            .finish(&msg_a)
+            .map_err(|e| TransportError::Pairing(e.to_string()))?;
+
+        let (mut s2, mut r2) = conn.accept_bi().await.map_err(iroh_err)?;
+        let peer_tag = read_confirm(&mut r2).await?;
+        write_tagged(&mut s2, TAG_CONFIRM, &key.confirm_tag()).await?;
+        let verify = key.verify_peer(&peer_tag);
+        // Wait for the initiator to close before returning, so our confirm is
+        // delivered and our endpoint stays alive until the peer has read it.
+        conn.closed().await;
+        verify.map_err(|e| TransportError::Pairing(e.to_string()))?;
+        Ok(key)
+    }
+
     /// Close the endpoint.
     pub async fn close(self) {
         self.endpoint.close().await;
     }
+}
+
+/// Write a `[tag][payload]` message on a bi-stream and finish the send half so
+/// the peer's `read_to_end` sees EOF.
+async fn write_tagged(s: &mut SendStream, tag: u8, payload: &[u8]) -> Result<(), TransportError> {
+    let mut buf = Vec::with_capacity(1 + payload.len());
+    buf.push(tag);
+    buf.extend_from_slice(payload);
+    s.write_all(&buf).await.map_err(iroh_err)?;
+    s.finish().map_err(iroh_err)?;
+    Ok(())
+}
+
+/// Read a `[tag][payload]` message, checking the expected tag (CON-014).
+async fn read_tagged(r: &mut RecvStream, expect: u8) -> Result<Vec<u8>, TransportError> {
+    let bytes = r.read_to_end(64 * 1024).await.map_err(iroh_err)?;
+    let (tag, payload) = bytes
+        .split_first()
+        .ok_or_else(|| TransportError::Pairing("empty handshake frame".into()))?;
+    if *tag != expect {
+        return Err(TransportError::Pairing(format!(
+            "unexpected handshake tag {tag:#04x}"
+        )));
+    }
+    Ok(payload.to_vec())
+}
+
+async fn read_confirm(r: &mut RecvStream) -> Result<[u8; 32], TransportError> {
+    let payload = read_tagged(r, TAG_CONFIRM).await?;
+    payload
+        .try_into()
+        .map_err(|_| TransportError::Pairing("confirmation tag must be 32 bytes".into()))
 }
 
 /// Wrap a delta blob in a CON-015 DELTA envelope.

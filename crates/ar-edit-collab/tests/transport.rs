@@ -4,6 +4,7 @@
 
 use ar_edit_collab::crdt::CollabDoc;
 use ar_edit_collab::materialise::materialise;
+use ar_edit_collab::recognise::phrase;
 use ar_edit_collab::shell::transport::Transport;
 use ar_edit_core::models::{Shot, ShotRange};
 
@@ -49,6 +50,45 @@ async fn delta_propagates_over_iroh() {
     );
 
     client.close().await;
+}
+
+/// REQ-070 / CON-014: SPAKE2 over the direct iroh connection. Matching phrases
+/// agree on a session key end-to-end; a wrong phrase fails key confirmation
+/// (no session). NB: mechanism test — production acceptance still needs the
+/// ADR-009 crypto review.
+#[tokio::test]
+async fn spake2_over_iroh_agrees_on_matching_phrase() {
+    let responder = Transport::bind_loopback().await.unwrap();
+    let initiator = Transport::bind_loopback().await.unwrap();
+    let addr = responder.dial_addr().unwrap();
+    let phrase = phrase::generate_secure();
+
+    let p = phrase.clone();
+    let h = tokio::spawn(async move { responder.pair_as_responder(&p).await });
+    let key_i = initiator.pair_as_initiator(addr, &phrase).await.unwrap();
+    let key_r = h.await.unwrap().unwrap();
+
+    assert_eq!(
+        key_i.bytes(),
+        key_r.bytes(),
+        "both peers must derive the same session key over iroh"
+    );
+    initiator.close().await;
+}
+
+#[tokio::test]
+async fn spake2_over_iroh_wrong_phrase_fails_closed() {
+    let responder = Transport::bind_loopback().await.unwrap();
+    let initiator = Transport::bind_loopback().await.unwrap();
+    let addr = responder.dial_addr().unwrap();
+    let good = phrase::generate_secure();
+    let wrong = phrase::parse(&format!("{}-{}-{}", (good.channel + 1) % 1000, good.words[0], good.words[1])).unwrap();
+
+    let h = tokio::spawn(async move { responder.pair_as_responder(&wrong).await });
+    let result = initiator.pair_as_initiator(addr, &good).await;
+    let _ = h.await;
+    assert!(result.is_err(), "mismatched phrase must fail key confirmation");
+    initiator.close().await;
 }
 
 /// REQ-075/076: a source blob transfers over iroh and is admitted only when its
