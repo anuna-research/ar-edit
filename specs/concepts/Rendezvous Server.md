@@ -4,6 +4,13 @@ A lightweight relay whose only job is to let two peers, who know a shared short
 code, **find each other** and exchange a handshake — after which they communicate
 directly. It is a meeting point, not a data hub.
 
+> **Status in SPEC-003 (v1.1.0):** the dedicated rendezvous server is no longer
+> the primary mechanism. Discovery is now serverless via phrase-keyed [[pkarr]]
+> on the [[Mainline DHT]] ([[SPEC-003-realtime-collaborative-editing#ADR-013]]);
+> a rendezvous relay survives only as an **optional fallback** for networks that
+> block the DHT, relaying the same opaque handshake frames
+> ([[SPEC-003-realtime-collaborative-editing#CON-014]]).
+
 In [[SPEC-003-realtime-collaborative-editing]] (the *magic-wormhole* model) the
 rendezvous server:
 

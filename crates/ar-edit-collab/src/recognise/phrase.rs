@@ -15,19 +15,11 @@ use rand::Rng;
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-/// The audited wordlist (fixed, checked into the repo). Production should use
-/// the full PGP word list; this is a >=256-word phonetically-distinct subset.
-const WORDLIST_RAW: &str = include_str!("wordlist.txt");
-
-fn wordlist() -> &'static Vec<&'static str> {
-    static W: OnceLock<Vec<&'static str>> = OnceLock::new();
-    W.get_or_init(|| {
-        WORDLIST_RAW
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .collect()
-    })
+/// The pairing wordlist is the BIP39 English list (2048 words). The whole
+/// `<num>-<word>-<word>` phrase is the shared secret — both the SPAKE2 password
+/// and the seed for the pkarr discovery key (SPEC-003 REQ-067 / ADR-013).
+fn wordlist() -> &'static [&'static str; 2048] {
+    bip39::Language::English.word_list()
 }
 
 fn wordset() -> &'static HashSet<&'static str> {
@@ -35,7 +27,7 @@ fn wordset() -> &'static HashSet<&'static str> {
     S.get_or_init(|| wordlist().iter().copied().collect())
 }
 
-/// Number of words in the audited list (entropy basis for REQ-067).
+/// Number of words in the wordlist (entropy basis for REQ-067): 2048 (BIP39).
 pub fn wordlist_len() -> usize {
     wordlist().len()
 }

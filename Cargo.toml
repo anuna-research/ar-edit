@@ -26,6 +26,7 @@ loro = "1"
 blake3 = "1"
 spake2 = "0.4"
 rand = "0.8"
+bip39 = "2"
 # Collaboration shell deps (Phase S; behind the `transport` feature)
 iroh = "1"
 iroh-blobs = "0.103"

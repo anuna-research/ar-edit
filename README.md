@@ -78,9 +78,12 @@ ar-edit session status        # session + sync status
 project over a direct peer-to-peer connection. The edit document is a
 [CRDT](specs/concepts/CRDT.md) ([Loro](specs/concepts/Loro.md)), so concurrent
 edits merge automatically; source media syncs content-addressed by
-[BLAKE3](specs/concepts/BLAKE3.md). Pairing uses
-[SPAKE2](specs/concepts/SPAKE2.md) over a rendezvous server, then hands off to
-[iroh](specs/concepts/iroh.md).
+[BLAKE3](specs/concepts/BLAKE3.md). The `<num>-<word>-<word>` phrase uses the
+[BIP39](specs/concepts/BIP39.md) wordlist; peers find each other **serverless**
+via phrase-keyed [pkarr](specs/concepts/pkarr.md) records on the
+[BitTorrent Mainline DHT](specs/concepts/Mainline%20DHT.md) (no rendezvous
+server to host), then run [SPAKE2](specs/concepts/SPAKE2.md) over the direct
+[iroh](specs/concepts/iroh.md) connection.
 
 Status: the CRDT engine, iroh transport, blob-integrity sync, delta reconnect,
 presence, and rendezvous relay are implemented and tested in the

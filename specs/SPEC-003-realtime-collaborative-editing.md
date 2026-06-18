@@ -2,9 +2,17 @@
 id: SPEC-003
 title: "SPEC-003: Realtime Collaborative Editing via P2P CRDTs"
 type: specification
-version: 1.0.0
+version: 1.1.0
 status: implementing
 parent: SPEC-001
+---
+
+<!-- Revision 1.1.0 (2026-06-19): pairing rendezvous reworked from a dedicated
+     server to serverless phrase-keyed pkarr / BitTorrent Mainline DHT discovery
+     with SPAKE2 run over the resulting direct iroh connection. Resolves OQ-3;
+     revises ADR-009; adds ADR-013 and CON-017; repurposes CON-014; demotes the
+     s7 TCP relay to an optional DHT-blocked fallback. Pattern after
+     ../did-crdt ADR-006 (pkarr-derived keypair for keyed DHT discovery). -->
 ---
 
 # SPEC-003: Realtime Collaborative Editing via P2P CRDTs
@@ -46,7 +54,7 @@ that every peer can resolve, preview, and render every shot in the shared edit.
 |----------|--------|-----------|
 | Source sync | Full content-addressed media replication via [[iroh-blobs]] | "Both clients sync the source materials" requires that either peer can independently render any shot; content addressing gives free dedup and integrity |
 | CRDT formulation | Off-the-shelf document CRDT ([[Loro]] — see [[SPEC-003-realtime-collaborative-editing#ADR-007]]) | Composition-First (Constitutional Principle 15); a hand-rolled CRDT at this novelty is unjustified risk |
-| Pairing rendezvous | Dedicated [[Rendezvous Server]] (magic-wormhole model) → direct iroh handoff | A low-entropy phrase needs a meeting point that does not itself leak the secret; proven design |
+| Pairing rendezvous | **Serverless: phrase-keyed [[pkarr]] / [[Mainline DHT]] discovery → SPAKE2 over direct iroh** (see [[SPEC-003-realtime-collaborative-editing#ADR-013]]) | No server to host (resolves OQ-3); reuses the public DHT iroh already uses for discovery; SPAKE2's single-guess property keeps the low-entropy phrase safe. (Revised from a dedicated rendezvous server in v1.1.0; the TCP relay survives as an optional DHT-blocked fallback.) |
 | Coordination scope | **N-peer** from the first version | Stakeholder requirement; CRDT actor model and sync topology specified for ≥ 3 concurrent editors |
 
 ### Phase 0 note — Experiment vs Specify
@@ -147,12 +155,16 @@ once SPEC-003 reaches `implemented`; that bookkeeping is tracked as
 
 The system SHALL generate a human-transcribable pairing phrase of the form
 `<num>-<word>-<word>` WHEN the user opens a collaborative session via
-`ar-edit share` WITH the leading `<num>` being a rendezvous channel identifier
-in the range 0–999 and each `<word>` drawn from a fixed, audited wordlist (the
-[[PGP Word List]] or equivalent ≥ 256-word phonetically-distinct list) selected
-with a cryptographically secure RNG. The phrase SHALL provide at least
-2^16 bits of selection entropy across the two words and SHALL be displayed
-prominently for the host to communicate out-of-band.
+`ar-edit share` WITH the leading `<num>` (range 0–999) and each `<word>` (drawn
+from the [[BIP39]] English wordlist — 2048 words, each uniquely identified by
+its first four letters) together forming the **shared low-entropy secret**: the
+whole phrase is both the [[SPAKE2]] password *and* the seed for the
+phrase-derived discovery keypair (see
+[[SPEC-003-realtime-collaborative-editing#ADR-013]]). The phrase SHALL be
+generated with a cryptographically secure RNG, providing at least 2048² ≈ 2^22
+combinations across the two words (plus ~2^10 from `<num>`), and be displayed
+prominently for the host to communicate out-of-band. (`<num>` is no longer a
+server channel index; it is part of the secret.)
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-074]]
@@ -164,44 +176,53 @@ Trace:
 
 The system SHALL open the current project for collaboration WHEN the user runs
 `ar-edit share` WITH the result being: (a) a pairing phrase generated per
-[[SPEC-003-realtime-collaborative-editing#REQ-067]], (b) a registration of the
-host's [[iroh]] node identity and rendezvous channel with the
-[[Rendezvous Server]], and (c) the host entering a waiting state that accepts
-joining peers until the session is closed. The phrase SHALL expire after a
-bounded, configurable interval (default 10 minutes) after which it is
-single-use-invalidated.
+[[SPEC-003-realtime-collaborative-editing#REQ-067]], (b) **publication of a
+signed [[pkarr]] discovery record advertising the host's [[iroh]] NodeAddr
+(NodeId + direct addresses + relay), keyed by the phrase-derived discovery key,
+to the [[Mainline DHT]] (or a pkarr relay)** per
+[[SPEC-003-realtime-collaborative-editing#CON-017]] and refreshed before
+expiry, and (c) the host entering a waiting state that accepts joining peers
+until the session is closed. The phrase SHALL expire after a bounded,
+configurable interval (default 10 minutes) after which the discovery record is
+withdrawn and the phrase single-use-invalidated. Publication SHALL be
+suppressible via a `DISABLE_DHT_PUBLISH`-style opt-out (privacy).
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-076]]
 - [[SPEC-003-realtime-collaborative-editing#CON-012]]
+- [[SPEC-003-realtime-collaborative-editing#CON-017]]
 
 **REQ-069: Session Joining**
 
 The system SHALL join an existing collaborative session WHEN the user runs
 `ar-edit pair <phrase>` WITH the system parsing the phrase per
-[[SPEC-003-realtime-collaborative-editing#CON-013]], contacting the
-[[Rendezvous Server]] on the channel encoded by `<num>`, completing the
-[[SPAKE2]] exchange keyed by the full phrase, and — on success — establishing a
-direct [[iroh]] connection to the host and every other peer. A phrase that
-fails to parse SHALL be rejected before any network action (Constitutional
-Principle 14).
+[[SPEC-003-realtime-collaborative-editing#CON-013]], **deriving the discovery
+keypair from the phrase, looking up the host's [[pkarr]] discovery record on the
+[[Mainline DHT]]** ([[SPEC-003-realtime-collaborative-editing#CON-017]]),
+**dialling the host directly over [[iroh]] using the record's address hints,
+and completing the [[SPAKE2]] exchange (keyed by the full phrase) over that
+direct connection** — on success establishing the session with the host and
+every other peer. A phrase that fails to parse SHALL be rejected before any
+network action (Constitutional Principle 14).
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-077]]
 - [[SPEC-003-realtime-collaborative-editing#TEST-078]]
 - [[SPEC-003-realtime-collaborative-editing#CON-012]]
 - [[SPEC-003-realtime-collaborative-editing#CON-013]]
+- [[SPEC-003-realtime-collaborative-editing#CON-017]]
 
 **REQ-070: Authenticated Key Agreement**
 
-The system SHALL derive a shared session key using a [[SPAKE2]] exchange over
-the [[Rendezvous Server]] channel, keyed by the full pairing phrase, BEFORE any
-project data is exchanged WITH the property that (a) an eavesdropper observing
-all rendezvous traffic cannot derive the session key, (b) an active attacker
-gets at most **one** online password guess per pairing attempt (the
-single-guess [[PAKE]] property), and (c) a confirmed key match is required
-before the iroh data channel carries any project bytes. The number of failed
-pairing attempts per channel SHALL be bounded.
+The system SHALL derive a shared session key using a [[SPAKE2]] exchange
+**conducted over the direct [[iroh]] connection** to the peer, keyed by the
+full pairing phrase, BEFORE any project data is exchanged WITH the property that
+(a) an eavesdropper cannot derive the session key, (b) an active attacker gets
+at most **one** online password guess per pairing attempt (the single-guess
+[[PAKE]] property), and (c) a confirmed key match is required before the
+connection carries any project bytes. The number of failed pairing attempts
+SHALL be bounded — the discovery key is single-use and the session burns after
+the configured limit (default: burn on first failed confirmation).
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-079]]
@@ -209,19 +230,26 @@ Trace:
 - [[SPEC-003-realtime-collaborative-editing#NFR-014]]
 - [[SPEC-003-realtime-collaborative-editing#CON-014]]
 
-**REQ-071: Rendezvous Brokering and Direct Handoff**
+**REQ-071: Serverless Peer Discovery and Direct Connection**
 
-The system SHALL use the [[Rendezvous Server]] solely to (a) match peers on a
-channel and (b) relay [[SPAKE2]] handshake messages and exchange [[iroh]]
-[[NodeTicket]]s, AFTER WHICH all project data (CRDT sync, blob transfer,
-presence) SHALL flow over a direct peer-to-peer iroh connection WITH the
-rendezvous connection closed once the direct connection is confirmed. The
-[[Rendezvous Server]] SHALL NOT receive any project data, decrypted phrase, or
-session key.
+The system SHALL discover peers **without a dedicated server** by
+publishing/looking up [[pkarr]] discovery records on the [[Mainline DHT]] (or a
+pkarr relay) under the phrase-derived key
+([[SPEC-003-realtime-collaborative-editing#CON-017]]), AFTER WHICH the
+[[SPAKE2]] handshake ([[SPEC-003-realtime-collaborative-editing#CON-014]]) and
+all project data (CRDT sync, blob transfer, presence) SHALL flow over the
+direct peer-to-peer [[iroh]] connection. No third party SHALL receive the
+pairing phrase, the [[SPAKE2]] session key, or any project data; the discovery
+record carries only the host's [[iroh]] NodeAddr as **unauthenticated dialling
+hints** (the iroh handshake authenticates the NodeId, so a forged hint costs
+only a failed connection attempt). An optional [[Rendezvous Server]] relay
+([[SPEC-003-realtime-collaborative-editing#ADR-013]]) MAY be used as a fallback
+where the DHT is unreachable; it likewise never learns the phrase, key, or data.
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-081]]
 - [[SPEC-003-realtime-collaborative-editing#CON-014]]
+- [[SPEC-003-realtime-collaborative-editing#CON-017]]
 
 **REQ-072: Peer Actor Identity**
 
@@ -622,40 +650,95 @@ Trace:
 - [[SPEC-003-realtime-collaborative-editing#REQ-075]]
 - [[SPEC-003-realtime-collaborative-editing#REQ-084]]
 
-### ADR-009: Pairing — SPAKE2 over a Rendezvous Server
+### ADR-009: Pairing — SPAKE2 Key Agreement
 
 **Status:** Proposed — crypto feasibility **spike-confirmed** (OQ-1: matched
 phrases agree, mismatched fail closed, handshake ~0.2 ms); remains a no-go
-cryptographic area pending audited-impl + expert + cross-model review
+cryptographic area pending audited-impl + expert + cross-model review.
+**Revised v1.1.0:** the handshake now runs over the direct iroh connection
+established by [[SPEC-003-realtime-collaborative-editing#ADR-013]] discovery,
+not over a rendezvous-server channel.
 
 **Context:** Users pair by communicating a short, low-entropy phrase
 out-of-band. The two instances must locate each other and bootstrap a strong
 key from that weak secret without a pre-shared certificate.
 
-**Decision:** Adopt the magic-wormhole model: a `<num>-<word>-<word>` phrase
-where `<num>` selects a [[Rendezvous Server]] channel and the two words are the
-[[SPAKE2]] password. The rendezvous relays SPAKE2 messages and iroh
-[[NodeTicket]]s, then peers connect directly
-([[SPEC-003-realtime-collaborative-editing#REQ-071]]).
+**Decision:** The full `<num>-<word>-<word>` phrase ([[BIP39]] words) is the
+[[SPAKE2]] password. After the peers find each other via phrase-keyed [[pkarr]]
+discovery ([[SPEC-003-realtime-collaborative-editing#ADR-013]]) and open a
+direct [[iroh]] connection, they run [[SPAKE2]] **over that connection**,
+exchange key-confirmation tags, and only then carry project data
+([[SPEC-003-realtime-collaborative-editing#REQ-070]]).
 
-**Alternatives considered:** (i) *iroh-native discovery keyed by the phrase* —
-rejected because a low-entropy phrase used as a public discovery key is
-enumerable, leaking session existence and enabling targeted attack. (ii)
-*Manual NodeTicket paste* — rejected as the default because it loses the
-"read a phrase aloud" ergonomics, though it MAY be offered as a fallback.
+**Alternatives considered:** (i) *Dedicated rendezvous server relaying SPAKE2*
+(the original v1.0.0 magic-wormhole-style decision) — sound, but raises "who
+hosts it?" (OQ-3) and adds infra; retained only as an optional DHT-blocked
+fallback. (ii) *Manual NodeTicket paste* — loses the "read a phrase aloud"
+ergonomics; MAY be offered as a fallback.
 
 **Rationale:** [[SPAKE2]] gives the single-guess [[PAKE]] property
-([[SPEC-003-realtime-collaborative-editing#NFR-014]]) so a weak phrase is safe;
-the rendezvous is a meeting point that never learns the secret or any project
-data. This is a **no-go cryptographic area** under [[PROTO-001]] AI Trust
-Boundaries — the SPAKE2 integration MUST use an audited implementation and
-receive cross-model + human expert review (Tier 1).
+([[SPEC-003-realtime-collaborative-editing#NFR-014]]), so the weak phrase is
+safe even though [[SPEC-003-realtime-collaborative-editing#ADR-013]] discovery
+makes the phrase-derived key enumerable.
+This is a **no-go cryptographic area** under [[PROTO-001]] AI Trust Boundaries —
+audited implementation + cross-model + human expert review (Tier 1) required.
+The in-house [[SPAKE2]] reference (`cbcl-bus` SPEC-007) informs open review
+items: proof-of-possession binding the session to the iroh node key, transcript
+binding, RFC 9382 / ristretto255 vs Ed25519Group, and a labelled KDF/AEAD.
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#REQ-067]]
 - [[SPEC-003-realtime-collaborative-editing#REQ-069]]
 - [[SPEC-003-realtime-collaborative-editing#REQ-070]]
+- [[SPEC-003-realtime-collaborative-editing#ADR-013]]
 - [[SPEC-003-realtime-collaborative-editing#NFR-014]]
+
+### ADR-013: Serverless Discovery via Phrase-Keyed pkarr / Mainline DHT
+
+**Status:** Proposed (v1.1.0) — pending the same crypto review as
+[[SPEC-003-realtime-collaborative-editing#ADR-009]]
+
+**Context:** ADR-009 v1.0.0 used a dedicated [[Rendezvous Server]] as the
+meeting point, which left open "who operates it?" (OQ-3) and added a piece of
+infrastructure. The sibling project `../did-crdt` (its ADR-006, REQ-013/014,
+CON-006) demonstrates **serverless** discovery: derive a deterministic Ed25519
+keypair from a known identifier, publish a signed [[pkarr]] record (DNS-shaped)
+to the [[Mainline DHT]] (or a pkarr HTTP relay) advertising an [[iroh]]
+NodeAddr, and let anyone who knows the identifier derive the same key and look
+it up. [[iroh]] already uses pkarr for its own node discovery.
+
+**Decision:** Adopt the `did-crdt` pattern, keyed by the **pairing phrase**:
+- `seed = blake3("ar-edit/pair/discovery/v1" ‖ phrase)`; `(sk, pk) = Ed25519(seed)`.
+- The host publishes a [[pkarr]] record under `pk` carrying its iroh NodeId +
+  direct addresses + relay (the dialling hints), refreshed before expiry, with a
+  `DISABLE_DHT_PUBLISH` opt-out.
+- The joiner derives the same `(sk, pk)`, looks the record up on the
+  [[Mainline DHT]], dials the host over iroh, then runs SPAKE2 over the
+  connection ([[SPEC-003-realtime-collaborative-editing#ADR-009]]).
+
+**Trade-off (the load-bearing review item):** unlike `did-crdt`'s high-entropy
+DID key, ar-edit's phrase is **low-entropy, so the discovery key is
+enumerable** — an attacker can derive candidate phrases, find live sessions, and
+learn the host's IP. This is mitigated and judged acceptable because: SPAKE2
+still limits an attacker to one online guess (NFR-014); the phrase has a short
+TTL (REQ-068, default 10 min); the session burns on the first failed
+confirmation; and `DISABLE_DHT_PUBLISH` lets the privacy-sensitive opt out. The
+net posture equals magic-wormhole's low-entropy mailbox channel — security comes
+from the PAKE, not from channel secrecy. (This reverses the v1.0.0 rejection of
+"iroh-native discovery keyed by the phrase" in ADR-009, now that the concrete
+`did-crdt` pattern + these mitigations are in hand.)
+
+**Consequences:** no server to host (**resolves OQ-3**); the s7 TCP relay is
+demoted to an optional fallback for networks that block the DHT; host IP is
+exposed on a public DHT (privacy, mitigated by opt-out); a real-DHT
+discovery+latency run is folded into
+[[SPEC-003-realtime-collaborative-editing#OQ-7]].
+
+Trace:
+- [[SPEC-003-realtime-collaborative-editing#REQ-068]]
+- [[SPEC-003-realtime-collaborative-editing#REQ-069]]
+- [[SPEC-003-realtime-collaborative-editing#REQ-071]]
+- [[SPEC-003-realtime-collaborative-editing#CON-017]]
 
 ### ADR-010: Full Content-Addressed Media Replication
 
@@ -807,35 +890,72 @@ Implements: [[SPEC-003-realtime-collaborative-editing#REQ-067]],
 Verified by: [[SPEC-003-realtime-collaborative-editing#TEST-075]],
 [[SPEC-003-realtime-collaborative-editing#TEST-078]]
 
-### CON-014: Rendezvous Protocol [LangSec]
+### CON-014: Pairing Handshake over iroh [LangSec]
 
-Messages exchanged with the [[Rendezvous Server]]. Each message is a
-length-prefixed, externally-tagged frame; the recogniser parses the full frame
-against the schema before dispatch. The server relays opaque bytes for the
-SPAKE2 and ticket-exchange payloads and never interprets project data.
+The [[SPAKE2]] handshake frames exchanged over the **direct iroh connection**
+after [[SPEC-003-realtime-collaborative-editing#ADR-013]] discovery. Each frame
+is length-prefixed and externally tagged; the recogniser parses the full frame
+before any cryptographic action.
 
 ```abnf
 frame       = u32-len body          ; u32-len = big-endian length of body
 body        = tag payload           ; tag = single octet message type
-; tags: 0x01 BIND(channel)      0x02 PEER-JOINED(peer-eph-id)
-;       0x03 PAKE-MSG(opaque)   0x04 TICKET(opaque)
-;       0x05 CLOSE(reason)      0x06 ERROR(code)
+; tags: 0x30 PAKE-MSG(opaque)   ; SPAKE2 message
+;       0x31 CONFIRM(mac-32)    ; key-confirmation tag (32 bytes)
+;       0x32 ERROR(code)
 ```
 
 Recognition rules:
 - A frame whose declared length exceeds a fixed maximum (default 64 KiB) is
   rejected without buffering (DoS guard).
-- `PAKE-MSG` and `TICKET` payloads are opaque to the rendezvous; only the
-  paired peers, holding the SPAKE2 key, may interpret/decrypt them.
+- `PAKE-MSG` is fed to the [[SPAKE2]] state machine; `CONFIRM` MUST be exactly
+  32 octets and is compared in constant time (review item) before any project
+  bytes flow.
 - Unknown tags ⇒ `ERROR` and connection close. No partial dispatch.
 
-Error model: malformed frame ⇒ ERROR(0x01); channel full ⇒ ERROR(0x02);
-expired/invalid channel ⇒ ERROR(0x03).
+**Optional fallback (DHT-blocked networks):** where the [[Mainline DHT]] is
+unreachable, a [[Rendezvous Server]] MAY relay these same opaque frames between
+peers (matching them on the `<num>` prefix as a channel), never interpreting
+PAKE payloads. This is the demoted v1.0.0 path
+([[SPEC-003-realtime-collaborative-editing#ADR-013]]).
 
 Implements: [[SPEC-003-realtime-collaborative-editing#REQ-070]],
 [[SPEC-003-realtime-collaborative-editing#REQ-071]]
 Verified by: [[SPEC-003-realtime-collaborative-editing#TEST-081]],
 [[SPEC-003-realtime-collaborative-editing#TEST-080]]
+
+### CON-017: pkarr Discovery Record [LangSec]
+
+The signed discovery record published to / looked up from the [[Mainline DHT]]
+(or a pkarr relay), keyed by the phrase-derived public key
+([[SPEC-003-realtime-collaborative-editing#ADR-013]]). A looked-up record is
+**untrusted input** and MUST be fully recognised before any dialling. Format
+(a [[pkarr]] signed DNS packet; one `key=value` per TXT character string, after
+`../did-crdt` CON-006):
+
+```abnf
+record   = "_ar-edit-pair" TXT 1*attr
+attr     = "v=1"
+         / "nid=" node-id          ; iroh NodeId (z-base-32)
+         / "relay=" url            ; optional relay URL
+         / "addrs=" addr *("," addr)   ; optional direct socket addresses
+addr     = ip ":" port
+```
+
+Recognition rules:
+- The record's pkarr/Ed25519 **signature MUST verify against the phrase-derived
+  public key**, and the embedded timestamp MUST be within the freshness window,
+  before any field is used (fail-closed; reject stale or unsigned records).
+- `nid` MUST parse as a valid iroh NodeId; `addrs`/`relay` are **unauthenticated
+  dialling hints** — a forged hint costs only a failed iroh handshake (which
+  authenticates the NodeId), never a trust escalation.
+- Unknown attributes are ignored (forward-compat), but a record missing `v` or
+  `nid` is rejected.
+
+Implements: [[SPEC-003-realtime-collaborative-editing#REQ-068]],
+[[SPEC-003-realtime-collaborative-editing#REQ-069]],
+[[SPEC-003-realtime-collaborative-editing#REQ-071]]
+Verified by: [[SPEC-003-realtime-collaborative-editing#TEST-081]]
 
 ### CON-015: CRDT Sync Message Envelope [LangSec]
 
@@ -1218,10 +1338,10 @@ boundary; the effectful transport lives in the shell. CI arch-lint forbids core
 
 ```
 REQ-067 → TEST-074, TEST-075 → CON-012, CON-013
-REQ-068 → TEST-076           → CON-012
-REQ-069 → TEST-077, TEST-078 → CON-012, CON-013
+REQ-068 → TEST-076           → CON-012, CON-017 ; ADR-013
+REQ-069 → TEST-077, TEST-078 → CON-012, CON-013, CON-017 ; ADR-013
 REQ-070 → TEST-079, TEST-080 → CON-014 ; NFR-014
-REQ-071 → TEST-081           → CON-014
+REQ-071 → TEST-081           → CON-014, CON-017 ; ADR-013
 REQ-072 → TEST-082, TEST-083
 REQ-073 → TEST-084           → CON-012
 REQ-074 → TEST-085, TEST-086 → CON-016
@@ -1261,7 +1381,8 @@ artefacts introduced here.
 | "sync the source materials" | Full content-addressed media + derived-artefact replication via [[iroh-blobs]], verified by [[BLAKE3]] ([[SPEC-003-realtime-collaborative-editing#REQ-075]], [[SPEC-003-realtime-collaborative-editing#REQ-077]]) |
 | "collection of CRDTs" | One [[Loro]] document: `MovableList` of shots, `Map` per shot, `List` of notes, `Map` sets for markers/POIs ([[SPEC-003-realtime-collaborative-editing#ADR-007]]) |
 | "connect two ar-edit instances" | Pairing is 2-at-a-time but the session is N-peer; each `pair` admits one more peer |
-| "secure pairing" | Single-guess [[PAKE]] via [[SPAKE2]]; channel lockout after 3 failures ([[SPEC-003-realtime-collaborative-editing#NFR-014]]) |
+| "secure pairing" | Single-guess [[PAKE]] via [[SPAKE2]] over direct [[iroh]]; phrase-keyed [[pkarr]] discovery; burn-on-failed-confirmation ([[SPEC-003-realtime-collaborative-editing#NFR-014]], [[SPEC-003-realtime-collaborative-editing#ADR-013]]) |
+| "wordlist" | [[BIP39]] English (2048 words); the whole `<num>-<word>-<word>` phrase is the secret |
 | "converged" | Byte-identical materialised edit documents given the same observed change set ([[SPEC-003-realtime-collaborative-editing#REQ-083]]) |
 
 ---
@@ -1271,9 +1392,9 @@ artefacts introduced here.
 | # | id | Question | Status |
 |---|----|----------|--------|
 | 1 | OQ-1 | De-risking spike: confirm [[Loro]] `MovableList` move/trim convergence, SPAKE2 feasibility, and 2 GB BLAKE3 content-addressing. | **Resolved 2026-06-18** — H-a/H-b/H-c PASS (`spike/oq-1/FINDINGS.md`). Transport-layer empirical run split out to OQ-7. |
-| 7 | OQ-7 | Transport-characterisation spike: real iroh pairing latency ([[SPEC-003-realtime-collaborative-editing#NFR-010]]) and iroh-blobs 2 GB network throughput / resumability ([[SPEC-003-realtime-collaborative-editing#NFR-011]]). Run on macOS, Linux, **and Windows** to confirm [[SPEC-001-transcript-video-editor#NFR-015]] (terminal backend, source-linking via [[ADR-012-cross-platform-source-linking]]) for the collaboration path. | **Partially addressed** (IMPL-003): the iroh transport + content-addressed blob transfer are implemented and **loopback-tested** (`crates/ar-edit-collab`, feature `transport`; requires rustc ≥ 1.91). Remaining: real-network latency/throughput numbers and iroh-blobs dedup/resume. |
+| 7 | OQ-7 | Transport-characterisation spike: real iroh pairing latency ([[SPEC-003-realtime-collaborative-editing#NFR-010]]) and iroh-blobs 2 GB network throughput / resumability ([[SPEC-003-realtime-collaborative-editing#NFR-011]]). Run on macOS, Linux, **and Windows** to confirm [[SPEC-001-transcript-video-editor#NFR-015]] (terminal backend, source-linking via [[ADR-012-cross-platform-source-linking]]) for the collaboration path. Also covers a real [[Mainline DHT]] / [[pkarr]] discovery round-trip ([[SPEC-003-realtime-collaborative-editing#ADR-013]]). | **Partially addressed** (IMPL-003): the iroh transport + content-addressed blob transfer are implemented and **loopback-tested** (`crates/ar-edit-collab`, feature `transport`; requires rustc ≥ 1.91). Remaining: real-network latency/throughput, pkarr/DHT discovery round-trip, and iroh-blobs dedup/resume. |
 | 2 | OQ-2 | Should lazy/on-demand media fetch be layered on full replication to let a peer start editing before a multi-GB sync finishes? | Deferred — optimisation over [[SPEC-003-realtime-collaborative-editing#ADR-010]] |
-| 3 | OQ-3 | Is the [[Rendezvous Server]] self-hosted by the user, Anuna-operated, or pluggable via config? Affects trust model and NFR-010. | Open — needs stakeholder decision |
+| 3 | OQ-3 | Is the [[Rendezvous Server]] self-hosted by the user, Anuna-operated, or pluggable via config? Affects trust model and NFR-010. | **Resolved (v1.1.0)** — no dedicated server: discovery is serverless via phrase-keyed [[pkarr]] / [[Mainline DHT]] ([[SPEC-003-realtime-collaborative-editing#ADR-013]]). A pkarr HTTP relay (e.g. `relay.pkarr.org`) is configurable; the TCP rendezvous relay remains an optional DHT-blocked fallback. |
 | 4 | OQ-4 | Version-bump and `superseded` bookkeeping on [[SPEC-001-transcript-video-editor]] REQ-046–048 and [[ADR-001-event-sourced-edits]] once SPEC-003 is `implemented`. | Open — tracked, execute at Phase 3 close |
 | 5 | OQ-5 | Should source-media replication be opt-in per source (e.g. exclude very large B-roll a peer will never need)? | Deferred — relates to OQ-2 |
 | 6 | OQ-6 | Conflict UX when two peers present the same `src-id` with different content ([[SPEC-003-realtime-collaborative-editing#REQ-074]]): auto-rename vs prompt? | Open — needs a SCREEN/UX decision |
@@ -1287,7 +1408,8 @@ artefacts introduced here.
 | CRDT engine | [[Loro]] (`MovableList` + `Map`) | Identity-preserving move; per-peer undo; delta sync |
 | P2P transport | [[iroh]] ([[QUIC]]) | Authenticated, NAT-traversing p2p with relay fallback |
 | Bulk transfer | [[iroh-blobs]] ([[BLAKE3]]) | Content-addressed, dedup, resumable, integrity-verified |
-| Pairing | [[SPAKE2]] + [[Rendezvous Server]] | Single-guess [[PAKE]] from a low-entropy phrase |
-| Wordlist | [[PGP Word List]] (or audited equivalent) | Phonetically distinct, transcribable aloud |
-| Async runtime | `tokio` (already a workspace dep) | iroh and rendezvous client are async |
+| Pairing | [[SPAKE2]] over direct [[iroh]] | Single-guess [[PAKE]] from a low-entropy phrase |
+| Discovery | phrase-keyed [[pkarr]] on [[Mainline DHT]] ([[SPEC-003-realtime-collaborative-editing#ADR-013]]) | Serverless meeting point; pattern after `../did-crdt` ADR-006; iroh already uses pkarr |
+| Wordlist | [[BIP39]] English (2048 words) | Standard, first-four-letters unique; matches `cbcl-bus` mnemonic pairing |
+| Async runtime | `tokio` (already a workspace dep) | iroh, pkarr, and the optional relay are async |
 | Platform support | macOS · Linux · Windows 10+ ([[SPEC-001-transcript-video-editor#NFR-015]]) | All collaboration crates (loro, iroh, iroh-blobs, spake2, blake3) are cross-platform Rust; iroh officially supports Windows; source-linking variance per [[ADR-012-cross-platform-source-linking]]; empirical Windows run is [[SPEC-003-realtime-collaborative-editing#OQ-7]] |

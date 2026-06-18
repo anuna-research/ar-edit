@@ -46,6 +46,15 @@ RUSTC=~/.rustup/toolchains/stable-*/bin/rustc \
 | s6 | `ar-edit` CLI (`share`/`pair`/`session`) | CON-012 | **malformed phrase → exit 1, no network** (TEST-078) |
 | s7 | `shell/rendezvous.rs` (TCP relay) | 071 (CON-014) | opaque relay + channel isolation |
 
+> **SPEC-003 v1.1.0 revision (discovery):** the dedicated rendezvous server is
+> replaced by serverless phrase-keyed pkarr / Mainline DHT discovery
+> ([ADR-013](../specs/SPEC-003-realtime-collaborative-editing.md)); the s7 TCP
+> relay above is demoted to an optional DHT-blocked fallback. The pkarr
+> discovery module (publish/lookup under a phrase-derived key → iroh dial) is a
+> **new follow-up task** not yet implemented; the wordlist is now BIP39 (2048
+> words, `bip39` crate) in `recognise/phrase.rs`. Spec is fully updated; code
+> for pkarr discovery is pending.
+
 ## Outstanding gates (recorded, not hidden)
 
 1. **s2 SPAKE2 — mandated crypto review (ADR-009 / AI Trust Boundaries).** The
