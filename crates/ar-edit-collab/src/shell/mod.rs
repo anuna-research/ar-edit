@@ -10,6 +10,9 @@
 pub mod rendezvous;
 
 #[cfg(feature = "transport")]
+pub mod discovery;
+
+#[cfg(feature = "transport")]
 pub mod transport;
 
 use crate::crdt::CollabDoc;

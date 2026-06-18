@@ -21,6 +21,7 @@ iroh = { workspace = true, optional = true }
 iroh-blobs = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
+pkarr = { workspace = true, optional = true }
 
 [features]
 # Pure core builds with no features (no iroh/tokio), per p0 acceptance.
@@ -28,7 +29,7 @@ default = []
 # Rendezvous relay needs only tokio (TCP) — no iroh, fast to build/test.
 rendezvous = ["dep:tokio"]
 # iroh delta transport.
-transport = ["dep:iroh", "dep:tokio", "dep:rustls"]
+transport = ["dep:iroh", "dep:tokio", "dep:rustls", "dep:pkarr"]
 blobsync = ["transport", "dep:iroh-blobs"]
 
 [dev-dependencies]

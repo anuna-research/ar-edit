@@ -593,3 +593,25 @@
 (claims agent:claude
   :at "2026-06-18T14:39:10Z"
   (given completed-s6-cli))
+
+;; =============================================================================
+;; s8: Serverless pkarr / Mainline DHT discovery (added v1.1.0, ADR-013/CON-017)
+;; =============================================================================
+(given task-s8-discovery)
+(meta task-s8-discovery
+  (phase "S")
+  (description "shell/discovery.rs: phrase-keyed pkarr discovery (ADR-013, CON-017). derive_keypair(phrase)=Ed25519 from blake3(domain‖phrase); build/parse the _ar-edit-pair signed TXT record carrying the host iroh EndpointAddr; Discovery backend enum InProcess (hermetic) + Http (pkarr relay over Mainline DHT). Replaces the dedicated rendezvous server; SPAKE2 then runs over the resulting direct iroh connection. Wordlist switched to BIP39. Implements REQ-068/069/071.")
+  (acceptance "Deterministic key from phrase; CON-017 record build/parse roundtrips to a dialable EndpointAddr; end-to-end: host publishes, joiner discovers by phrase alone, dials, and a CRDT delta propagates — all hermetic (in-process backend); builds under rustc>=1.91 with --features transport"))
+(normally r-ready-s8 (and task-s8-discovery completed-p5-phrase completed-p6-wire oq7-transport-host-available) ready-s8-discovery)
+(normally r-assign-s8 (and ready-s8-discovery agent-claude-available) assign-to-s8-discovery-claude)
+
+(claims agent:claude
+  :at "2026-06-18T20:30:40Z"
+  (given claim-v1-s8-discovery)
+  (normally r-cl-state-v1-s8-discovery claim-v1-s8-discovery state-claimed-v1-s8-discovery)
+  (normally r-cl-chain-v1-s8-discovery state-claimed-v1-s8-discovery claimed-s8-discovery)
+)
+
+(claims agent:claude
+  :at "2026-06-18T20:30:40Z"
+  (given completed-s8-discovery))

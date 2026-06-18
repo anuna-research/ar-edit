@@ -695,7 +695,11 @@ Trace:
 
 ### ADR-013: Serverless Discovery via Phrase-Keyed pkarr / Mainline DHT
 
-**Status:** Proposed (v1.1.0) — pending the same crypto review as
+**Status:** Proposed (v1.1.0) — **discovery implemented and loopback-tested**
+(`ar-edit-collab` `shell::discovery`, feature `transport`: deterministic phrase
+key, CON-017 record build/parse, in-process + pkarr-relay backends; end-to-end
+discover-by-phrase → dial → delta verified). The live SPAKE2 over the dialed
+connection remains pending the same crypto review as
 [[SPEC-003-realtime-collaborative-editing#ADR-009]]
 
 **Context:** ADR-009 v1.0.0 used a dedicated [[Rendezvous Server]] as the

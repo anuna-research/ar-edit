@@ -31,6 +31,7 @@ bip39 = "2"
 iroh = "1"
 iroh-blobs = "0.103"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+pkarr = { version = "2", default-features = false, features = ["async", "relay"] }
 
 # Binary
 ar-edit-core = { path = "crates/ar-edit-core" }

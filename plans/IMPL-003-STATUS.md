@@ -4,7 +4,7 @@ Implementation of [[SPEC-003-realtime-collaborative-editing]] via
 `plans/IMPL-003-collab.spl`. Crate: `crates/ar-edit-collab` (+ CLI in
 `crates/ar-edit`).
 
-**Status: 16/16 tasks done. 30 tests passing.**
+**Status: 17/17 tasks done. 33 tests passing.**
 
 ## Test matrix
 
@@ -12,7 +12,7 @@ Implementation of [[SPEC-003-realtime-collaborative-editing]] via
 |-------|-------|-------|
 | Pure core (crdt, materialise, migrate, undo, recognise, reconcile, pairing, presence) | default (any rustc) | 23 |
 | Rendezvous relay | `--features rendezvous` (tokio) | 2 |
-| iroh transport + blob integrity | `--features transport` (rustc ≥ 1.91) | 2 |
+| iroh transport + blob integrity + **pkarr discovery** | `--features transport` (rustc ≥ 1.91) | 5 |
 | Collaboration CLI | `ar-edit` binary | 3 |
 
 Reproduce:
@@ -45,15 +45,18 @@ RUSTC=~/.rustup/toolchains/stable-*/bin/rustc \
 | s5 | delta-sync test | 087 | offline edits reconcile delta-only, no loss |
 | s6 | `ar-edit` CLI (`share`/`pair`/`session`) | CON-012 | **malformed phrase → exit 1, no network** (TEST-078) |
 | s7 | `shell/rendezvous.rs` (TCP relay) | 071 (CON-014) | opaque relay + channel isolation |
+| s8 | `shell/discovery.rs` (pkarr / Mainline DHT) | 068/069/071 (ADR-013, CON-017) | **deterministic phrase key; CON-017 record roundtrip; end-to-end discover-by-phrase → dial → delta propagates (hermetic in-process backend)** |
 
-> **SPEC-003 v1.1.0 revision (discovery):** the dedicated rendezvous server is
-> replaced by serverless phrase-keyed pkarr / Mainline DHT discovery
+> **SPEC-003 v1.1.0 (discovery):** the dedicated rendezvous server is replaced by
+> serverless phrase-keyed pkarr / Mainline DHT discovery
 > ([ADR-013](../specs/SPEC-003-realtime-collaborative-editing.md)); the s7 TCP
-> relay above is demoted to an optional DHT-blocked fallback. The pkarr
-> discovery module (publish/lookup under a phrase-derived key → iroh dial) is a
-> **new follow-up task** not yet implemented; the wordlist is now BIP39 (2048
-> words, `bip39` crate) in `recognise/phrase.rs`. Spec is fully updated; code
-> for pkarr discovery is pending.
+> relay is demoted to an optional DHT-blocked fallback. The pkarr discovery
+> module (`shell/discovery.rs`, task s8) is now **implemented and tested**:
+> `derive_keypair` (phrase→Ed25519), CON-017 record build/parse, and an
+> in-process backend (hermetic) + an HTTP pkarr-relay backend (production, over
+> the Mainline DHT). The wordlist is BIP39 (2048 words, `bip39` crate). Remaining:
+> a real-DHT/relay round-trip (the in-process backend stands in for the DHT in
+> tests — see OQ-7) and the live SPAKE2 crypto review.
 
 ## Outstanding gates (recorded, not hidden)
 
