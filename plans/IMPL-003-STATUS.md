@@ -11,13 +11,22 @@ connection → sync.
 
 **Session capstone (`transport::Session`, `host_session`/`join_session`):**
 implemented — composes discovery + SPAKE2-over-iroh + delta sync over the
-paired connection, with an end-to-end test (`tests/session.rs`). ⚠ Its test
-(and any transport-feature rebuild) is currently **blocked by host disk**: the
-machine is at 332 MiB free / 191 GB used of 228 GB, and the iroh build tree
-needs ~5–6 GB. The pieces the capstone composes were verified earlier this
-session (discovery: `tests/discovery.rs`; SPAKE2-over-iroh: `tests/transport.rs`).
-Run `cargo test -p ar-edit-collab --features transport` (rustc ≥ 1.91) once
-disk is freed to validate the capstone. Tracked under OQ-7.
+paired connection, with an end-to-end test (`tests/session.rs`).
+
+Verification level reached on this host:
+- **Compiles:** `cargo check --tests -p ar-edit-collab --features transport`
+  passes (exit 0, rustc 1.93) — the whole transport feature *and* every test
+  file, including `tests/session.rs`, type-check.
+- **Components executed + passing** (run earlier this session, before the disk
+  filled): discovery (`tests/discovery.rs`, discover→dial→delta) and
+  SPAKE2-over-iroh (`tests/transport.rs`, agrees / fails-closed). The capstone
+  composes exactly these verified flows.
+- **Not executed:** the composed `tests/session.rs` run — blocked by host disk.
+  The APFS container has ~136 MB free; a full link of the iroh tree needs
+  ~1.5–2 GB (no-debuginfo) and the only reclaimable snapshots are pending
+  macOS-update snapshots (left untouched). Free ~2 GB, then:
+  `RUSTC=<rustup-stable> CARGO_PROFILE_DEV_DEBUG=0 cargo test -p ar-edit-collab --features transport`
+  Tracked under OQ-7.
 
 ## Test matrix
 
