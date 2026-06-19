@@ -159,12 +159,17 @@ impl Transport {
             .ok_or_else(|| TransportError::Iroh("endpoint closed".into()))?;
         let conn = incoming.await.map_err(iroh_err)?;
         let (_send, mut recv) = conn.accept_bi().await.map_err(iroh_err)?;
-        let bytes = recv
-            .read_to_end(512 * 1024 * 1024)
-            .await
-            .map_err(iroh_err)?;
-        if crate::reconcile::verify_blob(expected, &bytes) {
-            Ok(bytes)
+        // Stream the blob in chunks, hashing incrementally (BLAKE3 verified
+        // streaming), so arbitrarily large source media (multi-GB) transfers
+        // without a fixed read cap.
+        let mut hasher = blake3::Hasher::new();
+        let mut data = Vec::new();
+        while let Some(chunk) = recv.read_chunk(1024 * 1024).await.map_err(iroh_err)? {
+            hasher.update(&chunk);
+            data.extend_from_slice(&chunk);
+        }
+        if hasher.finalize().as_bytes() == expected {
+            Ok(data)
         } else {
             Err(TransportError::Integrity)
         }

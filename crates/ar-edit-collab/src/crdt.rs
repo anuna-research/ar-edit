@@ -248,9 +248,37 @@ impl CollabDoc {
             .expect("export snapshot")
     }
 
-    /// Merge another peer's snapshot or delta into this document.
+    /// Merge another peer's snapshot or delta into this document. After import,
+    /// the local note counter is advanced past any of this actor's note ids
+    /// already present, so a reloaded doc (same ActorId) never reuses an id and
+    /// overwrites an existing note (grow-only guarantee across restarts).
     pub fn import(&self, bytes: &[u8]) -> Result<(), loro::LoroError> {
-        self.doc.import(bytes).map(|_| ())
+        self.doc.import(bytes)?;
+        self.sync_note_counter();
+        Ok(())
+    }
+
+    /// Advance `note_counter` past the highest `actor:counter` note id already
+    /// in the document for this actor.
+    fn sync_note_counter(&self) {
+        let prefix = format!("{:016x}:", self.actor.0);
+        let mut highest: Option<u64> = None;
+        if let LoroValue::Map(m) = self.doc.get_map(NOTES).get_value() {
+            for (k, _) in m.iter() {
+                if let Some(rest) = k.strip_prefix(prefix.as_str()) {
+                    if let Ok(n) = u64::from_str_radix(rest, 16) {
+                        highest = Some(highest.map_or(n, |h| h.max(n)));
+                    }
+                }
+            }
+        }
+        if let Some(h) = highest {
+            let next = h + 1;
+            // Only ever move the counter forward.
+            let _ = self
+                .note_counter
+                .fetch_max(next, Ordering::Relaxed);
+        }
     }
 
     /// This document's current version vector (for delta sync, REQ-087).

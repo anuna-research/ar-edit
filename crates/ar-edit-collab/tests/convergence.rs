@@ -286,6 +286,30 @@ fn offline_edits_reconcile_with_delta_sync() {
     );
 }
 
+/// Regression (P1): notes must survive a reload by the same actor — the note
+/// counter is restored from imported ids so add_note doesn't reuse `actor:0`.
+#[test]
+fn notes_survive_reload_same_actor() {
+    let a = CollabDoc::new(ActorId(7));
+    a.add_shot(&shot("shot-001", "src-001", words(0, 1), vec![]));
+    a.add_note("shot-001", &note("first", 100));
+    let snap = a.export_snapshot();
+
+    // Fresh process, SAME actor id, import the persisted snapshot.
+    let b = CollabDoc::new(ActorId(7));
+    b.import(&snap).unwrap();
+    b.add_note("shot-001", &note("second", 200)); // must not overwrite "first"
+
+    let m = materialise::materialise(&b);
+    let s1 = m.shots.iter().find(|s| s.id == "shot-001").unwrap();
+    let texts: Vec<&str> = s1.notes.iter().map(|n| n.text.as_str()).collect();
+    assert!(
+        texts.contains(&"first") && texts.contains(&"second"),
+        "both notes must survive reload with the same actor: {texts:?}"
+    );
+    assert_eq!(s1.notes.len(), 2, "no note lost on reload");
+}
+
 fn note(text: &str, secs: i64) -> ShotNote {
     ShotNote {
         text: text.into(),

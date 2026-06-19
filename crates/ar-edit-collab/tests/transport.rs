@@ -109,7 +109,9 @@ async fn blob_transfer_with_integrity_gate() {
         let server = Transport::bind_loopback().await.unwrap();
         let client = Transport::bind_loopback().await.unwrap();
         let addr = server.dial_addr().unwrap();
-        let blob = b"pretend this is source-001.mp4 bytes".to_vec();
+        // > 1 MiB so fetch_blob's chunked streaming loop runs multiple times
+        // (and confirms there is no small read cap).
+        let blob = vec![0xCDu8; 3 * 1024 * 1024];
         let hash = content_hash(&blob);
         let recv = tokio::spawn(async move { server.fetch_blob(&hash).await });
         client.send_blob(addr, &blob).await.unwrap();

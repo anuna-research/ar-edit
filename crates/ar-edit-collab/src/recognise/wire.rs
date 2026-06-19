@@ -8,6 +8,10 @@
 //! holder of the session key to interpret — never parsed here.
 
 pub const MAX_FRAME: usize = 64 * 1024;
+/// Cap for CRDT sync envelopes (CON-015): a full snapshot or an offline batch
+/// of deltas can far exceed the small control-frame cap, so this matches the
+/// transport read cap.
+pub const MAX_SYNC_FRAME: usize = 64 * 1024 * 1024;
 pub const PROTOCOL_VERSION: u8 = 1;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -30,12 +34,12 @@ pub enum WireError {
 
 /// Read one exact `[u32 len][len bytes]` frame, enforcing the length cap before
 /// requiring the body. Returns the body slice.
-fn read_len_prefixed(buf: &[u8]) -> Result<&[u8], WireError> {
+fn read_len_prefixed_cap(buf: &[u8], max: usize) -> Result<&[u8], WireError> {
     if buf.len() < 4 {
         return Err(WireError::TooShort);
     }
     let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
-    if len > MAX_FRAME {
+    if len > max {
         return Err(WireError::TooLong);
     }
     let body = &buf[4..];
@@ -46,6 +50,10 @@ fn read_len_prefixed(buf: &[u8]) -> Result<&[u8], WireError> {
         return Err(WireError::Trailing);
     }
     Ok(body)
+}
+
+fn read_len_prefixed(buf: &[u8]) -> Result<&[u8], WireError> {
+    read_len_prefixed_cap(buf, MAX_FRAME)
 }
 
 // ---- CON-014: Rendezvous protocol ----
@@ -96,7 +104,7 @@ pub enum SyncEnvelope<'a> {
 }
 
 pub fn parse_sync_envelope(buf: &[u8]) -> Result<SyncEnvelope<'_>, WireError> {
-    let body = read_len_prefixed(buf)?;
+    let body = read_len_prefixed_cap(buf, MAX_SYNC_FRAME)?;
     if body.len() < 2 {
         return Err(WireError::TooShort);
     }

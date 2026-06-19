@@ -82,6 +82,19 @@ fn sync_envelope() {
     );
 }
 
+#[test]
+fn sync_envelope_allows_large_payload() {
+    // Regression (P2): a DELTA payload larger than the 64 KiB control-frame cap
+    // must parse (real snapshots/deltas exceed it).
+    let payload = vec![0xABu8; 128 * 1024];
+    let mut body = vec![0x01, 0x11]; // version 1, DELTA
+    body.extend_from_slice(&payload);
+    match wire::parse_sync_envelope(&wire::frame(&body)) {
+        Ok(SyncEnvelope::Delta(p)) => assert_eq!(p.len(), payload.len()),
+        other => panic!("expected Delta, got {other:?}"),
+    }
+}
+
 // ---- CON-016 source sync + frame guards ----
 
 #[test]

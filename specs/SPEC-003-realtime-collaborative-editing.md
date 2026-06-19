@@ -341,7 +341,12 @@ The system SHALL replicate missing source media between peers over
 [[iroh-blobs]] WITH each source file addressed by its [[BLAKE3]] hash, only the
 byte ranges a peer lacks transferred (content-addressed deduplication), and the
 transfer resumable across reconnects. A peer SHALL be able to fetch any source
-referenced by the shared edit from any peer that holds it.
+referenced by the shared edit from any peer that holds it. Blob receipt SHALL be
+**streamed in chunks and hashed incrementally** (BLAKE3 verified streaming) so
+arbitrarily large media (multi-GB sources, e.g. the 2 GB
+[[SPEC-003-realtime-collaborative-editing#NFR-011]] target) transfers without a
+fixed in-memory read cap; the recomputed hash is checked before the blob is
+admitted ([[SPEC-003-realtime-collaborative-editing#REQ-076]]).
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-087]]
@@ -1097,7 +1102,10 @@ Recognition rules:
   the CRDT update; a [[Loro]] import error ⇒ the delta is rejected and the
   sender asked to resend (the envelope never half-applies a delta).
 - `PRESENCE` state is ephemeral and MUST NOT mutate persisted CRDT state.
-- Frame length cap as in CON-014.
+- Frame length cap is **`MAX_SYNC_FRAME` (64 MiB)**, not the small control-frame
+  cap: a first-contact snapshot or an offline batch of deltas can far exceed
+  64 KiB, so the sync envelope uses the larger bound (matching the transport
+  read cap). Oversized-beyond-64-MiB frames are still rejected.
 
 Implements: [[SPEC-003-realtime-collaborative-editing#REQ-084]],
 [[SPEC-003-realtime-collaborative-editing#REQ-085]],

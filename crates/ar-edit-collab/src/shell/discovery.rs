@@ -12,7 +12,7 @@
 //! trade-off and its SPAKE2 + TTL + burn mitigations.
 
 use crate::recognise::phrase::Phrase;
-use iroh::{EndpointAddr, EndpointId};
+use iroh::{EndpointAddr, EndpointId, RelayUrl};
 use pkarr::dns::{self, rdata::RData, ResourceRecord};
 use pkarr::{Keypair, SignedPacket};
 use std::collections::HashMap;
@@ -93,6 +93,13 @@ pub fn parse_record(packet: &SignedPacket) -> Option<EndpointAddr> {
                 }
             }
         }
+        // Restore the relay path so a host reachable only via a relay (WAN/NAT)
+        // is still dialable after discovery.
+        if let Some(Some(relay)) = attrs.get("relay") {
+            if let Ok(url) = relay.parse::<RelayUrl>() {
+                ea = ea.with_relay_url(url);
+            }
+        }
         return Some(ea);
     }
     None
@@ -156,5 +163,28 @@ impl Discovery {
                 .map_err(|e| DiscoveryError::Pkarr(e.to_string()))?,
         };
         Ok(packet.as_ref().and_then(parse_record))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recognise::phrase;
+
+    /// Regression (P2): a relay URL written into the record must be restored on
+    /// parse, so a relay-only (WAN/NAT) host stays dialable after discovery.
+    #[test]
+    fn record_preserves_relay_url() {
+        let kp = derive_keypair(&phrase::generate_secure());
+        let relay: RelayUrl = "https://relay.example.com".parse().expect("relay url");
+        let id = iroh::SecretKey::generate().public();
+        let addr = EndpointAddr::new(id).with_relay_url(relay.clone());
+
+        let packet = build_record(&kp, &addr).expect("build record");
+        let parsed = parse_record(&packet).expect("record parses");
+        assert!(
+            parsed.relay_urls().any(|u| *u == relay),
+            "relay url must survive the record round-trip"
+        );
     }
 }
