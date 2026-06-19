@@ -27,6 +27,7 @@
 use crate::ids::ActorId;
 use ar_edit_core::models::{Shot, ShotNote, ShotRange};
 use loro::{ExportMode, LoroDoc, LoroValue, ValueOrContainer, VersionVector};
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) const ORDER: &str = "order";
@@ -35,6 +36,20 @@ pub(crate) const SHOT_RANGE: &str = "shot_range";
 pub(crate) const NOTES: &str = "notes";
 pub(crate) const MARKERS: &str = "markers";
 pub(crate) const POIS: &str = "pois";
+/// Per-actor high-water marks for the minted-id counters (shot / note / marker
+/// tag). Persisted in the document so a reload after a deletion never re-mints a
+/// tombstoned id (the live containers alone would reset the counter).
+pub(crate) const COUNTERS: &str = "id_counters";
+
+/// Commit origin for id high-water-mark writes. [`crate::undo::LocalUndo`]
+/// excludes this prefix from undo history, so undoing an insert can never roll
+/// the counter back (which would let the next insert reuse a tombstoned id and
+/// let a delayed peer op target the wrong shot — REQ-080/REQ-086).
+pub(crate) const COUNTER_ORIGIN: &str = "ar-edit:hwm";
+
+/// Separates an observed-remove-set logical id from its unique instance tag in
+/// the markers/POIs map keys. A unit separator never appears in an id.
+const TAG_SEP: char = '\u{1f}';
 
 /// A note as stored in the `notes` map value (JSON).
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -54,11 +69,20 @@ pub struct CollabDoc {
     actor: AtomicU64,
     note_counter: AtomicU64,
     shot_counter: AtomicU64,
+    /// Counter for observed-remove-set instance tags (markers / POIs).
+    orset_counter: AtomicU64,
 }
 
 pub(crate) fn as_string(v: Option<ValueOrContainer>) -> Option<String> {
     match v {
         Some(ValueOrContainer::Value(LoroValue::String(s))) => Some(s.to_string()),
+        _ => None,
+    }
+}
+
+fn as_i64(v: Option<ValueOrContainer>) -> Option<i64> {
+    match v {
+        Some(ValueOrContainer::Value(LoroValue::I64(n))) => Some(n),
         _ => None,
     }
 }
@@ -74,6 +98,7 @@ impl CollabDoc {
             actor: AtomicU64::new(actor.0),
             note_counter: AtomicU64::new(0),
             shot_counter: AtomicU64::new(0),
+            orset_counter: AtomicU64::new(0),
         }
     }
 
@@ -97,7 +122,37 @@ impl CollabDoc {
     /// (REQ-080).
     fn mint_shot_id(&self) -> String {
         let c = self.shot_counter.fetch_add(1, Ordering::Relaxed);
+        self.record_counter("shot", c);
         format!("shot-{:016x}-{:x}", self.actor.load(Ordering::Relaxed), c)
+    }
+
+    /// Persist the *next* value of a minted-id counter under an actor-scoped key
+    /// in [`COUNTERS`], so the high-water mark survives deletion of every entry
+    /// it was derived from (a reload then never reuses a tombstoned id). Only
+    /// this actor writes its own key, so the register never conflicts on merge.
+    fn record_counter(&self, kind: &str, used: u64) {
+        let key = format!("{kind}:{:016x}", self.actor.load(Ordering::Relaxed));
+        let map = self.doc.get_map(COUNTERS);
+        let next = used.saturating_add(1) as i64;
+        let cur = as_i64(map.get(key.as_str())).unwrap_or(0);
+        if next <= cur {
+            return;
+        }
+        // Flush any in-flight insert ops first so they keep the default
+        // (undoable) origin, then write the high-water mark in its OWN commit
+        // tagged with COUNTER_ORIGIN — which LocalUndo excludes from undo. This
+        // keeps an undo of the insert from also reverting the counter bump (which
+        // would resurrect the tombstoned id for reuse).
+        self.doc.commit();
+        map.insert(key.as_str(), next).expect("counter");
+        self.doc.set_next_commit_origin(COUNTER_ORIGIN);
+        self.doc.commit();
+    }
+
+    /// The persisted next-counter floor for `kind` (this actor), if any.
+    fn counter_floor(&self, kind: &str) -> Option<u64> {
+        let key = format!("{kind}:{:016x}", self.actor.load(Ordering::Relaxed));
+        as_i64(self.doc.get_map(COUNTERS).get(key.as_str())).map(|n| n.max(0) as u64)
     }
 
     /// Use the requested id if it is free in this document, otherwise mint a
@@ -210,6 +265,7 @@ impl CollabDoc {
     /// Append a note to a shot (REQ-082: grow-only; never lost on merge).
     pub fn add_note(&self, shot_id: &str, note: &ShotNote) {
         let counter = self.note_counter.fetch_add(1, Ordering::Relaxed);
+        self.record_counter("note", counter);
         let note_id = format!(
             "{:016x}:{:08x}",
             self.actor.load(Ordering::Relaxed),
@@ -247,50 +303,100 @@ impl CollabDoc {
     }
 
     // ---- markers / POIs (observed-remove sets, REQ-082) ----
+    //
+    // A Loro map is LWW, so keying a marker directly by its id would let a
+    // concurrent remove win over an add it never observed, dropping the marker.
+    // Instead each `put` writes a uniquely-*tagged* instance key
+    // (`<id>\u{1f}<actor>:<counter>`); a `remove` deletes only the instances it
+    // currently observes. A concurrent re-add carries a fresh tag the remove did
+    // not observe, so it survives the merge (true OR-set semantics, REQ-082).
 
-    /// Add or replace a marker by id; `json` is the serialised marker.
-    pub fn put_marker(&self, marker_id: &str, json: &str) {
-        self.doc
-            .get_map(MARKERS)
-            .insert(marker_id, json)
-            .expect("put marker");
-        self.doc.commit();
+    /// Mint a globally-unique, never-reused instance tag for an OR-set add. The
+    /// counter is persisted (see [`Self::record_counter`]) so a reload never
+    /// reuses a tag a tombstone already covers.
+    fn mint_orset_tag(&self) -> String {
+        let c = self.orset_counter.fetch_add(1, Ordering::Relaxed);
+        self.record_counter("orset", c);
+        format!("{:016x}:{:08x}", self.actor.load(Ordering::Relaxed), c)
     }
 
-    pub fn remove_marker(&self, marker_id: &str) {
-        let _ = self.doc.get_map(MARKERS).delete(marker_id);
-        self.doc.commit();
-    }
-
-    pub fn put_poi(&self, poi_id: &str, json: &str) {
-        self.doc.get_map(POIS).insert(poi_id, json).expect("put poi");
-        self.doc.commit();
-    }
-
-    pub fn remove_poi(&self, poi_id: &str) {
-        let _ = self.doc.get_map(POIS).delete(poi_id);
-        self.doc.commit();
-    }
-
-    fn map_keys(&self, name: &str) -> Vec<String> {
+    /// The map keys that are live instances of `logical_id` (including any legacy
+    /// untagged key equal to the id, for documents written before the OR-set).
+    fn orset_instance_keys(&self, name: &str, logical_id: &str) -> Vec<String> {
+        let prefix = format!("{logical_id}{TAG_SEP}");
         let mut keys = Vec::new();
         if let LoroValue::Map(m) = self.doc.get_map(name).get_value() {
             for (k, _) in m.iter() {
-                keys.push(k.to_string());
+                let key = k.to_string();
+                if key == logical_id || key.starts_with(prefix.as_str()) {
+                    keys.push(key);
+                }
             }
         }
-        keys.sort();
         keys
+    }
+
+    /// Live logical ids in an OR-set container (sorted, deduplicated).
+    fn orset_live_ids(&self, name: &str) -> Vec<String> {
+        let mut ids: BTreeSet<String> = BTreeSet::new();
+        if let LoroValue::Map(m) = self.doc.get_map(name).get_value() {
+            for (k, _) in m.iter() {
+                let key = k.to_string();
+                let logical = key.split(TAG_SEP).next().unwrap_or(key.as_str());
+                ids.insert(logical.to_string());
+            }
+        }
+        ids.into_iter().collect()
+    }
+
+    /// Add (or update) an OR-set member. An update is modelled as an
+    /// observed-replace: the instances this replica currently sees are tombstoned
+    /// and a fresh tagged instance is written, so concurrent adds elsewhere are
+    /// never clobbered.
+    fn orset_put(&self, name: &str, logical_id: &str, json: &str) {
+        let map = self.doc.get_map(name);
+        for k in self.orset_instance_keys(name, logical_id) {
+            let _ = map.delete(&k);
+        }
+        let key = format!("{logical_id}{TAG_SEP}{}", self.mint_orset_tag());
+        map.insert(key.as_str(), json).expect("put orset member");
+        self.doc.commit();
+    }
+
+    /// Remove an OR-set member: tombstone every instance this replica observes.
+    fn orset_remove(&self, name: &str, logical_id: &str) {
+        let map = self.doc.get_map(name);
+        for k in self.orset_instance_keys(name, logical_id) {
+            let _ = map.delete(&k);
+        }
+        self.doc.commit();
+    }
+
+    /// Add or replace a marker by id; `json` is the serialised marker.
+    pub fn put_marker(&self, marker_id: &str, json: &str) {
+        self.orset_put(MARKERS, marker_id, json);
+    }
+
+    pub fn remove_marker(&self, marker_id: &str) {
+        self.orset_remove(MARKERS, marker_id);
+    }
+
+    pub fn put_poi(&self, poi_id: &str, json: &str) {
+        self.orset_put(POIS, poi_id, json);
+    }
+
+    pub fn remove_poi(&self, poi_id: &str) {
+        self.orset_remove(POIS, poi_id);
     }
 
     /// Live marker ids (observed-remove set, REQ-082).
     pub fn marker_ids(&self) -> Vec<String> {
-        self.map_keys(MARKERS)
+        self.orset_live_ids(MARKERS)
     }
 
     /// Live POI ids (observed-remove set, REQ-082).
     pub fn poi_ids(&self) -> Vec<String> {
-        self.map_keys(POIS)
+        self.orset_live_ids(POIS)
     }
 
     // ---- sync ----
@@ -310,11 +416,17 @@ impl CollabDoc {
         self.doc.import(bytes)?;
         self.sync_note_counter();
         self.sync_shot_counter();
+        // OR-set instance tags must also never be reused after a reload.
+        if let Some(floor) = self.counter_floor("orset") {
+            let _ = self.orset_counter.fetch_max(floor, Ordering::Relaxed);
+        }
         Ok(())
     }
 
     /// Advance the shot counter past any minted shot ids already present for
-    /// this actor, so a reloaded doc never re-mints a colliding id.
+    /// this actor, so a reloaded doc never re-mints a colliding id. Combines the
+    /// persisted high-water mark (which survives deletions, [`COUNTERS`]) with a
+    /// scan of live ids (the fallback for documents written before COUNTERS).
     fn sync_shot_counter(&self) {
         let prefix = format!("shot-{:016x}-", self.actor.load(Ordering::Relaxed));
         let mut highest: Option<u64> = None;
@@ -330,6 +442,9 @@ impl CollabDoc {
         }
         if let Some(h) = highest {
             let _ = self.shot_counter.fetch_max(h + 1, Ordering::Relaxed);
+        }
+        if let Some(floor) = self.counter_floor("shot") {
+            let _ = self.shot_counter.fetch_max(floor, Ordering::Relaxed);
         }
     }
 
@@ -353,6 +468,9 @@ impl CollabDoc {
             let _ = self
                 .note_counter
                 .fetch_max(next, Ordering::Relaxed);
+        }
+        if let Some(floor) = self.counter_floor("note") {
+            let _ = self.note_counter.fetch_max(floor, Ordering::Relaxed);
         }
     }
 

@@ -51,7 +51,19 @@ pub fn reconcile(
                     });
                 }
             }
-            Some(_) => {} // identical — already merged
+            Some(existing) => {
+                // Same id and hash. The duration_ms *should* agree (identical
+                // content), but if a peer mis-recorded it we must still converge
+                // to the same merged entry regardless of argument order. Resolve
+                // deterministically to the smaller duration rather than letting
+                // whichever side was iterated first win.
+                if e.duration_ms != existing.duration_ms {
+                    let resolved = e.duration_ms.min(existing.duration_ms);
+                    entries
+                        .entry(e.src_id.clone())
+                        .and_modify(|m| m.duration_ms = resolved);
+                }
+            }
         }
     }
 

@@ -55,6 +55,8 @@ pub enum Request {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Response {
     Ok,
+    /// A live insert succeeded; carries the daemon-minted, actor-scoped shot id.
+    Added { shot_id: String },
     Snapshot { shots: Vec<Shot> },
     Status { shot_count: usize },
     Error { message: String },
@@ -70,8 +72,15 @@ fn apply(doc: &CollabDoc, req: Request) -> Response {
     match req {
         Request::Attach { .. } => Response::Ok,
         Request::AddShot { shot } => {
-            doc.add_shot(&shot);
-            Response::Ok
+            // Mint a fresh actor-scoped id rather than preserving the client's
+            // (possibly sequential) id: two peer daemons handed the same id would
+            // each keep it as "locally free", then collide on merge. add_new_shot
+            // guarantees a globally-unique id (REQ-080).
+            let shot_id = doc.add_new_shot(&shot.source, &shot.range);
+            for note in &shot.notes {
+                doc.add_note(&shot_id, note);
+            }
+            Response::Added { shot_id }
         }
         Request::MoveShot { shot_id, to } => {
             doc.move_shot(&shot_id, to);

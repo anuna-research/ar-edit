@@ -22,6 +22,11 @@ use std::sync::{Arc, Mutex};
 const RECORD_NAME: &str = "_ar-edit-pair";
 /// Record TTL — kept near the pairing-phrase TTL (REQ-068, ~10 min).
 const RECORD_TTL: u32 = 600;
+/// Freshness window for a resolved discovery packet (REQ-068 replay guard). A
+/// signed record whose authored timestamp is older than this is treated as
+/// not-found: a relay must not be able to replay a host's expired record after
+/// its pairing phrase has lapsed. Matches the record TTL.
+const PAIRING_FRESHNESS_SECS: u64 = RECORD_TTL as u64;
 /// Domain separation for the phrase → discovery-key derivation (ADR-013).
 const KDF_DOMAIN: &[u8] = b"ar-edit/pair/discovery/v1";
 /// DNS character strings cap at 255 bytes; a few dialling hints is plenty.
@@ -151,7 +156,9 @@ impl Discovery {
     }
 
     /// Resolve the host's [`EndpointAddr`] for `phrase` (REQ-069). `Ok(None)`
-    /// means no record found.
+    /// means no record found — or a found record that is stale (outside the
+    /// pairing freshness window), which is rejected so a relay cannot replay an
+    /// expired host record after the phrase has lapsed.
     pub async fn lookup(&self, phrase: &Phrase) -> Result<Option<EndpointAddr>, DiscoveryError> {
         let keypair = derive_keypair(phrase);
         let public_key = keypair.public_key();
@@ -162,8 +169,26 @@ impl Discovery {
                 .await
                 .map_err(|e| DiscoveryError::Pkarr(e.to_string()))?,
         };
-        Ok(packet.as_ref().and_then(parse_record))
+        Ok(packet
+            .as_ref()
+            .filter(|p| is_fresh(p))
+            .and_then(parse_record))
     }
+}
+
+/// Whether a signed discovery packet's authored timestamp is within the pairing
+/// freshness window (replay guard, REQ-068). `SignedPacket::timestamp()` is in
+/// microseconds since the UNIX epoch. A timestamp in the future (clock skew) is
+/// accepted; only records authored too far in the past are rejected.
+fn is_fresh(packet: &SignedPacket) -> bool {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now_us = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or(0);
+    let authored_us = packet.timestamp();
+    let age_us = now_us.saturating_sub(authored_us);
+    age_us <= PAIRING_FRESHNESS_SECS.saturating_mul(1_000_000)
 }
 
 #[cfg(test)]

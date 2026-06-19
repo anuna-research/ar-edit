@@ -195,20 +195,101 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             }
         }
         Commands::Session { command } => {
-            let what = match command {
-                SessionCommand::Status => "status",
-                SessionCommand::Peers => "peers",
-                SessionCommand::Leave => "leave",
-            };
-            if cli.json {
-                println!(
-                    "{}",
-                    serde_json::json!({ "session": serde_json::Value::Null, "request": what, "status": "no active session" })
-                );
-            } else {
-                println!("No active collaborative session.");
+            #[cfg(unix)]
+            {
+                use ar_edit_collab::shell::daemon::{DaemonClient, Request, Response};
+                let sock = session_socket();
+                let json = cli.json;
+                let rt = tokio::runtime::Runtime::new()?;
+                rt.block_on(async move {
+                    // Query the live daemon; a missing one is *not* success —
+                    // peers/leave must report the real state (CON-012) and the
+                    // documented exit code 1 when there is no session.
+                    let mut client = match DaemonClient::connect(&sock).await {
+                        Ok(c) => c,
+                        Err(_) => {
+                            return Err(anyhow::Error::new(CliError::user(
+                                "no active collaborative session (start one with `ar-edit daemon`)",
+                            )))
+                        }
+                    };
+                    let shot_count = match client.request(&Request::Status).await {
+                        Ok(Response::Status { shot_count }) => shot_count,
+                        Ok(other) => {
+                            return Err(anyhow::anyhow!("unexpected daemon response: {other:?}"))
+                        }
+                        Err(e) => {
+                            return Err(anyhow::Error::new(CliError::system(format!(
+                                "session daemon query failed: {e}"
+                            ))))
+                        }
+                    };
+                    let socket = sock.display().to_string();
+                    match command {
+                        SessionCommand::Status => {
+                            if json {
+                                println!(
+                                    "{}",
+                                    serde_json::json!({
+                                        "session": { "socket": socket, "shot_count": shot_count },
+                                        "status": "active"
+                                    })
+                                );
+                            } else {
+                                println!(
+                                    "Active collaborative session on {socket} ({shot_count} shots)."
+                                );
+                            }
+                        }
+                        SessionCommand::Peers => {
+                            // The in-memory daemon does not yet maintain a peer
+                            // registry (presence is OQ); report the session truthfully.
+                            if json {
+                                println!(
+                                    "{}",
+                                    serde_json::json!({
+                                        "session": { "socket": socket },
+                                        "peers": [],
+                                        "status": "active",
+                                        "note": "peer presence tracking is not yet wired into the daemon"
+                                    })
+                                );
+                            } else {
+                                println!(
+                                    "Active session on {socket} — peer presence tracking is not yet available."
+                                );
+                            }
+                        }
+                        SessionCommand::Leave => {
+                            // A single CLI invocation cannot tear down the shared
+                            // daemon; surface how to actually leave.
+                            if json {
+                                println!(
+                                    "{}",
+                                    serde_json::json!({
+                                        "session": { "socket": socket },
+                                        "status": "active",
+                                        "note": "stop the session daemon to leave; per-client leave is OQ"
+                                    })
+                                );
+                            } else {
+                                println!(
+                                    "Active session on {socket}. Stop the session daemon to leave."
+                                );
+                            }
+                        }
+                    }
+                    Ok::<(), anyhow::Error>(())
+                })?;
+                Ok(())
             }
-            Ok(())
+            #[cfg(not(unix))]
+            {
+                let _ = command;
+                Err(anyhow::Error::new(CliError::user(
+                    "no active collaborative session (the session daemon is Unix-only — OQ-8)",
+                )))
+            }
         }
         Commands::Init { name } => {
             let path = PathBuf::from(name);
@@ -318,7 +399,23 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     anyhow::bail!("invalid segment:\n{}", details.join("\n"));
                 }
 
-                let shot = doc.add_shot(&args.source, range)?;
+                // If a session daemon is live, let it mint the canonical
+                // actor-scoped id and adopt it for the persisted/reported shot,
+                // so later id-keyed ops (move/trim/note/remove) target the same
+                // live shot (REQ-090). Otherwise mint the usual sequential id.
+                let shot = {
+                    #[cfg(unix)]
+                    {
+                        match daemon_add_shot(&args.source, &range) {
+                            Some(minted) => doc.add_shot_with_id(minted, &args.source, range)?,
+                            None => doc.add_shot(&args.source, range)?,
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        doc.add_shot(&args.source, range)?
+                    }
+                };
                 let shot_id = shot.id.clone();
                 doc.save(&path)?;
                 if cli.json {
@@ -337,6 +434,11 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 let mut doc = EditDocument::load(&path)?;
                 doc.move_shot(shot, *position as usize)?;
                 doc.save(&path)?;
+                #[cfg(unix)]
+                forward_to_daemon(ar_edit_collab::shell::daemon::Request::MoveShot {
+                    shot_id: shot.clone(),
+                    to: *position as usize,
+                });
                 if cli.json {
                     println!("{}", serde_json::to_string_pretty(&doc)?);
                 } else {
@@ -349,6 +451,10 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 let mut doc = EditDocument::load(&path)?;
                 doc.remove_shot(shot)?;
                 doc.save(&path)?;
+                #[cfg(unix)]
+                forward_to_daemon(ar_edit_collab::shell::daemon::Request::RemoveShot {
+                    shot_id: shot.clone(),
+                });
                 if cli.json {
                     println!("{}", serde_json::to_string_pretty(&doc)?);
                 } else {
@@ -384,8 +490,15 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     anyhow::bail!("invalid segment:\n{}", details.join("\n"));
                 }
 
+                #[cfg(unix)]
+                let range_for_daemon = range.clone();
                 doc.trim_shot(&args.shot, range)?;
                 doc.save(&path)?;
+                #[cfg(unix)]
+                forward_to_daemon(ar_edit_collab::shell::daemon::Request::TrimShot {
+                    shot_id: args.shot.clone(),
+                    range: range_for_daemon,
+                });
                 if cli.json {
                     println!("{}", serde_json::to_string_pretty(&doc)?);
                 } else {
@@ -451,6 +564,70 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
 /// Build the on-disk path for an edit document: `edits/<name>.edit.json`.
 fn edit_path(name: &str) -> PathBuf {
     PathBuf::from("edits").join(format!("{name}.edit.json"))
+}
+
+/// This project's session-daemon IPC socket (REQ-089/090).
+#[cfg(unix)]
+fn session_socket() -> PathBuf {
+    PathBuf::from(".ar-edit").join("session.sock")
+}
+
+/// Best-effort: if a session daemon is listening for this project, forward `req`
+/// so the edit enters the live CRDT and propagates to peers (REQ-090). The
+/// on-disk event-sourced document remains the durable local store; this
+/// connects the live-collaboration path that was previously disconnected. When
+/// no daemon is running the socket is absent and this is a cheap no-op (no
+/// runtime is spun up).
+///
+/// Note: the in-memory daemon mints its own actor-scoped shot ids and does not
+/// yet load the on-disk edit (persistence unification is OQ-8), so id-keyed ops
+/// (move/trim/remove/note) only take effect in the daemon once the id spaces are
+/// unified; forwarding them is harmless until then (an unknown id is ignored).
+#[cfg(unix)]
+fn forward_to_daemon(req: ar_edit_collab::shell::daemon::Request) {
+    let sock = session_socket();
+    if !sock.exists() {
+        return;
+    }
+    if let Ok(rt) = tokio::runtime::Runtime::new() {
+        rt.block_on(async move {
+            if let Ok(mut client) =
+                ar_edit_collab::shell::daemon::DaemonClient::connect(&sock).await
+            {
+                let _ = client.request(&req).await;
+            }
+        });
+    }
+}
+
+/// If a session daemon is live, forward an AddShot and return the daemon-minted,
+/// actor-scoped id (REQ-090); `None` means no daemon (or the request failed) and
+/// the caller mints its own id. Forwarding the add first and adopting the
+/// returned id keeps the on-disk document and the live CRDT referring to the
+/// same shot, so subsequent id-keyed ops converge instead of diverging.
+#[cfg(unix)]
+fn daemon_add_shot(source: &str, range: &ShotRange) -> Option<String> {
+    use ar_edit_collab::shell::daemon::{DaemonClient, Request, Response};
+    let sock = session_socket();
+    if !sock.exists() {
+        return None;
+    }
+    let rt = tokio::runtime::Runtime::new().ok()?;
+    let source = source.to_string();
+    let range = range.clone();
+    rt.block_on(async move {
+        let mut client = DaemonClient::connect(&sock).await.ok()?;
+        let shot = ar_edit_core::models::Shot {
+            id: String::new(),
+            source,
+            range,
+            notes: vec![],
+        };
+        match client.request(&Request::AddShot { shot }).await.ok()? {
+            Response::Added { shot_id } => Some(shot_id),
+            _ => None,
+        }
+    })
 }
 
 /// Return a human-readable label and the affected shot ID for an op.
@@ -1059,6 +1236,11 @@ fn cmd_note(cli: &Cli, edit: &str, shot: &str, text: &str) -> anyhow::Result<()>
         })?
         .clone();
     doc.save(&path).system_err()?;
+    #[cfg(unix)]
+    forward_to_daemon(ar_edit_collab::shell::daemon::Request::AddNote {
+        shot_id: shot.to_string(),
+        note: note.clone(),
+    });
 
     if cli.json {
         println!("{}", serde_json::to_string_pretty(&note)?);

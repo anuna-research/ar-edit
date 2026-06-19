@@ -48,8 +48,13 @@ pub fn materialise(collab: &CollabDoc) -> EditSnapshot {
         let notes = notes_by_shot
             .remove(&id)
             .map(|mut v| {
-                // Deterministic order: by creation time, then by note id.
-                v.sort_by(|a, b| a.1.created.cmp(&b.1.created).then_with(|| a.0.cmp(&b.0)));
+                // Order by note id only. A note id is `<actor>:<counter>`, so
+                // within a single (e.g. migrated) actor this is exactly the
+                // append order — preserving the migration identity guarantee
+                // (REQ-083) even when creation timestamps are non-monotonic
+                // (clock rollback, hand-edited legacy snapshots). Across actors
+                // it stays deterministic (actor-major), so merges still converge.
+                v.sort_by(|a, b| a.0.cmp(&b.0));
                 v.into_iter()
                     .map(|(_, rec)| ShotNote {
                         text: rec.text,

@@ -7,7 +7,7 @@
 //! document this is observationally identical to the old head-pointer
 //! undo/redo of [`SPEC-001`] REQ-046/047.
 
-use crate::crdt::CollabDoc;
+use crate::crdt::{CollabDoc, COUNTER_ORIGIN};
 use loro::UndoManager;
 
 /// Local-actor undo/redo over a [`CollabDoc`]. Must be created before the
@@ -18,9 +18,11 @@ pub struct LocalUndo {
 
 impl LocalUndo {
     pub fn new(doc: &CollabDoc) -> Self {
-        Self {
-            mgr: UndoManager::new(doc.doc()),
-        }
+        let mut mgr = UndoManager::new(doc.doc());
+        // Id high-water-mark bumps are committed under this origin; never let an
+        // undo roll them back (that would reuse a tombstoned id — REQ-080).
+        mgr.add_exclude_origin_prefix(COUNTER_ORIGIN);
+        Self { mgr }
     }
 
     /// Undo the local actor's most recent change. Returns whether anything was

@@ -104,6 +104,30 @@ impl EditDocument {
         Ok(self.snapshot.shots.last().unwrap())
     }
 
+    /// Add a shot using a caller-supplied `id` rather than one derived from
+    /// `next_shot_id`. Used when a live collaboration daemon has already minted
+    /// the canonical actor-scoped id (SPEC-003 REQ-090): the CLI must persist and
+    /// report that id so later move/trim/note/remove target the live shot.
+    pub fn add_shot_with_id(
+        &mut self,
+        id: impl Into<String>,
+        source: impl Into<String>,
+        range: ShotRange,
+    ) -> Result<&Shot, EditError> {
+        validate_range(&range)?;
+
+        let shot = Shot {
+            id: id.into(),
+            source: source.into(),
+            range,
+            notes: vec![],
+        };
+
+        self.push_op(EditOpKind::AddShot { shot: shot.clone() });
+        self.snapshot.shots.push(shot);
+        Ok(self.snapshot.shots.last().unwrap())
+    }
+
     /// Move a shot from its current position to `to_position` in the timeline.
     ///
     /// `to_position` is the desired index in the resulting shot list.

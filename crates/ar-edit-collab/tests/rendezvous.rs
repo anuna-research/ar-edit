@@ -99,6 +99,39 @@ async fn waiter_freed_on_disconnect() {
     );
 }
 
+/// Regression (P2): after BIND, a frame that fails the CON-014 recogniser
+/// (unknown tag) is dropped fail-closed and the connection is torn down — the
+/// relay must not become an arbitrary framed-data tunnel.
+#[tokio::test]
+async fn unrecognised_frame_after_bind_is_dropped() {
+    let server = RendezvousServer::bind("127.0.0.1:0").await.unwrap();
+    let addr = server.local_addr();
+    tokio::spawn(server.run());
+
+    let mut a = TcpStream::connect(addr).await.unwrap();
+    let mut b = TcpStream::connect(addr).await.unwrap();
+    let bind7 = wire::frame(&[0x01, 0x00, 0x07]);
+    a.write_all(&bind7).await.unwrap();
+    b.write_all(&bind7).await.unwrap();
+
+    // Well-formed length prefix, but tag 0x7f is not a recognised rendezvous
+    // frame — the relay must drop it (stop forwarding), never tunnel it.
+    a.write_all(&wire::frame(&[0x7f, 0xde, 0xad])).await.unwrap();
+
+    // B must receive nothing: the unrecognised frame is not relayed.
+    let mut buf = [0u8; 16];
+    let r = tokio::time::timeout(Duration::from_millis(300), b.read(&mut buf)).await;
+    let relayed = matches!(r, Ok(Ok(n)) if n > 0);
+    assert!(!relayed, "an unrecognised frame must not be relayed");
+
+    // And a *recognised* frame sent on the same channel afterwards is also not
+    // forwarded (the relay stopped reading A's malformed stream — fail closed).
+    a.write_all(&pake(b"after-bad")).await.unwrap();
+    let r2 = tokio::time::timeout(Duration::from_millis(300), b.read(&mut buf)).await;
+    let relayed2 = matches!(r2, Ok(Ok(n)) if n > 0);
+    assert!(!relayed2, "relay must stop forwarding after a malformed frame");
+}
+
 /// Peers on different channels are not paired (no cross-talk).
 #[tokio::test]
 async fn different_channels_are_isolated() {

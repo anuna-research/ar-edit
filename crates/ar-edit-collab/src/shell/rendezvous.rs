@@ -14,13 +14,28 @@
 
 use crate::recognise::wire::{parse_rendezvous, RendezvousFrame, MAX_FRAME};
 use std::collections::HashMap;
+
+/// Pre-pair buffering bound (REQ-071, anti-DoS). Before a partner arrives, a
+/// waiter has only a handshake to send (a Bind already consumed, then at most a
+/// PakeMsg / Ticket); an unauthenticated peer must not be able to stream
+/// unlimited valid frames into relay memory. Cap both the frame count and the
+/// total bytes; whichever trips first frees the channel and drops the waiter.
+const MAX_PREPAIR_FRAMES: usize = 8;
+const MAX_PREPAIR_BYTES: usize = 4 * MAX_FRAME;
+
+/// Post-pair relay queue depth. A *bounded* channel is essential: once two peers
+/// are matched, a fast sender must not be able to outrun the slow consumer and
+/// buffer unbounded frames in relay memory. When the queue fills, the relaying
+/// task `await`s on `send`, which stops it reading the source socket and so
+/// backpressures the fast peer over TCP (REQ-071, anti-DoS).
+const RELAY_QUEUE_CAP: usize = 64;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 
-type Inbound = mpsc::UnboundedSender<Vec<u8>>;
+type Inbound = mpsc::Sender<Vec<u8>>;
 
 struct Pending {
     /// Sink that delivers frames *to* the already-waiting peer.
@@ -110,8 +125,8 @@ async fn handle_conn(stream: TcpStream, state: State) -> std::io::Result<()> {
         _ => return Ok(()), // not a bind → drop (fail closed)
     };
 
-    // Frames destined TO this peer.
-    let (my_tx, mut my_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    // Frames destined TO this peer (bounded → backpressure, never unbounded).
+    let (my_tx, mut my_rx) = mpsc::channel::<Vec<u8>>(RELAY_QUEUE_CAP);
 
     // Decide the pairing under the lock (no await held), then await outside it.
     enum Pairing {
@@ -147,6 +162,7 @@ async fn handle_conn(stream: TcpStream, state: State) -> std::io::Result<()> {
             // (EOF) so the channel is freed instead of leaving a dead waiter the
             // next peer would be matched to.
             let mut buffered: Vec<Vec<u8>> = Vec::new();
+            let mut buffered_bytes: usize = 0;
             let tx = loop {
                 tokio::select! {
                     biased;
@@ -160,7 +176,26 @@ async fn handle_conn(stream: TcpStream, state: State) -> std::io::Result<()> {
                         };
                     }
                     frame = read_frame(&mut read_half) => match frame {
-                        Ok(Some(f)) => buffered.push(f), // relay once paired
+                        Ok(Some(f)) => {
+                            // Fail closed on anything that is not a well-formed
+                            // rendezvous frame — the relay must not become an
+                            // arbitrary framed-data tunnel.
+                            if parse_rendezvous(&f).is_err() {
+                                state.channels.lock().unwrap().remove(&channel);
+                                return Ok(());
+                            }
+                            // Bound pre-pair buffering: an unauthenticated waiter
+                            // must not be able to stuff relay memory before a
+                            // partner arrives. Over-limit → free channel, drop.
+                            buffered_bytes = buffered_bytes.saturating_add(f.len());
+                            if buffered.len() >= MAX_PREPAIR_FRAMES
+                                || buffered_bytes > MAX_PREPAIR_BYTES
+                            {
+                                state.channels.lock().unwrap().remove(&channel);
+                                return Ok(());
+                            }
+                            buffered.push(f); // relay once paired
+                        }
                         _ => {
                             // EOF or error before a partner arrived: free channel.
                             state.channels.lock().unwrap().remove(&channel);
@@ -169,9 +204,10 @@ async fn handle_conn(stream: TcpStream, state: State) -> std::io::Result<()> {
                     },
                 }
             };
-            // Flush anything the waiter sent before its partner arrived.
+            // Flush anything the waiter sent before its partner arrived (awaits
+            // on the bounded queue — backpressure, not unbounded buffering).
             for f in buffered {
-                if tx.send(f).is_err() {
+                if tx.send(f).await.is_err() {
                     return Ok(());
                 }
             }
@@ -188,9 +224,16 @@ async fn handle_conn(stream: TcpStream, state: State) -> std::io::Result<()> {
         }
     });
 
-    // Reader: relay this peer's frames to the other peer, opaquely.
+    // Reader: relay this peer's frames to the other peer. Each frame is first
+    // run through the CON-014 recogniser (fail closed on unknown tag / malformed
+    // payload) so the relay only ever forwards well-formed rendezvous frames,
+    // never an arbitrary tunnel. `send().await` applies backpressure when the
+    // peer's queue is full (bounded), so a fast sender cannot exhaust memory.
     while let Some(frame) = read_frame(&mut read_half).await? {
-        if other_tx.send(frame).is_err() {
+        if parse_rendezvous(&frame).is_err() {
+            break; // not a recognised rendezvous frame → drop, fail closed
+        }
+        if other_tx.send(frame).await.is_err() {
             break; // other side gone
         }
     }

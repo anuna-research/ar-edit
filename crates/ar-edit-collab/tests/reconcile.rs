@@ -39,6 +39,30 @@ fn reconcile_detects_conflict() {
 }
 
 #[test]
+fn reconcile_duration_mismatch_is_order_independent() {
+    // Same id + hash but a differing duration_ms must resolve deterministically,
+    // so reconcile(a,b) == reconcile(b,a) (the determinism guarantee), rather
+    // than letting whichever side was iterated first win.
+    let a = vec![ManifestEntry {
+        src_id: "src-001".into(),
+        hash: [1; 32],
+        duration_ms: 1000,
+    }];
+    let b = vec![ManifestEntry {
+        src_id: "src-001".into(),
+        hash: [1; 32],
+        duration_ms: 2000,
+    }];
+    let ab = reconcile::reconcile(&a, &b).expect("identical hash merges");
+    let ba = reconcile::reconcile(&b, &a).expect("identical hash merges");
+    assert_eq!(ab, ba, "reconcile must be order-independent");
+    assert_eq!(
+        ab.entries["src-001"].duration_ms, 1000,
+        "deterministic resolution (min)"
+    );
+}
+
+#[test]
 fn blob_integrity() {
     // TEST-088/089: matching hash accepted, mismatched rejected.
     let bytes = b"some source media bytes";

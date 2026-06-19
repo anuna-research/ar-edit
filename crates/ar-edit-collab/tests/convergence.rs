@@ -3,6 +3,7 @@
 
 use ar_edit_collab::crdt::CollabDoc;
 use ar_edit_collab::ids::ActorId;
+use ar_edit_collab::undo::LocalUndo;
 use ar_edit_collab::{materialise, migrate};
 use ar_edit_core::models::{EditDocument, EditSnapshot, Shot, ShotNote, ShotRange};
 use chrono::{TimeZone, Utc};
@@ -215,6 +216,89 @@ fn marker_orset_converges() {
     a.remove_marker("mark-002");
     b.import(&a.export_snapshot()).unwrap();
     assert!(!b.marker_ids().contains(&"mark-002".to_string()), "remove propagated");
+}
+
+/// Regression (P2, observed-remove): a concurrent re-add must survive a remove
+/// that never observed it. A plain LWW-by-id map would let actor ordering drop
+/// the marker; the tagged-instance OR-set keeps it.
+#[test]
+fn marker_readd_survives_concurrent_remove() {
+    let a = CollabDoc::new(ActorId(10));
+    let b = CollabDoc::new(ActorId(20));
+
+    // Both observe mark-001.
+    a.put_marker("mark-001", "{\"v\":1}");
+    b.import(&a.export_snapshot()).unwrap();
+
+    // Concurrently: A removes mark-001; B re-adds it (a fresh instance A's
+    // remove never saw).
+    a.remove_marker("mark-001");
+    b.put_marker("mark-001", "{\"v\":2}");
+
+    // Merge both ways.
+    let sa = a.export_snapshot();
+    let sb = b.export_snapshot();
+    a.import(&sb).unwrap();
+    b.import(&sa).unwrap();
+
+    assert_eq!(a.marker_ids(), b.marker_ids(), "replicas converge");
+    assert!(
+        a.marker_ids().contains(&"mark-001".to_string()),
+        "the concurrent re-add must survive a remove that did not observe it"
+    );
+}
+
+/// Regression (P1, id reuse): after deleting a generated shot and reloading the
+/// snapshot under the *same* actor, the minted-id counter must not reset and
+/// re-mint the tombstoned id (which a delayed peer op could then mis-apply).
+#[test]
+fn generated_shot_id_not_reused_after_delete_and_reload() {
+    let a = CollabDoc::new(ActorId(7));
+    let id1 = a.add_new_shot("src-A", &words(0, 1));
+    a.remove_shot(&id1);
+
+    // Reload: a fresh document for the SAME actor imports the snapshot in which
+    // the shot is tombstoned (absent from the live order list).
+    let snapshot = a.export_snapshot();
+    let b = CollabDoc::new(ActorId(7));
+    b.import(&snapshot).unwrap();
+
+    let id2 = b.add_new_shot("src-B", &words(2, 3));
+    assert_ne!(
+        id1, id2,
+        "a reloaded doc must not re-mint a tombstoned shot id (persisted counter)"
+    );
+}
+
+/// Regression (P1, id reuse via undo): the id high-water mark is committed under
+/// an undo-excluded origin, so undoing an insert must NOT roll the counter back.
+/// After add -> undo -> snapshot/reload (same actor), the next insert must mint a
+/// fresh id, never the undone one.
+#[test]
+fn undone_insert_does_not_reuse_id_after_reload() {
+    let a = CollabDoc::new(ActorId(9));
+    let mut undo = LocalUndo::new(&a);
+
+    let id1 = a.add_new_shot("src-A", &words(0, 1));
+    assert!(undo.undo(), "the insert is undoable");
+    assert!(
+        !materialise::materialise(&a)
+            .shots
+            .iter()
+            .any(|s| s.id == id1),
+        "undo removed the shot"
+    );
+
+    // Reload under the same actor: the counter bump survived the undo.
+    let snapshot = a.export_snapshot();
+    let b = CollabDoc::new(ActorId(9));
+    b.import(&snapshot).unwrap();
+
+    let id2 = b.add_new_shot("src-B", &words(2, 3));
+    assert_ne!(
+        id1, id2,
+        "undo must not roll back the id high-water mark (no reuse)"
+    );
 }
 
 /// TEST-100: concurrent note appends to the SAME shot are never lost.

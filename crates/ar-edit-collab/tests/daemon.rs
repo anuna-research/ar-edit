@@ -35,17 +35,20 @@ async fn daemon_holds_live_state_across_clients() {
     {
         let mut a = DaemonClient::connect(&path).await.unwrap();
         let r = a.request(&Request::AddShot { shot: shot("shot-001") }).await.unwrap();
-        assert!(matches!(r, Response::Ok));
+        // The daemon mints its own actor-scoped id (it never preserves the
+        // client's sequential id, which would collide across peer daemons).
+        let minted = match r {
+            Response::Added { shot_id } => shot_id,
+            other => panic!("expected added, got {other:?}"),
+        };
+        assert!(minted.starts_with("shot-"), "daemon minted an actor-scoped id: {minted}");
     }
 
     // Client B — a fresh connection — sees A's shot in the live session.
     let mut b = DaemonClient::connect(&path).await.unwrap();
     match b.request(&Request::Snapshot).await.unwrap() {
         Response::Snapshot { shots } => {
-            assert!(
-                shots.iter().any(|s| s.id == "shot-001"),
-                "second client must see the live state: {shots:?}"
-            );
+            assert_eq!(shots.len(), 1, "second client sees the one live shot: {shots:?}");
         }
         other => panic!("expected snapshot, got {other:?}"),
     }

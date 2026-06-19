@@ -23,6 +23,14 @@ use std::sync::Arc;
 /// ALPN for the ar-edit collaboration protocol.
 pub const COLLAB_ALPN: &[u8] = b"ar-edit/collab/0";
 
+/// Hard ceiling on a single received source blob (REQ-075). Bounds the memory a
+/// peer can force us to buffer before integrity verification — a sender that
+/// never finishes, or advertises a 2 GiB media file but streams forever, is cut
+/// off here instead of exhausting the process. Production callers should pass
+/// the manifest-advertised size via [`Transport::fetch_blob_capped`]; this is
+/// the fallback bound for [`Transport::fetch_blob`].
+pub const MAX_BLOB_BYTES: usize = 2 * 1024 * 1024 * 1024;
+
 /// DELTA tag in the CON-015 envelope.
 const TAG_DELTA: u8 = 0x11;
 /// CON-014 pairing-handshake tags (over the direct iroh connection).
@@ -41,6 +49,8 @@ pub enum TransportError {
     NoSocket,
     #[error("blob failed BLAKE3 integrity check — rejected")]
     Integrity,
+    #[error("blob exceeds the {0}-byte cap — rejected before exhausting memory")]
+    TooLarge(usize),
     #[error("pairing: {0}")]
     Pairing(String),
 }
@@ -152,6 +162,19 @@ impl Transport {
     /// bytes are never returned (the caller therefore never writes them to
     /// `sources/`).
     pub async fn fetch_blob(&self, expected: &[u8; 32]) -> Result<Vec<u8>, TransportError> {
+        self.fetch_blob_capped(expected, MAX_BLOB_BYTES).await
+    }
+
+    /// As [`Self::fetch_blob`], but bound to `max_bytes` (e.g. the
+    /// manifest-advertised source size plus a small margin). The transfer is
+    /// aborted fail-closed the moment the running total would exceed the cap, so
+    /// neither an oversized blob nor a peer that never sends EOF can exhaust
+    /// memory before the BLAKE3 check completes (REQ-075/076).
+    pub async fn fetch_blob_capped(
+        &self,
+        expected: &[u8; 32],
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, TransportError> {
         let incoming = self
             .endpoint
             .accept()
@@ -160,11 +183,15 @@ impl Transport {
         let conn = incoming.await.map_err(iroh_err)?;
         let (_send, mut recv) = conn.accept_bi().await.map_err(iroh_err)?;
         // Stream the blob in chunks, hashing incrementally (BLAKE3 verified
-        // streaming), so arbitrarily large source media (multi-GB) transfers
-        // without a fixed read cap.
+        // streaming), but enforce a finite ceiling: arbitrarily large media is
+        // fine up to the cap, beyond which we stop reading rather than buffer an
+        // unbounded Vec.
         let mut hasher = blake3::Hasher::new();
-        let mut data = Vec::new();
+        let mut data: Vec<u8> = Vec::new();
         while let Some(chunk) = recv.read_chunk(1024 * 1024).await.map_err(iroh_err)? {
+            if data.len().saturating_add(chunk.len()) > max_bytes {
+                return Err(TransportError::TooLarge(max_bytes));
+            }
             hasher.update(&chunk);
             data.extend_from_slice(&chunk);
         }
@@ -281,21 +308,40 @@ impl Transport {
     }
 }
 
-/// Write a `[tag][payload]` message on a bi-stream and finish the send half so
-/// the peer's `read_to_end` sees EOF.
+/// Write a CON-014 `[u32 len][tag][payload]` handshake message on a bi-stream
+/// and finish the send half so the peer's `read_to_end` sees EOF. The `u32`
+/// length prefix is mandated by CON-014; emitting only `[tag][payload]` makes a
+/// conforming peer read the first length byte as the tag and fail pairing.
 async fn write_tagged(s: &mut SendStream, tag: u8, payload: &[u8]) -> Result<(), TransportError> {
-    let mut buf = Vec::with_capacity(1 + payload.len());
-    buf.push(tag);
-    buf.extend_from_slice(payload);
-    s.write_all(&buf).await.map_err(iroh_err)?;
+    let mut body = Vec::with_capacity(1 + payload.len());
+    body.push(tag);
+    body.extend_from_slice(payload);
+    s.write_all(&wire::frame(&body)).await.map_err(iroh_err)?;
     s.finish().map_err(iroh_err)?;
     Ok(())
 }
 
-/// Read a `[tag][payload]` message, checking the expected tag (CON-014).
+/// Read a CON-014 `[u32 len][tag][payload]` message, enforcing the length cap
+/// and checking the expected tag.
 async fn read_tagged(r: &mut RecvStream, expect: u8) -> Result<Vec<u8>, TransportError> {
-    let bytes = r.read_to_end(64 * 1024).await.map_err(iroh_err)?;
-    let (tag, payload) = bytes
+    let bytes = r
+        .read_to_end(4 + wire::MAX_FRAME)
+        .await
+        .map_err(iroh_err)?;
+    if bytes.len() < 4 {
+        return Err(TransportError::Pairing("handshake frame missing length prefix".into()));
+    }
+    let len = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    if len > wire::MAX_FRAME {
+        return Err(TransportError::Pairing("handshake frame exceeds MAX_FRAME".into()));
+    }
+    let body = &bytes[4..];
+    if body.len() != len {
+        return Err(TransportError::Pairing(
+            "handshake frame length mismatch".into(),
+        ));
+    }
+    let (tag, payload) = body
         .split_first()
         .ok_or_else(|| TransportError::Pairing("empty handshake frame".into()))?;
     if *tag != expect {
