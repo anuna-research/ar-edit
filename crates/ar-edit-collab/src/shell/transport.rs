@@ -13,10 +13,10 @@ use crate::crdt::CollabDoc;
 use crate::ids::ActorId;
 use crate::pairing::{self, SessionKey};
 use crate::recognise::phrase::Phrase;
-use crate::recognise::wire::{self, SyncEnvelope, PROTOCOL_VERSION};
+use crate::recognise::wire::{self, SyncEnvelope, PROTOCOL_VERSION, TAG_CONFIRM, TAG_PAKE};
 use super::discovery::Discovery;
 use iroh::endpoint::{Builder, Connection, RecvStream, SendStream};
-use iroh::{Endpoint, EndpointAddr};
+use iroh::{Endpoint, EndpointAddr, RelayMode};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -33,9 +33,9 @@ pub const MAX_BLOB_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 /// DELTA tag in the CON-015 envelope.
 const TAG_DELTA: u8 = 0x11;
-/// CON-014 pairing-handshake tags (over the direct iroh connection).
-const TAG_PAKE: u8 = 0x30;
-const TAG_CONFIRM: u8 = 0x31;
+// CON-014 pairing-handshake tags (`TAG_PAKE`/`TAG_CONFIRM`) live in
+// `crate::recognise::wire`, the single recogniser of record, so the relay's
+// `parse_rendezvous` and this emitter cannot drift apart.
 
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
@@ -62,6 +62,11 @@ fn iroh_err<E: std::fmt::Display>(e: E) -> TransportError {
 /// A bound iroh endpoint for collaboration.
 pub struct Transport {
     endpoint: Endpoint,
+    /// Whether this endpoint was bound with relays enabled. A relay-enabled
+    /// endpoint must wait to acquire its home relay before publishing a
+    /// dialable address; a loopback (relay-disabled) one never gets a relay, so
+    /// it must NOT wait (iroh's `online()` blocks forever with no relays).
+    relay: bool,
 }
 
 impl Transport {
@@ -81,7 +86,28 @@ impl Transport {
             .bind()
             .await
             .map_err(iroh_err)?;
-        Ok(Self { endpoint })
+        Ok(Self { endpoint, relay: false })
+    }
+
+    /// Bind a production endpoint reachable from another machine (SPEC-003
+    /// REQ-071/084). Unlike [`Self::bind_loopback`], it binds the default
+    /// interfaces (not `127.0.0.1`) and enables iroh's [`RelayMode::Default`]
+    /// (the n0 production relays), so a peer behind NAT is reachable via a relay
+    /// when no direct path exists. Pair with [`crate::shell::discovery::Discovery::http`]:
+    /// the published CON-017 record then carries the relay URL and direct
+    /// addresses a remote joiner dials (a loopback host can only ever publish a
+    /// loopback address, which is why this constructor is required for real
+    /// cross-machine sessions).
+    pub async fn bind() -> Result<Self, TransportError> {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let endpoint = Builder::empty()
+            .crypto_provider(provider)
+            .alpns(vec![COLLAB_ALPN.to_vec()])
+            .relay_mode(RelayMode::Default)
+            .bind()
+            .await
+            .map_err(iroh_err)?;
+        Ok(Self { endpoint, relay: true })
     }
 
     /// This peer's CRDT actor id, derived from its iroh node public key
@@ -100,6 +126,23 @@ impl Transport {
             .next()
             .ok_or(TransportError::NoSocket)?;
         Ok(EndpointAddr::new(self.endpoint.id()).with_ip_addr(socket))
+    }
+
+    /// The address to advertise via discovery so a peer can reach this host.
+    ///
+    /// For a relay-enabled (production) endpoint this first waits for the home
+    /// relay to connect, then returns iroh's full [`EndpointAddr`] — including
+    /// the relay URL and discovered direct addresses — so a remote/NAT'd joiner
+    /// is dialable. For a loopback endpoint (no relay) it returns the direct
+    /// [`Self::dial_addr`] without waiting (iroh's `online()` never completes
+    /// when no relays are configured).
+    pub async fn publish_addr(&self) -> Result<EndpointAddr, TransportError> {
+        if self.relay {
+            self.endpoint.online().await;
+            Ok(self.endpoint.addr())
+        } else {
+            self.dial_addr()
+        }
     }
 
     /// Send `doc`'s full state (or a delta blob) to a peer as a CON-015 DELTA
@@ -270,7 +313,7 @@ impl Transport {
         phrase: &Phrase,
     ) -> Result<Session, TransportError> {
         discovery
-            .publish(phrase, &self.dial_addr()?)
+            .publish(phrase, &self.publish_addr().await?)
             .await
             .map_err(|e| TransportError::Pairing(e.to_string()))?;
         let (conn, key) = self.pair_as_responder(phrase).await?;

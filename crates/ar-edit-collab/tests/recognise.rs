@@ -61,6 +61,22 @@ fn rendezvous_frames() {
     );
 }
 
+/// Regression (P2): the direct CON-014 handshake tags its PAKE and
+/// key-confirmation frames 0x30/0x31. The relay validates every post-BIND frame
+/// with `parse_rendezvous`, so these current tags must be recognised — otherwise
+/// the DHT-blocked fallback drops the first handshake frame.
+#[test]
+fn rendezvous_accepts_current_handshake_tags() {
+    assert_eq!(
+        wire::parse_rendezvous(&wire::frame(&[0x30, 0xbe, 0xef])),
+        Ok(RendezvousFrame::PakeMsg(&[0xbe, 0xef]))
+    );
+    assert_eq!(
+        wire::parse_rendezvous(&wire::frame(&[0x31, 0xca, 0xfe])),
+        Ok(RendezvousFrame::Confirm(&[0xca, 0xfe]))
+    );
+}
+
 // ---- CON-015 sync envelope ----
 
 #[test]

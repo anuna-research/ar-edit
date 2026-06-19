@@ -50,6 +50,30 @@ fn undo_is_per_actor() {
     );
 }
 
+/// Regression (P2): updating an OR-set member (marker/POI) is an
+/// observed-replace — tombstone the old instance, insert a fresh one. Those two
+/// steps must commit as a SINGLE undo unit, so one `undo()` of an update
+/// restores the previous instance rather than deleting the marker outright.
+/// Previously the id-counter bump committed between the delete and the insert,
+/// splitting them across two undo steps, so undoing an update lost the marker.
+#[test]
+fn undo_of_marker_update_restores_marker() {
+    let a = CollabDoc::new(ActorId(10));
+    a.put_marker("m1", r#"{"v":1}"#); // initial add (committed)
+
+    // Track undo from here: only the update below should be undoable.
+    let mut undo = LocalUndo::new(&a);
+    a.put_marker("m1", r#"{"v":2}"#); // update == observed-replace
+    assert_eq!(a.marker_ids(), vec!["m1".to_string()]);
+
+    assert!(undo.undo(), "the update is one undoable unit");
+    assert_eq!(
+        a.marker_ids(),
+        vec!["m1".to_string()],
+        "undoing a marker update must restore the previous instance, not delete the marker"
+    );
+}
+
 /// Single-actor undo/redo behaves like the classic head-pointer model.
 #[test]
 fn single_actor_undo_redo() {

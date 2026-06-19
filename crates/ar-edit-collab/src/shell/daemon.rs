@@ -40,6 +40,12 @@ pub enum Request {
     /// Attach to the session for `edit` (informational; the daemon owns one doc).
     Attach { edit: String },
     AddShot { shot: Shot },
+    /// Re-insert a shot **preserving its id** — the inverse of a forwarded
+    /// remove (undo) and the replay of a forwarded add (redo). Unlike
+    /// [`Request::AddShot`] it does not mint a new id: the supplied id was
+    /// already an actor-scoped, globally-unique id, so reinstating it keeps the
+    /// live document and the on-disk edit referring to the same shot (REQ-090).
+    RestoreShot { shot: Shot },
     MoveShot { shot_id: String, to: usize },
     TrimShot { shot_id: String, range: ShotRange },
     AddNote { shot_id: String, note: ShotNote },
@@ -82,6 +88,11 @@ fn apply(doc: &CollabDoc, req: Request) -> Response {
             }
             Response::Added { shot_id }
         }
+        Request::RestoreShot { shot } => {
+            // Id-preserving re-insert (CollabDoc::add_shot keeps a free id).
+            doc.add_shot(&shot);
+            Response::Ok
+        }
         Request::MoveShot { shot_id, to } => {
             doc.move_shot(&shot_id, to);
             Response::Ok
@@ -112,11 +123,38 @@ pub struct Daemon {
     doc: Arc<Mutex<CollabDoc>>,
     listener: UnixListener,
     path: PathBuf,
+    /// Where to persist the live CRDT snapshot after each mutation. When set, a
+    /// restart can reload it so the actor's minted-id counters (and content)
+    /// survive — without it a restart resets every counter to zero and re-mints
+    /// already-issued ids (REQ-080). `None` keeps the daemon purely in-memory.
+    snapshot_path: Option<PathBuf>,
 }
 
 impl Daemon {
-    /// Bind the daemon's IPC socket (mode 0600) and take ownership of `doc`.
+    /// Bind the daemon's IPC socket (mode 0600) and take ownership of `doc`,
+    /// keeping the document purely in-memory (no persistence across restarts).
     pub fn bind(socket_path: impl AsRef<Path>, doc: CollabDoc) -> Result<Self, DaemonError> {
+        Self::bind_inner(socket_path, doc, None)
+    }
+
+    /// As [`Self::bind`], but persist the live CRDT snapshot to `snapshot_path`
+    /// after every mutation. The caller is expected to load that snapshot into
+    /// `doc` (via [`CollabDoc::import`]) before binding, so a restarted daemon
+    /// restores its content and id counters and never re-mints a live id
+    /// (SPEC-003 REQ-080).
+    pub fn bind_persisting(
+        socket_path: impl AsRef<Path>,
+        doc: CollabDoc,
+        snapshot_path: impl Into<PathBuf>,
+    ) -> Result<Self, DaemonError> {
+        Self::bind_inner(socket_path, doc, Some(snapshot_path.into()))
+    }
+
+    fn bind_inner(
+        socket_path: impl AsRef<Path>,
+        doc: CollabDoc,
+        snapshot_path: Option<PathBuf>,
+    ) -> Result<Self, DaemonError> {
         let path = socket_path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -139,6 +177,7 @@ impl Daemon {
             doc: Arc::new(Mutex::new(doc)),
             listener,
             path,
+            snapshot_path,
         })
     }
 
@@ -154,15 +193,29 @@ impl Daemon {
 
     /// Serve clients until the listener closes.
     pub async fn run(self) {
+        // `Daemon` implements Drop, so fields can't be moved out of `self`.
+        let snapshot_path = self.snapshot_path.clone().map(Arc::new);
         loop {
             match self.listener.accept().await {
                 Ok((stream, _)) => {
                     let doc = self.doc.clone();
-                    tokio::spawn(handle_client(stream, doc));
+                    tokio::spawn(handle_client(stream, doc, snapshot_path.clone()));
                 }
                 Err(_) => break,
             }
         }
+    }
+}
+
+/// Persist the live document so a restart restores its content and id counters
+/// (REQ-080). Written via a temp file + rename so a crash mid-write never
+/// leaves a truncated snapshot. Best-effort: an IO failure leaves the previous
+/// snapshot intact rather than aborting the live session.
+fn persist_snapshot(doc: &CollabDoc, path: &Path) {
+    let bytes = doc.export_snapshot();
+    let tmp = path.with_extension("snapshot.tmp");
+    if std::fs::write(&tmp, &bytes).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
     }
 }
 
@@ -172,7 +225,11 @@ impl Drop for Daemon {
     }
 }
 
-async fn handle_client(mut stream: UnixStream, doc: Arc<Mutex<CollabDoc>>) {
+async fn handle_client(
+    mut stream: UnixStream,
+    doc: Arc<Mutex<CollabDoc>>,
+    snapshot_path: Option<Arc<PathBuf>>,
+) {
     loop {
         let body = match read_frame(&mut stream).await {
             Ok(Some(b)) => b,
@@ -181,8 +238,19 @@ async fn handle_client(mut stream: UnixStream, doc: Arc<Mutex<CollabDoc>>) {
         // Recognise, then apply under the lock (no await held).
         let resp = match parse_request(&body) {
             Ok(req) => {
+                // Read-only ops need no snapshot rewrite.
+                let mutating = !matches!(
+                    req,
+                    Request::Snapshot | Request::Status | Request::Attach { .. }
+                );
                 let guard = doc.lock().unwrap();
-                apply(&guard, req)
+                let resp = apply(&guard, req);
+                if mutating {
+                    if let Some(path) = snapshot_path.as_deref() {
+                        persist_snapshot(&guard, path);
+                    }
+                }
+                resp
             }
             Err(e) => Response::Error {
                 message: e.to_string(),

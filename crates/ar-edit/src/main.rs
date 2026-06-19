@@ -117,14 +117,27 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             let _ = edit; // loading/persisting an existing edit is OQ-8
             #[cfg(unix)]
             {
-                let sock = std::path::Path::new(".ar-edit").join("session.sock");
+                let sock = session_socket();
                 let json = cli.json;
                 let rt = tokio::runtime::Runtime::new()?;
                 rt.block_on(async move {
-                    let doc =
-                        ar_edit_collab::crdt::CollabDoc::new(ar_edit_collab::ids::ActorId(1));
-                    let daemon = ar_edit_collab::shell::daemon::Daemon::bind(&sock, doc)
-                        .map_err(|e| anyhow::anyhow!("daemon bind failed: {e}"))?;
+                    // Each daemon owns a unique, persisted actor id (not the
+                    // fixed actor 1 every daemon used to take, which made two
+                    // peers' Loro op ids collide). Loading the persisted CRDT
+                    // snapshot then restores this actor's id counters, so a
+                    // restart never re-mints an already-issued id (REQ-072/080).
+                    let actor = session_actor();
+                    let doc = ar_edit_collab::crdt::CollabDoc::new(actor);
+                    let snapshot = session_snapshot_path();
+                    if let Ok(bytes) = std::fs::read(&snapshot) {
+                        doc.import(&bytes).map_err(|e| {
+                            anyhow::anyhow!("loading session snapshot {}: {e}", snapshot.display())
+                        })?;
+                    }
+                    let daemon = ar_edit_collab::shell::daemon::Daemon::bind_persisting(
+                        &sock, doc, snapshot,
+                    )
+                    .map_err(|e| anyhow::anyhow!("daemon bind failed: {e}"))?;
                     if json {
                         println!(
                             "{}",
@@ -572,6 +585,32 @@ fn session_socket() -> PathBuf {
     PathBuf::from(".ar-edit").join("session.sock")
 }
 
+/// Where the live CRDT snapshot is persisted between daemon runs (REQ-080).
+#[cfg(unix)]
+fn session_snapshot_path() -> PathBuf {
+    PathBuf::from(".ar-edit").join("session.loro")
+}
+
+/// This daemon's persisted, unique CRDT actor id. Read from `.ar-edit/actor` if
+/// present; otherwise a fresh random id is generated and stored, so the actor
+/// is stable across restarts yet distinct from any other daemon's (REQ-072 — a
+/// shared actor would make peers' Loro operation ids collide).
+#[cfg(unix)]
+fn session_actor() -> ar_edit_collab::ids::ActorId {
+    use ar_edit_collab::ids::ActorId;
+    let dir = PathBuf::from(".ar-edit");
+    let path = dir.join("actor");
+    if let Ok(s) = std::fs::read_to_string(&path) {
+        if let Ok(n) = u64::from_str_radix(s.trim(), 16) {
+            return ActorId(n);
+        }
+    }
+    let actor = ActorId::generate();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(&path, format!("{:016x}\n", actor.0));
+    actor
+}
+
 /// Best-effort: if a session daemon is listening for this project, forward `req`
 /// so the edit enters the live CRDT and propagates to peers (REQ-090). The
 /// on-disk event-sourced document remains the durable local store; this
@@ -579,10 +618,11 @@ fn session_socket() -> PathBuf {
 /// no daemon is running the socket is absent and this is a cheap no-op (no
 /// runtime is spun up).
 ///
-/// Note: the in-memory daemon mints its own actor-scoped shot ids and does not
-/// yet load the on-disk edit (persistence unification is OQ-8), so id-keyed ops
-/// (move/trim/remove/note) only take effect in the daemon once the id spaces are
-/// unified; forwarding them is harmless until then (an unknown id is ignored).
+/// Id alignment: an add made while the daemon is live adopts the daemon-minted
+/// actor-scoped id (see [`daemon_add_shot`]), so subsequent id-keyed ops
+/// (move/trim/remove/note and the undo/redo mirrors) target the same live shot.
+/// Re-importing the on-disk edit into a fresh daemon is still OQ-8; an op naming
+/// an id the daemon has never seen is harmlessly ignored.
 #[cfg(unix)]
 fn forward_to_daemon(req: ar_edit_collab::shell::daemon::Request) {
     let sock = session_socket();
@@ -627,6 +667,77 @@ fn daemon_add_shot(source: &str, range: &ShotRange) -> Option<String> {
             Response::Added { shot_id } => Some(shot_id),
             _ => None,
         }
+    })
+}
+
+/// The live-document request that *undoes* `op`, or `None` when the operation
+/// cannot be retracted on the live CRDT. When a session daemon is active these
+/// are forwarded so an undo mutates the live document (and propagates to peers)
+/// instead of only rewinding the on-disk head — which would diverge live and
+/// durable state (REQ-090). Ids match because adds made while the daemon was
+/// live adopt the daemon-minted id (see [`daemon_add_shot`]).
+#[cfg(unix)]
+fn daemon_undo_request(op: &EditOpKind) -> Option<ar_edit_collab::shell::daemon::Request> {
+    use ar_edit_collab::shell::daemon::Request;
+    Some(match op {
+        EditOpKind::AddShot { shot } => Request::RemoveShot {
+            shot_id: shot.id.clone(),
+        },
+        EditOpKind::RemoveShot { shot, .. } => Request::RestoreShot { shot: shot.clone() },
+        EditOpKind::MoveShot {
+            shot_id,
+            from_position,
+            ..
+        } => Request::MoveShot {
+            shot_id: shot_id.clone(),
+            to: *from_position as usize,
+        },
+        EditOpKind::TrimShot {
+            shot_id, old_range, ..
+        }
+        | EditOpKind::ReplaceRangeType {
+            shot_id, old_range, ..
+        } => Request::TrimShot {
+            shot_id: shot_id.clone(),
+            range: old_range.clone(),
+        },
+        // Notes are grow-only in the live CRDT (REQ-082): a propagated note
+        // cannot be retracted, so an undo of AddNote is not forwarded.
+        EditOpKind::AddNote { .. } => return None,
+    })
+}
+
+/// The live-document request that *replays* `op` for a redo (inverse of
+/// [`daemon_undo_request`]). `None` for ops with no live counterpart.
+#[cfg(unix)]
+fn daemon_redo_request(op: &EditOpKind) -> Option<ar_edit_collab::shell::daemon::Request> {
+    use ar_edit_collab::shell::daemon::Request;
+    Some(match op {
+        // Re-add preserving the original id so live and durable stay aligned.
+        EditOpKind::AddShot { shot } => Request::RestoreShot { shot: shot.clone() },
+        EditOpKind::RemoveShot { shot_id, .. } => Request::RemoveShot {
+            shot_id: shot_id.clone(),
+        },
+        EditOpKind::MoveShot {
+            shot_id,
+            to_position,
+            ..
+        } => Request::MoveShot {
+            shot_id: shot_id.clone(),
+            to: *to_position as usize,
+        },
+        EditOpKind::TrimShot {
+            shot_id, new_range, ..
+        }
+        | EditOpKind::ReplaceRangeType {
+            shot_id, new_range, ..
+        } => Request::TrimShot {
+            shot_id: shot_id.clone(),
+            range: new_range.clone(),
+        },
+        // A note re-added on redo would duplicate the grow-only note its undo
+        // never removed — so, like the undo, it is not forwarded.
+        EditOpKind::AddNote { .. } => return None,
     })
 }
 
@@ -715,6 +826,13 @@ fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         .clone();
     doc.save(&path).system_err()?;
 
+    // Mirror the undo onto the live session so the daemon and connected peers
+    // reflect it too — otherwise live and durable state diverge (REQ-090).
+    #[cfg(unix)]
+    if let Some(req) = daemon_undo_request(&undone.op) {
+        forward_to_daemon(req);
+    }
+
     if cli.json {
         let output = serde_json::json!({
             "head": doc.head,
@@ -741,6 +859,13 @@ fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         .map_err(|e| anyhow::Error::new(CliError::user(e)))?
         .clone();
     doc.save(&path).system_err()?;
+
+    // Replay the redo onto the live session (inverse of the undo path) so the
+    // daemon and peers stay in step with the durable document (REQ-090).
+    #[cfg(unix)]
+    if let Some(req) = daemon_redo_request(&redone.op) {
+        forward_to_daemon(req);
+    }
 
     if cli.json {
         let output = serde_json::json!({

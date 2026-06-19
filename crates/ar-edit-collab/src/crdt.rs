@@ -354,11 +354,19 @@ impl CollabDoc {
     /// and a fresh tagged instance is written, so concurrent adds elsewhere are
     /// never clobbered.
     fn orset_put(&self, name: &str, logical_id: &str, json: &str) {
+        // Mint the instance tag FIRST. `mint_orset_tag` persists the counter
+        // high-water mark in its own COUNTER_ORIGIN commit (which flushes any
+        // in-flight ops); doing it before we touch the OR-set keeps that commit
+        // from landing BETWEEN the tombstones and the insert below. The
+        // observed-replace — delete the observed instances, insert the fresh one
+        // — therefore commits as a SINGLE undo unit, so one `LocalUndo::undo()`
+        // of an update restores the previous instance instead of deleting the
+        // marker outright (REQ-082/REQ-086).
+        let key = format!("{logical_id}{TAG_SEP}{}", self.mint_orset_tag());
         let map = self.doc.get_map(name);
         for k in self.orset_instance_keys(name, logical_id) {
             let _ = map.delete(&k);
         }
-        let key = format!("{logical_id}{TAG_SEP}{}", self.mint_orset_tag());
         map.insert(key.as_str(), json).expect("put orset member");
         self.doc.commit();
     }

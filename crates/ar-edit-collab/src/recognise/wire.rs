@@ -14,6 +14,15 @@ pub const MAX_FRAME: usize = 64 * 1024;
 pub const MAX_SYNC_FRAME: usize = 64 * 1024 * 1024;
 pub const PROTOCOL_VERSION: u8 = 1;
 
+/// CON-014 direct-connection handshake tags. The live pairing
+/// ([`crate::shell::transport`]) tags its SPAKE2 message and key-confirmation
+/// frames with these; they are defined here — the single recogniser of record —
+/// so the emitter and [`parse_rendezvous`] can never drift apart. The relay
+/// validates every post-BIND frame with [`parse_rendezvous`], so the
+/// DHT-blocked fallback can only tunnel the handshake if these are recognised.
+pub const TAG_PAKE: u8 = 0x30;
+pub const TAG_CONFIRM: u8 = 0x31;
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum WireError {
     #[error("frame shorter than its declared length")]
@@ -64,6 +73,10 @@ pub enum RendezvousFrame<'a> {
     PeerJoined(&'a [u8]),
     PakeMsg(&'a [u8]),
     Ticket(&'a [u8]),
+    /// Key-confirmation frame of the direct CON-014 handshake (tag
+    /// [`TAG_CONFIRM`]), tunnelled when the DHT-blocked relay fallback carries
+    /// the live pairing.
+    Confirm(&'a [u8]),
     Close(&'a [u8]),
     Error(u8),
 }
@@ -71,7 +84,9 @@ pub enum RendezvousFrame<'a> {
 pub fn parse_rendezvous(buf: &[u8]) -> Result<RendezvousFrame<'_>, WireError> {
     let body = read_len_prefixed(buf)?;
     let (tag, payload) = body.split_first().ok_or(WireError::EmptyBody)?;
-    match tag {
+    // Match on the value (not `&u8`) so the named handshake-tag constants are
+    // read as constants rather than fresh bindings.
+    match *tag {
         0x01 => {
             if payload.len() < 2 {
                 return Err(WireError::TooShort);
@@ -81,14 +96,20 @@ pub fn parse_rendezvous(buf: &[u8]) -> Result<RendezvousFrame<'_>, WireError> {
             ])))
         }
         0x02 => Ok(RendezvousFrame::PeerJoined(payload)),
-        0x03 => Ok(RendezvousFrame::PakeMsg(payload)),
+        // 0x03/0x04 are the rendezvous protocol's own PAKE/ticket tags;
+        // TAG_PAKE (0x30) is the current direct-handshake SPAKE2 tag the live
+        // pairing emits. Both are opaque PAKE payloads as far as the relay is
+        // concerned, so accept either rather than dropping the first
+        // current-format frame of the DHT-blocked fallback.
+        0x03 | TAG_PAKE => Ok(RendezvousFrame::PakeMsg(payload)),
         0x04 => Ok(RendezvousFrame::Ticket(payload)),
+        TAG_CONFIRM => Ok(RendezvousFrame::Confirm(payload)),
         0x05 => Ok(RendezvousFrame::Close(payload)),
         0x06 => {
             let code = *payload.first().ok_or(WireError::TooShort)?;
             Ok(RendezvousFrame::Error(code))
         }
-        other => Err(WireError::UnknownTag(*other)),
+        other => Err(WireError::UnknownTag(other)),
     }
 }
 

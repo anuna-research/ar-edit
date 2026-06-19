@@ -19,6 +19,21 @@ impl ActorId {
         n.copy_from_slice(&digest.as_bytes()[..8]);
         ActorId(u64::from_be_bytes(n) & 0x7fff_ffff_ffff_ffff)
     }
+
+    /// Generate a fresh, random actor id (a valid Loro peer id). A session
+    /// daemon with no node key derives its site identity this way and persists
+    /// it, so two daemons never share an actor — sharing one would make their
+    /// Loro operation ids collide and the documents fail to converge (REQ-072,
+    /// REQ-080). The high bit is masked (Loro peer-id requirement) and zero is
+    /// avoided so the value is always a usable, distinct site id.
+    pub fn generate() -> Self {
+        use rand::RngCore;
+        let mut n = rand::rngs::OsRng.next_u64() & 0x7fff_ffff_ffff_ffff;
+        if n == 0 {
+            n = 1;
+        }
+        ActorId(n)
+    }
 }
 
 /// Deterministic total order over actor ids, for concurrent-change tie-breaks
