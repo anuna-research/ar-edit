@@ -49,8 +49,11 @@ pub(crate) struct NoteRec {
 /// [`crate::materialise`].
 pub struct CollabDoc {
     doc: LoroDoc,
-    actor: ActorId,
+    /// The local actor / Loro peer id. Held in an atomic so a migrated document
+    /// can be re-keyed to the node-derived actor after deterministic migration.
+    actor: AtomicU64,
     note_counter: AtomicU64,
+    shot_counter: AtomicU64,
 }
 
 pub(crate) fn as_string(v: Option<ValueOrContainer>) -> Option<String> {
@@ -68,13 +71,60 @@ impl CollabDoc {
         doc.set_peer_id(actor.0).expect("fresh doc accepts peer id");
         Self {
             doc,
-            actor,
+            actor: AtomicU64::new(actor.0),
             note_counter: AtomicU64::new(0),
+            shot_counter: AtomicU64::new(0),
         }
     }
 
     pub fn actor(&self) -> ActorId {
-        self.actor
+        ActorId(self.actor.load(Ordering::Relaxed))
+    }
+
+    /// Re-key this document's actor (Loro peer id) for *subsequent* operations.
+    /// Used after a deterministic migration so the migration ops carry a fixed
+    /// peer id (idempotent across independent migrations) while later edits
+    /// carry the caller's node-derived actor (REQ-072, REQ-088).
+    pub fn rekey_actor(&self, actor: ActorId) -> Result<(), loro::LoroError> {
+        self.doc.commit();
+        self.doc.set_peer_id(actor.0)?;
+        self.actor.store(actor.0, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Mint a globally-unique shot id (actor-scoped) for collaborative inserts,
+    /// so two replicas never produce a colliding id without coordination
+    /// (REQ-080).
+    fn mint_shot_id(&self) -> String {
+        let c = self.shot_counter.fetch_add(1, Ordering::Relaxed);
+        format!("shot-{:016x}-{:x}", self.actor.load(Ordering::Relaxed), c)
+    }
+
+    /// Use the requested id if it is free in this document, otherwise mint a
+    /// unique one (guards against local duplicate ids overwriting fields).
+    fn unique_id_for(&self, requested: &str) -> String {
+        if self.order_index_of(requested).is_some() {
+            self.mint_shot_id()
+        } else {
+            requested.to_string()
+        }
+    }
+
+    fn insert_shot(&self, pos: usize, id: &str, source: &str, range: &ShotRange, notes: &[ShotNote]) {
+        let order = self.doc.get_movable_list(ORDER);
+        order.insert(pos.min(order.len()), id).expect("insert id");
+        self.doc
+            .get_map(SHOT_SOURCE)
+            .insert(id, source)
+            .expect("set source");
+        self.doc
+            .get_map(SHOT_RANGE)
+            .insert(id, range_to_json(range).as_str())
+            .expect("set range");
+        for note in notes {
+            self.add_note(id, note);
+        }
+        self.doc.commit();
     }
 
     pub(crate) fn doc(&self) -> &LoroDoc {
@@ -86,31 +136,31 @@ impl CollabDoc {
         (0..order.len()).find(|&i| as_string(order.get(i)).as_deref() == Some(shot_id))
     }
 
-    /// Append a shot at the end of the order (mirrors `edit add-segment`).
+    /// Append a shot, preserving its id when free (migration/import) or minting
+    /// a unique one on a local collision. For NEW collaborative inserts prefer
+    /// [`Self::add_new_shot`], which always mints an actor-scoped id so
+    /// concurrent inserts on different replicas never collide (REQ-080).
     pub fn add_shot(&self, shot: &Shot) {
-        let order = self.doc.get_movable_list(ORDER);
-        let pos = order.len();
+        let pos = self.doc.get_movable_list(ORDER).len();
         self.add_shot_at(pos, shot);
     }
 
-    /// Insert a shot at `pos` in the order.
+    /// Insert a shot at `pos`, with the same id-uniqueness handling as
+    /// [`Self::add_shot`].
     pub fn add_shot_at(&self, pos: usize, shot: &Shot) {
-        let order = self.doc.get_movable_list(ORDER);
-        order
-            .insert(pos.min(order.len()), shot.id.as_str())
-            .expect("insert id");
-        self.doc
-            .get_map(SHOT_SOURCE)
-            .insert(shot.id.as_str(), shot.source.as_str())
-            .expect("set source");
-        self.doc
-            .get_map(SHOT_RANGE)
-            .insert(shot.id.as_str(), range_to_json(&shot.range).as_str())
-            .expect("set range");
-        for note in &shot.notes {
-            self.add_note(&shot.id, note);
-        }
-        self.doc.commit();
+        let id = self.unique_id_for(&shot.id);
+        self.insert_shot(pos, &id, &shot.source, &shot.range, &shot.notes);
+    }
+
+    /// Append a brand-new shot with a freshly-minted, globally-unique id and
+    /// return that id. This is the correct entry point for live collaborative
+    /// inserts (CLI/agent/daemon): the id is actor-scoped, so two replicas
+    /// inserting concurrently never produce a colliding id (REQ-080).
+    pub fn add_new_shot(&self, source: &str, range: &ShotRange) -> String {
+        let id = self.mint_shot_id();
+        let pos = self.doc.get_movable_list(ORDER).len();
+        self.insert_shot(pos, &id, source, range, &[]);
+        id
     }
 
     /// Remove a shot, retiring its id (REQ — id never reused by the caller).
@@ -160,7 +210,11 @@ impl CollabDoc {
     /// Append a note to a shot (REQ-082: grow-only; never lost on merge).
     pub fn add_note(&self, shot_id: &str, note: &ShotNote) {
         let counter = self.note_counter.fetch_add(1, Ordering::Relaxed);
-        let note_id = format!("{:016x}:{:08x}", self.actor.0, counter);
+        let note_id = format!(
+            "{:016x}:{:08x}",
+            self.actor.load(Ordering::Relaxed),
+            counter
+        );
         let rec = NoteRec {
             shot_id: shot_id.to_string(),
             text: note.text.clone(),
@@ -255,13 +309,34 @@ impl CollabDoc {
     pub fn import(&self, bytes: &[u8]) -> Result<(), loro::LoroError> {
         self.doc.import(bytes)?;
         self.sync_note_counter();
+        self.sync_shot_counter();
         Ok(())
+    }
+
+    /// Advance the shot counter past any minted shot ids already present for
+    /// this actor, so a reloaded doc never re-mints a colliding id.
+    fn sync_shot_counter(&self) {
+        let prefix = format!("shot-{:016x}-", self.actor.load(Ordering::Relaxed));
+        let mut highest: Option<u64> = None;
+        let order = self.doc.get_movable_list(ORDER);
+        for i in 0..order.len() {
+            if let Some(s) = as_string(order.get(i)) {
+                if let Some(rest) = s.strip_prefix(prefix.as_str()) {
+                    if let Ok(n) = u64::from_str_radix(rest, 16) {
+                        highest = Some(highest.map_or(n, |h| h.max(n)));
+                    }
+                }
+            }
+        }
+        if let Some(h) = highest {
+            let _ = self.shot_counter.fetch_max(h + 1, Ordering::Relaxed);
+        }
     }
 
     /// Advance `note_counter` past the highest `actor:counter` note id already
     /// in the document for this actor.
     fn sync_note_counter(&self) {
-        let prefix = format!("{:016x}:", self.actor.0);
+        let prefix = format!("{:016x}:", self.actor.load(Ordering::Relaxed));
         let mut highest: Option<u64> = None;
         if let LoroValue::Map(m) = self.doc.get_map(NOTES).get_value() {
             for (k, _) in m.iter() {

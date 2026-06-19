@@ -74,7 +74,7 @@ fn migration_snapshot_identity() {
         snapshot: snapshot.clone(),
     };
 
-    let collab = migrate::from_event_sourced(&ed);
+    let collab = migrate::from_event_sourced(&ed, ActorId(2));
     let materialised = materialise::materialise(&collab);
 
     assert_eq!(
@@ -284,6 +284,83 @@ fn offline_edits_reconcile_with_delta_sync() {
         ids.contains(&"shot-A1".to_string()) && ids.contains(&"shot-B1".to_string()),
         "no offline edit may be lost: {ids:?}"
     );
+}
+
+/// Regression (P1): generated shot ids are actor-scoped, so concurrent inserts
+/// on different replicas never collide — both survive with their own fields.
+#[test]
+fn generated_shot_ids_avoid_collision_across_replicas() {
+    let base = base_three_shots();
+    let a = CollabDoc::new(ActorId(10));
+    a.import(&base).unwrap();
+    let b = CollabDoc::new(ActorId(20));
+    b.import(&base).unwrap();
+
+    let id_a = a.add_new_shot("src-A", &words(1, 2));
+    let id_b = b.add_new_shot("src-B", &words(3, 4));
+    assert_ne!(id_a, id_b, "generated ids must differ across actors");
+
+    a.import(&b.export_snapshot()).unwrap();
+    b.import(&a.export_snapshot()).unwrap();
+
+    let ma = materialise::materialise(&a);
+    assert_eq!(ma.shots.len(), 5, "both inserts survive: {:?}", order_ids(&ma));
+    assert_eq!(ma.shots.iter().find(|s| s.id == id_a).unwrap().source, "src-A");
+    assert_eq!(ma.shots.iter().find(|s| s.id == id_b).unwrap().source, "src-B");
+    assert_eq!(json(&ma), json(&materialise::materialise(&b)));
+}
+
+/// Regression (P1): a locally-duplicated shot id is disambiguated rather than
+/// overwriting the first shot's fields.
+#[test]
+fn add_shot_disambiguates_local_duplicate_id() {
+    let d = CollabDoc::new(ActorId(1));
+    d.add_shot(&shot("shot-001", "src-A", words(0, 1), vec![]));
+    d.add_shot(&shot("shot-001", "src-B", words(2, 3), vec![])); // same id locally
+    let m = materialise::materialise(&d);
+    assert_eq!(m.shots.len(), 2, "duplicate id must not overwrite: {:?}", order_ids(&m));
+    let srcs: Vec<&str> = m.shots.iter().map(|s| s.source.as_str()).collect();
+    assert!(
+        srcs.contains(&"src-A") && srcs.contains(&"src-B"),
+        "both sources preserved: {srcs:?}"
+    );
+}
+
+/// Regression (P1/P2): two peers migrate the SAME legacy edit independently,
+/// then edit and sync — migrated shots are not duplicated (idempotent migration
+/// under the fixed migration actor) and each peer's live inserts survive (their
+/// re-keyed node actors keep ids unique).
+#[test]
+fn independent_migrations_converge_without_duplication() {
+    let snapshot = EditSnapshot {
+        shots: vec![
+            shot("shot-001", "src-001", words(0, 52), vec![]),
+            shot("shot-002", "src-002", words(0, 10), vec![]),
+        ],
+    };
+    let ed = EditDocument {
+        name: "legacy".into(),
+        created: ts(0),
+        next_shot_id: 3,
+        head: -1,
+        ops: vec![],
+        snapshot,
+    };
+
+    let a = migrate::from_event_sourced(&ed, ActorId(10));
+    let b = migrate::from_event_sourced(&ed, ActorId(20));
+    a.add_new_shot("src-A", &words(1, 2));
+    b.add_new_shot("src-B", &words(3, 4));
+
+    a.import(&b.export_snapshot()).unwrap();
+    b.import(&a.export_snapshot()).unwrap();
+
+    let ma = materialise::materialise(&a);
+    let order = order_ids(&ma);
+    assert_eq!(order.iter().filter(|x| *x == "shot-001").count(), 1, "no dup: {order:?}");
+    assert_eq!(order.iter().filter(|x| *x == "shot-002").count(), 1, "no dup: {order:?}");
+    assert_eq!(ma.shots.len(), 4, "2 migrated + 2 live inserts: {order:?}");
+    assert_eq!(json(&ma), json(&materialise::materialise(&b)));
 }
 
 /// Regression (P1): notes must survive a reload by the same actor — the note

@@ -141,10 +141,42 @@ async fn handle_conn(stream: TcpStream, state: State) -> std::io::Result<()> {
     };
     let other_tx: Inbound = match pairing {
         Pairing::Ready(tx) => tx,
-        Pairing::Wait(rx) => match rx.await {
-            Ok(tx) => tx,
-            Err(_) => return Ok(()), // peer never arrived
-        },
+        Pairing::Wait(mut rx) => {
+            // Wait for a partner while still servicing this peer's socket: buffer
+            // any frames it sends early, and — crucially — detect its disconnect
+            // (EOF) so the channel is freed instead of leaving a dead waiter the
+            // next peer would be matched to.
+            let mut buffered: Vec<Vec<u8>> = Vec::new();
+            let tx = loop {
+                tokio::select! {
+                    biased;
+                    res = &mut rx => {
+                        break match res {
+                            Ok(tx) => tx,
+                            Err(_) => {
+                                state.channels.lock().unwrap().remove(&channel);
+                                return Ok(());
+                            }
+                        };
+                    }
+                    frame = read_frame(&mut read_half) => match frame {
+                        Ok(Some(f)) => buffered.push(f), // relay once paired
+                        _ => {
+                            // EOF or error before a partner arrived: free channel.
+                            state.channels.lock().unwrap().remove(&channel);
+                            return Ok(());
+                        }
+                    },
+                }
+            };
+            // Flush anything the waiter sent before its partner arrived.
+            for f in buffered {
+                if tx.send(f).is_err() {
+                    return Ok(());
+                }
+            }
+            tx
+        }
     };
 
     // Writer: deliver inbound frames to this peer's socket.

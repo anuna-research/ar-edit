@@ -29,6 +29,8 @@ pub enum DaemonError {
     TooLong,
     #[error("connection closed")]
     Closed,
+    #[error("a session daemon is already running on this socket")]
+    AlreadyRunning,
 }
 
 /// A client request (CON-018). Externally tagged on `op`.
@@ -110,7 +112,17 @@ impl Daemon {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let _ = std::fs::remove_file(&path); // clear a stale socket
+        // Only remove the socket after proving it is stale: if a live daemon is
+        // already listening, refuse rather than unlink its socket (which would
+        // orphan it and split the session).
+        if path.exists() {
+            match std::os::unix::net::UnixStream::connect(&path) {
+                Ok(_) => return Err(DaemonError::AlreadyRunning),
+                Err(_) => {
+                    let _ = std::fs::remove_file(&path); // stale socket — safe to clear
+                }
+            }
+        }
         let listener = UnixListener::bind(&path).map_err(|e| DaemonError::Io(e.to_string()))?;
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));

@@ -4,6 +4,7 @@
 
 use ar_edit_collab::recognise::wire::{self, RendezvousFrame};
 use ar_edit_collab::shell::rendezvous::RendezvousServer;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -62,6 +63,39 @@ async fn relays_opaque_frames_between_paired_peers() {
         wire::parse_rendezvous(&got2),
         Ok(RendezvousFrame::Ticket(b"node-ticket-B")),
         "A must receive B's opaque ticket frame verbatim"
+    );
+}
+
+/// Regression (P2): a peer that binds a channel and disconnects before a
+/// partner arrives must free the channel, so the next two peers pair with each
+/// other instead of a dead waiter.
+#[tokio::test]
+async fn waiter_freed_on_disconnect() {
+    let server = RendezvousServer::bind("127.0.0.1:0").await.unwrap();
+    let addr = server.local_addr();
+    tokio::spawn(server.run());
+
+    // Peer 1 binds channel 7, then disconnects before any partner arrives.
+    {
+        let mut p1 = TcpStream::connect(addr).await.unwrap();
+        p1.write_all(&wire::frame(&[0x01, 0x00, 0x07])).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await; // let server register it
+    } // p1 dropped → disconnects
+    tokio::time::sleep(Duration::from_millis(100)).await; // let server free channel 7
+
+    // Two fresh peers on channel 7 must pair with each other.
+    let mut a = TcpStream::connect(addr).await.unwrap();
+    let mut b = TcpStream::connect(addr).await.unwrap();
+    a.write_all(&wire::frame(&[0x01, 0x00, 0x07])).await.unwrap();
+    b.write_all(&wire::frame(&[0x01, 0x00, 0x07])).await.unwrap();
+    a.write_all(&pake(b"hello")).await.unwrap();
+
+    let got = tokio::time::timeout(Duration::from_secs(2), read_framed(&mut b))
+        .await
+        .expect("B must receive A's frame — the dead waiter was freed");
+    assert_eq!(
+        wire::parse_rendezvous(&got),
+        Ok(RendezvousFrame::PakeMsg(b"hello"))
     );
 }
 

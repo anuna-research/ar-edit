@@ -9,8 +9,10 @@ content-addressed source sync. Implements [SPEC-003](../../specs/SPEC-003-realti
 ```rust
 use ar_edit_collab::{CollabDoc, ids::ActorId, materialise::materialise, migrate};
 
-// Migrate an existing event-sourced edit document into the CRDT form.
-let doc = migrate::from_event_sourced(&edit_document);
+// Migrate an existing event-sourced edit document into the CRDT form, owned by
+// this node's actor for subsequent edits.
+let actor = ActorId::from_public_key(node_public_key);
+let doc = migrate::from_event_sourced(&edit_document, actor);
 
 // Concurrent edits from peers merge automatically; read the materialised view.
 let snapshot = materialise(&doc);

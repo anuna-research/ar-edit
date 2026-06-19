@@ -5,7 +5,7 @@
 
 use ar_edit_collab::crdt::CollabDoc;
 use ar_edit_collab::ids::ActorId;
-use ar_edit_collab::shell::daemon::{Daemon, DaemonClient, Request, Response};
+use ar_edit_collab::shell::daemon::{Daemon, DaemonClient, DaemonError, Request, Response};
 use ar_edit_core::models::{Shot, ShotRange};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -53,6 +53,29 @@ async fn daemon_holds_live_state_across_clients() {
         Response::Status { shot_count } => assert_eq!(shot_count, 1),
         other => panic!("expected status, got {other:?}"),
     }
+}
+
+/// Regression (P2): a second daemon on a *live* socket refuses to start rather
+/// than unlinking the running daemon's socket (which would split the session).
+#[tokio::test]
+async fn daemon_refuses_when_already_running() {
+    let d1 = Daemon::bind(sock("running"), CollabDoc::new(ActorId(1))).unwrap();
+    let path = d1.socket_path().to_path_buf();
+    tokio::spawn(d1.run());
+
+    // Second bind on the same live socket must refuse.
+    let second = Daemon::bind(&path, CollabDoc::new(ActorId(2)));
+    assert!(
+        matches!(second, Err(DaemonError::AlreadyRunning)),
+        "second daemon must refuse a live socket"
+    );
+
+    // The original daemon is still reachable.
+    let mut c = DaemonClient::connect(&path).await.unwrap();
+    assert!(matches!(
+        c.request(&Request::Status).await.unwrap(),
+        Response::Status { .. }
+    ));
 }
 
 /// CON-018 / TEST-120: a malformed request frame is rejected with an `error`

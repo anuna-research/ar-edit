@@ -292,6 +292,10 @@ Windows per [[SPEC-001-transcript-video-editor#NFR-015]]) through which clients
 attach to apply edits and read state, and SHALL re-publish the discovery record
 before its TTL while it runs. WHEN the owning process exits, the session ends
 and the discovery record is withdrawn ([[SPEC-003-realtime-collaborative-editing#REQ-068]]).
+Starting a daemon SHALL NOT clobber an already-running one: if a live daemon is
+listening on the socket, the new instance SHALL refuse rather than unlink the
+socket (which would orphan the running session); a socket is removed only after
+it is proven stale.
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-119]]
@@ -426,7 +430,11 @@ inserted it (no loss, no duplication of a single logical insert), (b) a shot
 **moved** by `move-segment` is relocated rather than deleted-and-reinserted
 (preserving the shot's identity, notes, and any concurrent edits to it), and
 (c) concurrent moves of the same shot converge to a single deterministic
-position across all peers.
+position across all peers. To make (a) hold without coordination, **new
+collaborative inserts SHALL use an actor-scoped, generated shot id** (not a
+per-replica sequential counter), so two peers inserting concurrently never
+produce a colliding id whose fields would overwrite each other; a
+locally-duplicated id is likewise disambiguated rather than overwritten.
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-094]]
@@ -541,7 +549,13 @@ The system SHALL transparently migrate an existing event-sourced edit document
 first open WITH the materialised shot list after migration being identical to
 the pre-migration `snapshot`, AND SHALL continue to operate on single-player
 projects (no session) as a one-actor [[CRDT]], preserving the non-destructive
-guarantee of [[ADR-001-event-sourced-edits]].
+guarantee of [[ADR-001-event-sourced-edits]]. Migration SHALL run under a
+**fixed migration peer id** so two peers migrating the same legacy edit
+independently produce identical [[CRDT]] operations (idempotent on merge — no
+duplicated shots), and SHALL then **re-key the document to the caller's
+node-derived actor** ([[SPEC-003-realtime-collaborative-editing#REQ-072]]) so
+subsequent edits carry a unique peer id rather than colliding on the migration
+actor.
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-109]]
@@ -1005,7 +1019,11 @@ Recognition rules:
 unreachable, a [[Rendezvous Server]] MAY relay these same opaque frames between
 peers (matching them on the `<num>` prefix as a channel), never interpreting
 PAKE payloads. This is the demoted v1.0.0 path
-([[SPEC-003-realtime-collaborative-editing#ADR-013]]).
+([[SPEC-003-realtime-collaborative-editing#ADR-013]]). The relay SHALL free a
+channel whose waiting peer disconnects before a partner arrives (so the next
+peer is not matched to a dead waiter), and SHALL buffer any frames a waiter
+sends before its partner arrives, relaying them once paired rather than
+discarding them.
 
 Implements: [[SPEC-003-realtime-collaborative-editing#REQ-070]],
 [[SPEC-003-realtime-collaborative-editing#REQ-071]]

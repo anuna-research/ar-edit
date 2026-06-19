@@ -14,14 +14,23 @@ use crate::crdt::CollabDoc;
 use crate::ids::ActorId;
 use ar_edit_core::models::EditDocument;
 
-/// The actor id assigned to a migrated single-player document.
+/// Fixed peer id used for the migration operations themselves, so that two
+/// peers migrating the same legacy edit independently produce identical Loro
+/// ops (idempotent on merge — no duplicated shots).
 pub const MIGRATION_ACTOR: ActorId = ActorId(1);
 
-/// Build a CRDT document from an existing event-sourced edit document.
-pub fn from_event_sourced(ed: &EditDocument) -> CollabDoc {
+/// Build a CRDT document from an existing event-sourced edit document, owned by
+/// `actor` for subsequent edits.
+///
+/// The migration ops are written under [`MIGRATION_ACTOR`] (deterministic, so
+/// independent migrations merge idempotently); the document is then re-keyed to
+/// the caller's node-derived `actor` so later collaborative edits carry a unique
+/// peer id rather than colliding on actor 1 (REQ-072, REQ-088).
+pub fn from_event_sourced(ed: &EditDocument, actor: ActorId) -> CollabDoc {
     let collab = CollabDoc::new(MIGRATION_ACTOR);
     for shot in &ed.snapshot.shots {
         collab.add_shot(shot);
     }
+    let _ = collab.rekey_actor(actor);
     collab
 }
