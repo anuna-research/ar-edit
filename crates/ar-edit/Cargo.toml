@@ -12,7 +12,7 @@ collab-transport = ["ar-edit-collab/transport"]
 
 [dependencies]
 ar-edit-core.workspace = true
-ar-edit-collab.workspace = true
+ar-edit-collab = { workspace = true, features = ["daemon"] }
 clap.workspace = true
 ratatui = { workspace = true, optional = true }
 crossterm = { workspace = true, optional = true }

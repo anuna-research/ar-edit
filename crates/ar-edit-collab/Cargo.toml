@@ -28,6 +28,8 @@ pkarr = { workspace = true, optional = true }
 default = []
 # Rendezvous relay needs only tokio (TCP) — no iroh, fast to build/test.
 rendezvous = ["dep:tokio"]
+# Session daemon + local IPC (Unix socket) — tokio only, no iroh.
+daemon = ["dep:tokio"]
 # iroh delta transport.
 transport = ["dep:iroh", "dep:tokio", "dep:rustls", "dep:pkarr"]
 blobsync = ["transport", "dep:iroh-blobs"]

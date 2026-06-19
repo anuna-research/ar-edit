@@ -181,7 +181,8 @@ signed [[pkarr]] discovery record advertising the host's [[iroh]] NodeAddr
 (NodeId + direct addresses + relay), keyed by the phrase-derived discovery key,
 to the [[Mainline DHT]] (or a pkarr relay)** per
 [[SPEC-003-realtime-collaborative-editing#CON-017]] and refreshed before
-expiry, and (c) the host entering a waiting state that accepts joining peers
+expiry, and (c) the host process (TUI, blocking `share`, or the session daemon —
+[[SPEC-003-realtime-collaborative-editing#ADR-014]]) entering a waiting state that accepts joining peers
 until the session is closed. The phrase SHALL expire after a bounded,
 configurable interval (default 10 minutes) after which the discovery record is
 withdrawn and the phrase single-use-invalidated. Publication SHALL be
@@ -277,6 +278,40 @@ connected), and the session remaining alive as long as ≥ 1 peer is present.
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-084]]
 - [[SPEC-003-realtime-collaborative-editing#CON-012]]
+
+**REQ-089: Session-Owning Process (Daemon)**
+
+The system SHALL hold a live collaborative session in a **single long-running
+process** that owns the in-memory [[CRDT]] document, the peer connections, and
+the [[pkarr]] record refresh — because discrete one-shot CLI invocations cannot
+maintain live state between calls. That process is either (a) the interactive
+TUI or a blocking `ar-edit share`, or (b) a background **session daemon**
+(`ar-edit daemon`) for headless/agent use. The daemon SHALL expose a local IPC
+endpoint (a Unix-domain socket under the project directory; named pipe on
+Windows per [[SPEC-001-transcript-video-editor#NFR-015]]) through which clients
+attach to apply edits and read state, and SHALL re-publish the discovery record
+before its TTL while it runs. WHEN the owning process exits, the session ends
+and the discovery record is withdrawn ([[SPEC-003-realtime-collaborative-editing#REQ-068]]).
+
+Trace:
+- [[SPEC-003-realtime-collaborative-editing#TEST-119]]
+- [[SPEC-003-realtime-collaborative-editing#CON-018]]
+- [[SPEC-003-realtime-collaborative-editing#ADR-014]]
+
+**REQ-090: CLI / Agent Attach to a Live Session**
+
+The system SHALL route discrete edit and session commands (`ar-edit edit …`,
+`ar-edit session …`) to a running session daemon over its IPC endpoint when one
+is active for the project, so an agent or CLI user participates in the *live*
+session and their mutations propagate to peers; WHEN no daemon is running, those
+commands SHALL fall back to one-shot operations on the on-disk edit document
+(unchanged single-player behaviour). IPC input is untrusted and fully recognised
+before any action ([[SPEC-003-realtime-collaborative-editing#CON-018]],
+Constitutional Principle 14).
+
+Trace:
+- [[SPEC-003-realtime-collaborative-editing#TEST-120]]
+- [[SPEC-003-realtime-collaborative-editing#CON-018]]
 
 ---
 
@@ -747,6 +782,47 @@ Trace:
 - [[SPEC-003-realtime-collaborative-editing#REQ-071]]
 - [[SPEC-003-realtime-collaborative-editing#CON-017]]
 
+### ADR-014: Session Process Model (TUI host + background daemon)
+
+**Status:** Proposed (v1.1.0)
+
+**Context:** A realtime session needs a persistent owner of the live [[CRDT]]
+document, the peer connections, and the [[pkarr]] record refresh. ar-edit's
+CLI/agent surface, however, is one-shot: `ar-edit edit add-segment …` opens the
+file, mutates, and exits — it cannot hold live state or connections between
+invocations. Without a defined process model, `ar-edit share` and discrete CLI
+edits cannot participate in the same live session.
+
+**Decision:** Support **both** owners:
+- **Interactive / human:** the TUI (or a blocking `ar-edit share`) is itself the
+  long-running host — no separate process needed.
+- **Headless / agent:** a background **session daemon** (`ar-edit daemon`) owns
+  the live `CollabDoc`, the transport, and pkarr refresh, and exposes a local
+  IPC endpoint (Unix-domain socket under the project dir;
+  [[SPEC-003-realtime-collaborative-editing#CON-018]]). Discrete `edit`/`session`
+  commands attach to it over IPC ([[SPEC-003-realtime-collaborative-editing#REQ-090]]),
+  and fall back to one-shot on-disk operations when no daemon is running.
+
+Local IPC mutations and remote CRDT deltas are applied to the *same* in-memory
+document, so they converge by the CRDT's own merge — no extra coordination.
+
+**Alternatives considered:** *daemon-only* (rejected — heavyweight for plain
+single-player CLI/agent file edits, which must keep working with no daemon);
+*TUI-only host* (rejected — excludes headless/agent collaboration entirely).
+
+**Consequences:** introduces a daemon lifecycle and the IPC contract
+([[SPEC-003-realtime-collaborative-editing#CON-018]]); the daemon owns pkarr
+refresh and peer acceptance; reframes the "waiting state" of
+[[SPEC-003-realtime-collaborative-editing#REQ-068]]. Lifecycle specifics
+(auto-start, idle shutdown, one-per-project) are
+[[SPEC-003-realtime-collaborative-editing#OQ-8]].
+
+Trace:
+- [[SPEC-003-realtime-collaborative-editing#REQ-068]]
+- [[SPEC-003-realtime-collaborative-editing#REQ-089]]
+- [[SPEC-003-realtime-collaborative-editing#REQ-090]]
+- [[SPEC-003-realtime-collaborative-editing#CON-018]]
+
 ### ADR-010: Full Content-Addressed Media Replication
 
 **Status:** Proposed — hashing/integrity ceiling **spike-confirmed** (OQ-1:
@@ -963,6 +1039,39 @@ Implements: [[SPEC-003-realtime-collaborative-editing#REQ-068]],
 [[SPEC-003-realtime-collaborative-editing#REQ-069]],
 [[SPEC-003-realtime-collaborative-editing#REQ-071]]
 Verified by: [[SPEC-003-realtime-collaborative-editing#TEST-081]]
+
+### CON-018: Session Daemon IPC [LangSec]
+
+The local control channel between discrete CLI/agent clients and the session
+daemon ([[SPEC-003-realtime-collaborative-editing#ADR-014]]). Transport is a
+**Unix-domain socket** at `<project>/.ar-edit/session.sock` (mode 0600; named
+pipe on Windows). Each message is a length-prefixed JSON frame, fully recognised
+into a typed request before any mutation (fail-closed, Constitutional Principle 14).
+
+```abnf
+frame    = u32-len json-body        ; u32-len big-endian; cap 1 MiB
+request  = attach / mutate / read   ; externally-tagged on "op"
+attach   = %s'{"op":"attach","edit":' string '}'
+mutate   = add-shot / move-shot / trim-shot / add-note / remove-shot
+add-shot = %s'{"op":"add_shot","shot":' shot-json '}'
+read     = %s'{"op":"snapshot"}' / %s'{"op":"status"}'
+response = ok / snapshot / status / error    ; tagged JSON
+```
+
+Recognition rules:
+- A frame whose declared length exceeds the cap is rejected without buffering.
+- The JSON body MUST deserialise to a known `op`; an unknown/!malformed request
+  yields an `error` response and **performs no mutation**.
+- The socket is created mode 0600 in the project directory: the trust boundary
+  is local filesystem access (a connecting client is already a local user with
+  project access). The daemon never executes payload-supplied paths or code.
+- Local-mutation and remote-delta application share one in-memory document, so
+  they converge via the CRDT (no IPC-side conflict handling).
+
+Implements: [[SPEC-003-realtime-collaborative-editing#REQ-089]],
+[[SPEC-003-realtime-collaborative-editing#REQ-090]]
+Verified by: [[SPEC-003-realtime-collaborative-editing#TEST-119]],
+[[SPEC-003-realtime-collaborative-editing#TEST-120]]
 
 ### CON-015: CRDT Sync Message Envelope [LangSec]
 
@@ -1262,6 +1371,21 @@ After the configured number of failed key confirmations the channel is
 invalidated and further guesses are refused.
 Validates: [[SPEC-003-realtime-collaborative-editing#NFR-014]]
 
+**TEST-119: Daemon holds a live session across one-shot clients (positive)**
+Start a session daemon over a socket holding an edit; client A applies
+`add_shot`; a *separate* client B requests `snapshot` and sees A's shot —
+proving the daemon maintains shared live state between discrete invocations
+(REQ-089).
+Validates: [[SPEC-003-realtime-collaborative-editing#REQ-089]]
+
+**TEST-120: IPC recognition + attach (positive + negative-input)**
+A well-formed request mutates and returns `ok`; a malformed or oversized frame
+is rejected with an `error` and leaves the document unchanged (LangSec,
+CON-018). With no daemon running, an `edit` command falls back to the on-disk
+document.
+Validates: [[SPEC-003-realtime-collaborative-editing#REQ-090]],
+[[SPEC-003-realtime-collaborative-editing#CON-018]]
+
 ### Selected Verification Techniques
 
 | Surface | Techniques (per [[PROTO-001]]) |
@@ -1400,6 +1524,7 @@ artefacts introduced here.
 |---|----|----------|--------|
 | 1 | OQ-1 | De-risking spike: confirm [[Loro]] `MovableList` move/trim convergence, SPAKE2 feasibility, and 2 GB BLAKE3 content-addressing. | **Resolved 2026-06-18** — H-a/H-b/H-c PASS (`spike/oq-1/FINDINGS.md`). Transport-layer empirical run split out to OQ-7. |
 | 7 | OQ-7 | Transport-characterisation spike: real iroh pairing latency ([[SPEC-003-realtime-collaborative-editing#NFR-010]]) and iroh-blobs 2 GB network throughput / resumability ([[SPEC-003-realtime-collaborative-editing#NFR-011]]). Run on macOS, Linux, **and Windows** to confirm [[SPEC-001-transcript-video-editor#NFR-015]] (terminal backend, source-linking via [[ADR-012-cross-platform-source-linking]]) for the collaboration path. Also covers a real [[Mainline DHT]] / [[pkarr]] discovery round-trip ([[SPEC-003-realtime-collaborative-editing#ADR-013]]). | **Partially addressed** (IMPL-003): the iroh transport + content-addressed blob transfer are implemented and **loopback-tested** (`crates/ar-edit-collab`, feature `transport`; requires rustc ≥ 1.91). Remaining: real-network latency/throughput, pkarr/DHT discovery round-trip, and iroh-blobs dedup/resume. |
+| 8 | OQ-8 | Session-daemon lifecycle ([[SPEC-003-realtime-collaborative-editing#ADR-014]]): auto-start on `share`/first attach vs explicit `ar-edit daemon`; idle-shutdown policy; one-daemon-per-project vs global; socket path/permission hardening; Windows named-pipe equivalent ([[SPEC-001-transcript-video-editor#NFR-015]]); how the daemon drives remote sync (push local IPC mutations as deltas, apply remote deltas). | Open — core daemon + IPC implemented (REQ-089/090, CON-018); lifecycle/policy + remote-sync wiring to refine |
 | 2 | OQ-2 | Should lazy/on-demand media fetch be layered on full replication to let a peer start editing before a multi-GB sync finishes? | Deferred — optimisation over [[SPEC-003-realtime-collaborative-editing#ADR-010]] |
 | 3 | OQ-3 | Is the [[Rendezvous Server]] self-hosted by the user, Anuna-operated, or pluggable via config? Affects trust model and NFR-010. | **Resolved (v1.1.0)** — no dedicated server: discovery is serverless via phrase-keyed [[pkarr]] / [[Mainline DHT]] ([[SPEC-003-realtime-collaborative-editing#ADR-013]]). A pkarr HTTP relay (e.g. `relay.pkarr.org`) is configurable; the TCP rendezvous relay remains an optional DHT-blocked fallback. |
 | 4 | OQ-4 | Version-bump and `superseded` bookkeeping on [[SPEC-001-transcript-video-editor]] REQ-046–048 and [[ADR-001-event-sourced-edits]] once SPEC-003 is `implemented`. | Open — tracked, execute at Phase 3 close |
@@ -1419,4 +1544,5 @@ artefacts introduced here.
 | Discovery | phrase-keyed [[pkarr]] on [[Mainline DHT]] ([[SPEC-003-realtime-collaborative-editing#ADR-013]]) | Serverless meeting point; pattern after `../did-crdt` ADR-006; iroh already uses pkarr |
 | Wordlist | [[BIP39]] English (2048 words) | Standard, first-four-letters unique; matches `cbcl-bus` mnemonic pairing |
 | Async runtime | `tokio` (already a workspace dep) | iroh, pkarr, and the optional relay are async |
+| Session process | TUI / blocking `share`, or `ar-edit daemon` + Unix-socket IPC ([[SPEC-003-realtime-collaborative-editing#ADR-014]]) | One-shot CLI can't hold live state; the daemon owns the CRDT + connections + pkarr refresh |
 | Platform support | macOS · Linux · Windows 10+ ([[SPEC-001-transcript-video-editor#NFR-015]]) | All collaboration crates (loro, iroh, iroh-blobs, spake2, blake3) are cross-platform Rust; iroh officially supports Windows; source-linking variance per [[ADR-012-cross-platform-source-linking]]; empirical Windows run is [[SPEC-003-realtime-collaborative-editing#OQ-7]] |

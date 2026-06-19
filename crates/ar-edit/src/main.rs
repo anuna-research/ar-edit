@@ -113,6 +113,30 @@ fn main() {
 fn run(cli: &Cli) -> anyhow::Result<()> {
     match &cli.command {
         // ---- Realtime collaboration (SPEC-003) ----
+        Commands::Daemon { edit } => {
+            let _ = edit; // loading/persisting an existing edit is OQ-8
+            let sock = std::path::Path::new(".ar-edit").join("session.sock");
+            let json = cli.json;
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async move {
+                let doc =
+                    ar_edit_collab::crdt::CollabDoc::new(ar_edit_collab::ids::ActorId(1));
+                let daemon = ar_edit_collab::shell::daemon::Daemon::bind(&sock, doc)
+                    .map_err(|e| anyhow::anyhow!("daemon bind failed: {e}"))?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "socket": sock.display().to_string(), "status": "listening" })
+                    );
+                } else {
+                    println!("Session daemon listening on {}", sock.display());
+                    println!("(Ctrl-C to stop; clients attach via `ar-edit edit …` — REQ-090.)");
+                }
+                daemon.run().await;
+                Ok::<(), anyhow::Error>(())
+            })?;
+            Ok(())
+        }
         Commands::Share => {
             let phrase = ar_edit_collab::recognise::phrase::generate_secure();
             if cli.json {

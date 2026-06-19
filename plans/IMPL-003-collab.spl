@@ -615,3 +615,25 @@
 (claims agent:claude
   :at "2026-06-18T20:30:40Z"
   (given completed-s8-discovery))
+
+;; =============================================================================
+;; s9: Session daemon + local IPC (added v1.1.0, ADR-014/CON-018, REQ-089/090)
+;; =============================================================================
+(given task-s9-daemon)
+(meta task-s9-daemon
+  (phase "S")
+  (description "shell/daemon.rs (feature daemon, tokio only — no iroh): a long-running process owning the live CollabDoc so discrete one-shot CLI/agent commands can join one live session. Unix-domain-socket IPC with length-prefixed JSON Request/Response (CON-018), fully recognised before any mutation (LangSec). DaemonClient for attach; `ar-edit daemon` CLI subcommand. Implements REQ-089/090, ADR-014.")
+  (acceptance "Daemon holds live state across separate clients (TEST-119); malformed frame rejected with no mutation (TEST-120); `ar-edit daemon` binds the socket and listens; builds on the default toolchain (tokio only)."))
+(normally r-ready-s9 (and task-s9-daemon completed-p1-crdt-model completed-p2-materialise) ready-s9-daemon)
+(normally r-assign-s9 (and ready-s9-daemon agent-claude-available) assign-to-s9-daemon-claude)
+
+(claims agent:claude
+  :at "2026-06-19T00:14:54Z"
+  (given claim-v1-s9-daemon)
+  (normally r-cl-state-v1-s9-daemon claim-v1-s9-daemon state-claimed-v1-s9-daemon)
+  (normally r-cl-chain-v1-s9-daemon state-claimed-v1-s9-daemon claimed-s9-daemon)
+)
+
+(claims agent:claude
+  :at "2026-06-19T00:14:54Z"
+  (given completed-s9-daemon))

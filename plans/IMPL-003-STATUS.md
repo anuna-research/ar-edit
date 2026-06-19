@@ -4,7 +4,7 @@ Implementation of [[SPEC-003-realtime-collaborative-editing]] via
 `plans/IMPL-003-collab.spl`. Crate: `crates/ar-edit-collab` (+ CLI in
 `crates/ar-edit`).
 
-**Status: 17/17 tasks done. 36 tests passing — full matrix executed.** The full
+**Status: 18/18 tasks done. 38 tests passing — full matrix executed.** The full
 serverless pairing vertical is implemented and **verified end-to-end**: discover
 by phrase (pkarr/DHT) → dial over iroh → SPAKE2 authenticated key agreement over
 that connection → CRDT sync.
@@ -37,6 +37,7 @@ The same command reproduces it (rustc ≥ 1.91). The real-DHT/relay round-trip
 |-------|-------|-------|
 | Pure core (crdt, materialise, migrate, undo, recognise, reconcile, pairing, presence) | default (any rustc) | 23 |
 | Rendezvous relay | `--features rendezvous` (tokio) | 2 |
+| Session daemon + IPC | `--features daemon` (tokio) | 2 |
 | iroh transport + blob + pkarr discovery + **SPAKE2-over-iroh** | `--features transport` (rustc ≥ 1.91) | 7 |
 | Collaboration CLI | `ar-edit` binary | 3 |
 
@@ -71,6 +72,7 @@ RUSTC=~/.rustup/toolchains/stable-*/bin/rustc \
 | s6 | `ar-edit` CLI (`share`/`pair`/`session`) | CON-012 | **malformed phrase → exit 1, no network** (TEST-078) |
 | s7 | `shell/rendezvous.rs` (TCP relay) | 071 (CON-014) | opaque relay + channel isolation |
 | s8 | `shell/discovery.rs` (pkarr / Mainline DHT) | 068/069/071 (ADR-013, CON-017) | **deterministic phrase key; CON-017 record roundtrip; end-to-end discover-by-phrase → dial → delta propagates (hermetic in-process backend)** |
+| s9 | `shell/daemon.rs` + `ar-edit daemon` (ADR-014, CON-018) | 089/090 | **persistent process owning the live CRDT; Unix-socket IPC; live state shared across one-shot clients (TEST-119); malformed frames rejected (TEST-120); `ar-edit daemon` binds + listens.** This is the "always-available process" needed for `share`/agent collaboration. |
 
 > **SPEC-003 v1.1.0 (discovery):** the dedicated rendezvous server is replaced by
 > serverless phrase-keyed pkarr / Mainline DHT discovery

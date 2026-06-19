@@ -74,6 +74,13 @@ pub enum Commands {
         command: SessionCommand,
     },
 
+    /// Run the collaborative session daemon for this project (SPEC-003)
+    Daemon {
+        /// Edit document to host (in-memory session for now; persistence is OQ-8)
+        #[arg(long)]
+        edit: Option<String>,
+    },
+
     /// Create a new project directory
     Init {
         /// Project name (becomes the directory name)

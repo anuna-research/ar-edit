@@ -9,6 +9,9 @@
 #[cfg(feature = "rendezvous")]
 pub mod rendezvous;
 
+#[cfg(all(feature = "daemon", unix))]
+pub mod daemon;
+
 #[cfg(feature = "transport")]
 pub mod discovery;
 
