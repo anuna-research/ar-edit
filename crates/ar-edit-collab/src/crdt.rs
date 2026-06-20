@@ -106,6 +106,28 @@ impl CollabDoc {
         ActorId(self.actor.load(Ordering::Relaxed))
     }
 
+    /// Current minted-id counter high-water marks (shot, note, orset) — the
+    /// *next* value each will mint. These must be persisted alongside the
+    /// snapshot: a `revert_to` (cursor undo) rolls back the in-document
+    /// [`COUNTERS`] map, so the reverted snapshot alone would let a reload
+    /// re-mint a tombstoned id (REQ-080). The atomics are never reverted, so
+    /// they hold the true marks.
+    pub fn counter_hwm(&self) -> (u64, u64, u64) {
+        (
+            self.shot_counter.load(Ordering::Relaxed),
+            self.note_counter.load(Ordering::Relaxed),
+            self.orset_counter.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Raise the minted-id counter marks (monotonic), so a reload never reuses an
+    /// id even if the persisted snapshot's [`COUNTERS`] map was reverted by undo.
+    pub fn restore_counter_hwm(&self, (shot, note, orset): (u64, u64, u64)) {
+        let _ = self.shot_counter.fetch_max(shot, Ordering::Relaxed);
+        let _ = self.note_counter.fetch_max(note, Ordering::Relaxed);
+        let _ = self.orset_counter.fetch_max(orset, Ordering::Relaxed);
+    }
+
     /// Re-key this document's actor (Loro peer id) for *subsequent* operations.
     /// Used after a deterministic migration so the migration ops carry a fixed
     /// peer id (idempotent across independent migrations) while later edits
@@ -218,12 +240,17 @@ impl CollabDoc {
         id
     }
 
-    /// Remove a shot, retiring its id (REQ — id never reused by the caller).
+    /// Remove a shot, retiring its id (REQ — id never reused by the caller). A
+    /// shot that is not present is a true no-op (no commit, no op) — otherwise
+    /// the deletes/commit would advance the version and record a phantom step.
     pub fn remove_shot(&self, shot_id: &str) {
-        if let Some(idx) = self.order_index_of(shot_id) {
-            let order = self.doc.get_movable_list(ORDER);
-            order.delete(idx, 1).expect("delete from order");
-        }
+        let Some(idx) = self.order_index_of(shot_id) else {
+            return;
+        };
+        self.doc
+            .get_movable_list(ORDER)
+            .delete(idx, 1)
+            .expect("delete from order");
         let _ = self.doc.get_map(SHOT_SOURCE).delete(shot_id);
         let _ = self.doc.get_map(SHOT_RANGE).delete(shot_id);
         // Drop this shot's notes (orphans would be ignored by materialise, but
@@ -244,8 +271,13 @@ impl CollabDoc {
         }
     }
 
-    /// Replace a shot's range (REQ-081: whole-value LWW register).
+    /// Replace a shot's range (REQ-081: whole-value LWW register). A shot that is
+    /// not present is a no-op — otherwise the write would orphan a range key (not
+    /// in `order`, so invisible to materialise) and record a phantom undo step.
     pub fn trim_shot(&self, shot_id: &str, new_range: &ShotRange) {
+        if self.order_index_of(shot_id).is_none() {
+            return;
+        }
         self.doc
             .get_map(SHOT_RANGE)
             .insert(shot_id, range_to_json(new_range).as_str())

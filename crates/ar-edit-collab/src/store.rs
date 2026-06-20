@@ -57,6 +57,11 @@ struct OnDisk {
     undo_history: Vec<DiskCheckpoint>,
     /// Index into `undo_history` of the current visible state.
     undo_head: usize,
+    /// Minted-id counter high-water marks (shot, note, orset). Persisted so a
+    /// reload never re-mints a tombstoned id even when undo (`revert_to`) rolled
+    /// back the in-document counter map (REQ-080). Defaulted for old files.
+    #[serde(default)]
+    counters: (u64, u64, u64),
     /// Materialised read view (regenerated on every save).
     snapshot: EditSnapshot,
 }
@@ -142,13 +147,16 @@ impl PersistentEdit {
             .and_then(|c| c.op_id.as_deref())
     }
 
-    /// Record a checkpoint after a mutation, truncating any redo branch.
+    /// Record a checkpoint after a mutation, truncating any redo branch. A no-op
+    /// mutation (e.g. move/remove of a missing shot) leaves the document frontier
+    /// unchanged — it records nothing, so undo never has to step over a phantom.
     fn checkpoint(&mut self, op_id: Option<String>) {
+        let frontier = self.doc.checkpoint();
+        if frontier == self.history[self.head].frontier {
+            return;
+        }
         self.history.truncate(self.head + 1);
-        self.history.push(Checkpoint {
-            frontier: self.doc.checkpoint(),
-            op_id,
-        });
+        self.history.push(Checkpoint { frontier, op_id });
         self.head += 1;
     }
 
@@ -241,9 +249,11 @@ impl PersistentEdit {
         if !self.can_undo() {
             return false;
         }
-        self.doc
-            .revert_to(&self.history[self.head - 1].frontier)
-            .expect("revert to a recorded checkpoint");
+        // A checkpoint frontier that is not in this doc (corrupt/hand-edited
+        // file) makes revert fail — return false rather than panic the CLI.
+        if self.doc.revert_to(&self.history[self.head - 1].frontier).is_err() {
+            return false;
+        }
         self.head -= 1;
         true
     }
@@ -253,9 +263,9 @@ impl PersistentEdit {
         if !self.can_redo() {
             return false;
         }
-        self.doc
-            .revert_to(&self.history[self.head + 1].frontier)
-            .expect("revert to a recorded checkpoint");
+        if self.doc.revert_to(&self.history[self.head + 1].frontier).is_err() {
+            return false;
+        }
         self.head += 1;
         true
     }
@@ -276,6 +286,7 @@ impl PersistentEdit {
                 })
                 .collect(),
             undo_head: self.head,
+            counters: self.doc.counter_hwm(),
             snapshot: self.snapshot(),
         };
         serde_json::to_vec_pretty(&on_disk).expect("edit store serialises")
@@ -303,6 +314,10 @@ impl PersistentEdit {
             .map_err(|e| StoreError::Corrupt(format!("crdt base64: {e}")))?;
         doc.import(&crdt)
             .map_err(|e| StoreError::Corrupt(format!("crdt import: {e}")))?;
+        // Restore the true minted-id counter marks: `import` reseeds them from
+        // the snapshot, which undo may have reverted below the high-water mark
+        // (REQ-080). This must run AFTER import.
+        doc.restore_counter_hwm(on_disk.counters);
         let mut history = on_disk
             .undo_history
             .into_iter()
@@ -402,6 +417,32 @@ mod tests {
 
     fn ids(e: &PersistentEdit) -> Vec<String> {
         e.snapshot().shots.into_iter().map(|s| s.id).collect()
+    }
+
+    /// Regression (REQ-080): a cursor undo reverts the in-document counter map,
+    /// so without persisting the counter high-water marks a reload re-minted the
+    /// tombstoned id. The id must stay unique across undo + reload.
+    #[test]
+    fn no_id_reuse_after_undo_and_reload() {
+        let mut e = PersistentEdit::create("p", ActorId(0x42));
+        let id1 = e.add_shot("src-001", words(0, 10), None).unwrap();
+        assert!(e.undo());
+        let mut e = PersistentEdit::from_bytes(&e.to_bytes(), ActorId(0x42)).unwrap();
+        let id2 = e.add_shot("src-002", words(0, 10), None).unwrap();
+        assert_ne!(id1, id2, "a tombstoned id must never be re-minted after undo + reload");
+    }
+
+    /// Regression: a no-op mutation (move/remove of a missing shot) must not
+    /// record a phantom undo step — one undo reverts the one real edit.
+    #[test]
+    fn no_op_mutation_records_no_undo_step() {
+        let mut e = PersistentEdit::create("p", ActorId(7));
+        e.add_shot("src-001", words(0, 10), None).unwrap();
+        e.remove_shot("does-not-exist", None);
+        e.move_shot("does-not-exist", 0, None);
+        assert!(e.undo(), "one undo available");
+        assert_eq!(ids(&e).len(), 0, "a single undo reverts the real add (no phantom steps)");
+        assert!(!e.undo(), "nothing more to undo");
     }
 
     #[test]

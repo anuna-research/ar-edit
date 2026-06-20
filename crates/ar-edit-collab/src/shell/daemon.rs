@@ -109,6 +109,11 @@ fn apply(store: &mut PersistentEdit, req: Request) -> Response {
             Err(e) => Response::Error { message: e.to_string() },
         },
         Request::AddNote { shot_id, text } => {
+            if !store.has_shot(&shot_id) {
+                return Response::Error {
+                    message: format!("shot '{shot_id}' not found"),
+                };
+            }
             store.add_note_text(&shot_id, &text, None);
             Response::Ok
         }
