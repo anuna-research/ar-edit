@@ -126,6 +126,11 @@ impl ChannelGuard {
         self.failures >= self.max
     }
 
+    /// The configured failure threshold (NFR-014).
+    pub fn max(&self) -> u32 {
+        self.max
+    }
+
     /// Record the outcome of an attempt; returns `LockedOut` once the limit is
     /// reached.
     pub fn record(&mut self, ok: bool) -> Result<(), PairingError> {

@@ -435,9 +435,12 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 if let Err(e) = doc.save(&path) {
                     #[cfg(unix)]
                     if let Some(id) = minted {
-                        forward_to_daemon(
-                            ar_edit_collab::shell::daemon::Request::RemoveShot { shot_id: id },
-                        );
+                        // Undo the just-recorded live add (top of the daemon's
+                        // undo stack) so it leaves no shot AND no stray undo
+                        // entry — a plain remove would do neither cleanly.
+                        forward_to_daemon(ar_edit_collab::shell::daemon::Request::Undo {
+                            tag: ar_edit_collab::shell::daemon::op_tag("add_shot", &id),
+                        });
                     }
                     return Err(anyhow::Error::new(CliError::system(e)));
                 }
@@ -650,6 +653,26 @@ fn forward_to_daemon(req: ar_edit_collab::shell::daemon::Request) {
     }
 }
 
+/// Send `req` to a live daemon and return its response. `None` means no daemon is
+/// running (socket absent) or the round-trip failed — the caller then treats the
+/// operation as durable-only. Used by undo/redo to *gate* the on-disk change on
+/// the live revert (REQ-090), unlike fire-and-forget [`forward_to_daemon`].
+#[cfg(unix)]
+fn daemon_request(
+    req: ar_edit_collab::shell::daemon::Request,
+) -> Option<ar_edit_collab::shell::daemon::Response> {
+    use ar_edit_collab::shell::daemon::DaemonClient;
+    let sock = session_socket();
+    if !sock.exists() {
+        return None;
+    }
+    let rt = tokio::runtime::Runtime::new().ok()?;
+    rt.block_on(async move {
+        let mut client = DaemonClient::connect(&sock).await.ok()?;
+        client.request(&req).await.ok()
+    })
+}
+
 /// If a session daemon is live, forward an AddShot and return the daemon-minted,
 /// actor-scoped id (REQ-090); `None` means no daemon (or the request failed) and
 /// the caller mints its own id. Forwarding the add first and adopting the
@@ -759,18 +782,46 @@ fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
     let path = edit_path(edit);
     let mut doc = load_edit(edit)?;
 
+    // Identify the op an undo would revert (without mutating yet) so the live
+    // session can be asked to revert *exactly that op* first. Binding the live
+    // undo to the specific op prevents the daemon from popping an unrelated op
+    // (another client's IPC edit, a rollback) and diverging from disk (REQ-090).
+    #[cfg(unix)]
+    let undo_tag = (doc.head >= 0).then(|| {
+        let (kind, shot_id) = op_summary(&doc.ops[doc.head as usize].op);
+        ar_edit_collab::shell::daemon::op_tag(kind, shot_id)
+    });
+
+    // Gate on the live session: if a daemon is attached it must revert the
+    // matching op first. If it cannot (diverged history, or empty after a
+    // restart), refuse rather than commit only the durable side (REQ-086/090).
+    #[cfg(unix)]
+    if let Some(tag) = &undo_tag {
+        use ar_edit_collab::shell::daemon::{Request, Response};
+        if let Some(resp) = daemon_request(Request::Undo { tag: tag.clone() }) {
+            if !matches!(resp, Response::Reverted { reverted: true }) {
+                return Err(anyhow::Error::new(CliError::user(
+                    "a live session is attached but has no matching operation to revert \
+                     (the live document may have diverged or the daemon was restarted); \
+                     the durable edit was left unchanged",
+                )));
+            }
+        }
+    }
+
     let undone = doc
         .undo()
         .map_err(|e| anyhow::Error::new(CliError::user(e)))?
         .clone();
-    doc.save(&path).system_err()?;
-
-    // Mirror the undo onto the live session via the daemon's CRDT-aware
-    // LocalUndo (REQ-086/090): it reverts only this actor's last operation,
-    // transformed against any concurrent remote edit, so it never clobbers a
-    // peer's winning write the way a blind inverse LWW write would.
-    #[cfg(unix)]
-    forward_to_daemon(ar_edit_collab::shell::daemon::Request::Undo);
+    if let Err(e) = doc.save(&path) {
+        // The live side already reverted but the durable save failed; replay it
+        // live so both sides stay consistent (mirror of the add rollback).
+        #[cfg(unix)]
+        if let Some(tag) = undo_tag {
+            forward_to_daemon(ar_edit_collab::shell::daemon::Request::Redo { tag });
+        }
+        return Err(anyhow::Error::new(CliError::system(e)));
+    }
 
     if cli.json {
         let output = serde_json::json!({
@@ -793,16 +844,41 @@ fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
     let path = edit_path(edit);
     let mut doc = load_edit(edit)?;
 
+    // The op a redo would re-apply is the one just past the head.
+    #[cfg(unix)]
+    let redo_tag = (doc.head + 1 < doc.ops.len() as i32).then(|| {
+        let (kind, shot_id) = op_summary(&doc.ops[(doc.head + 1) as usize].op);
+        ar_edit_collab::shell::daemon::op_tag(kind, shot_id)
+    });
+
+    // Gate the durable redo on the live session re-applying the matching op
+    // (inverse of the undo path, REQ-086/090).
+    #[cfg(unix)]
+    if let Some(tag) = &redo_tag {
+        use ar_edit_collab::shell::daemon::{Request, Response};
+        if let Some(resp) = daemon_request(Request::Redo { tag: tag.clone() }) {
+            if !matches!(resp, Response::Reverted { reverted: true }) {
+                return Err(anyhow::Error::new(CliError::user(
+                    "a live session is attached but has no matching operation to redo \
+                     (the live document may have diverged or the daemon was restarted); \
+                     the durable edit was left unchanged",
+                )));
+            }
+        }
+    }
+
     let redone = doc
         .redo()
         .map_err(|e| anyhow::Error::new(CliError::user(e)))?
         .clone();
-    doc.save(&path).system_err()?;
-
-    // Replay the redo onto the live session via the daemon's LocalUndo, the
-    // inverse of the undo path (REQ-086/090).
-    #[cfg(unix)]
-    forward_to_daemon(ar_edit_collab::shell::daemon::Request::Redo);
+    if let Err(e) = doc.save(&path) {
+        // Durable save failed after the live re-apply; undo it live again.
+        #[cfg(unix)]
+        if let Some(tag) = redo_tag {
+            forward_to_daemon(ar_edit_collab::shell::daemon::Request::Undo { tag });
+        }
+        return Err(anyhow::Error::new(CliError::system(e)));
+    }
 
     if cli.json {
         let output = serde_json::json!({

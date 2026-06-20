@@ -148,24 +148,48 @@ async fn add(c: &mut DaemonClient) -> String {
     }
 }
 
-/// Regression (P1, REQ-086): undo/redo go through the daemon's CRDT-aware
-/// LocalUndo, reverting only this actor's most recent change.
+/// Send a guarded undo for `kind:shot_id` and return whether it reverted.
+async fn undo_op(c: &mut DaemonClient, kind: &str, shot_id: &str) -> bool {
+    let tag = format!("{kind}:{shot_id}");
+    match c.request(&Request::Undo { tag }).await.unwrap() {
+        Response::Reverted { reverted } => reverted,
+        other => panic!("expected reverted, got {other:?}"),
+    }
+}
+
+async fn redo_op(c: &mut DaemonClient, kind: &str, shot_id: &str) -> bool {
+    let tag = format!("{kind}:{shot_id}");
+    match c.request(&Request::Redo { tag }).await.unwrap() {
+        Response::Reverted { reverted } => reverted,
+        other => panic!("expected reverted, got {other:?}"),
+    }
+}
+
+/// Regression (P1, REQ-086): a guarded undo/redo reverts only the matching op,
+/// and a tag that is NOT on top of the stack is refused (no mutation) so the
+/// daemon never pops an unrelated operation (REQ-090).
 #[tokio::test]
-async fn daemon_undo_redo_reverts_last_local_change() {
+async fn daemon_guarded_undo_redo() {
     let daemon = Daemon::bind(sock("undo"), CollabDoc::new(ActorId(5))).unwrap();
     let path = daemon.socket_path().to_path_buf();
     tokio::spawn(daemon.run());
     let mut c = DaemonClient::connect(&path).await.unwrap();
 
     let a = add(&mut c).await;
-    let _b = add(&mut c).await;
+    let b = add(&mut c).await;
     assert_eq!(snapshot_ids(&mut c).await.len(), 2);
 
-    assert!(matches!(c.request(&Request::Undo).await.unwrap(), Response::Ok));
-    assert_eq!(snapshot_ids(&mut c).await, vec![a.clone()], "undo reverts only the last add");
+    // A tag that is not on top (the older add `a`) must be refused.
+    assert!(!undo_op(&mut c, "add_shot", &a).await, "non-top tag must not undo");
+    assert_eq!(snapshot_ids(&mut c).await.len(), 2, "refused undo changed nothing");
 
-    assert!(matches!(c.request(&Request::Redo).await.unwrap(), Response::Ok));
-    assert_eq!(snapshot_ids(&mut c).await.len(), 2, "redo reinstates it");
+    // The matching top tag (`b`) reverts exactly that op.
+    assert!(undo_op(&mut c, "add_shot", &b).await, "matching tag reverts");
+    assert_eq!(snapshot_ids(&mut c).await, vec![a.clone()]);
+
+    // Redo of the same op reinstates it.
+    assert!(redo_op(&mut c, "add_shot", &b).await, "matching tag redoes");
+    assert_eq!(snapshot_ids(&mut c).await.len(), 2);
 }
 
 /// Regression (P1): undoing the removal of a NON-final shot restores it at its
@@ -182,19 +206,52 @@ async fn daemon_undo_of_remove_restores_position() {
     let d = add(&mut c).await;
     assert_eq!(snapshot_ids(&mut c).await, vec![a.clone(), b.clone(), d.clone()]);
 
-    // Remove the MIDDLE shot, then undo.
+    // Remove the MIDDLE shot, then undo it by tag.
     assert!(matches!(
         c.request(&Request::RemoveShot { shot_id: b.clone() }).await.unwrap(),
         Response::Ok
     ));
     assert_eq!(snapshot_ids(&mut c).await, vec![a.clone(), d.clone()]);
 
-    assert!(matches!(c.request(&Request::Undo).await.unwrap(), Response::Ok));
+    assert!(undo_op(&mut c, "remove_shot", &b).await);
     assert_eq!(
         snapshot_ids(&mut c).await,
         vec![a, b, d],
         "undo of a middle removal restores the shot at its original position"
     );
+}
+
+/// Regression (P1, REQ-086): after a restart the undo history is empty, so a
+/// guarded undo reports `reverted: false` instead of silently doing nothing
+/// while claiming success — the CLI relies on this to avoid committing one side.
+#[tokio::test]
+async fn daemon_undo_after_restart_reports_no_revert() {
+    let snap = std::env::temp_dir().join(format!("ar-edit-undorestart-{}.loro", std::process::id()));
+    let _ = std::fs::remove_file(&snap);
+
+    let added = {
+        let daemon = Daemon::bind_persisting(sock("ur1"), CollabDoc::new(ActorId(12)), &snap).unwrap();
+        let path = daemon.socket_path().to_path_buf();
+        let h = tokio::spawn(daemon.run());
+        let mut c = DaemonClient::connect(&path).await.unwrap();
+        let id = add(&mut c).await;
+        h.abort();
+        id
+    };
+
+    // Restart: history is empty, even though the shot is restored.
+    let doc = CollabDoc::new(ActorId(12));
+    doc.import(&std::fs::read(&snap).unwrap()).unwrap();
+    let daemon = Daemon::bind_persisting(sock("ur2"), doc, &snap).unwrap();
+    let path = daemon.socket_path().to_path_buf();
+    tokio::spawn(daemon.run());
+    let mut c = DaemonClient::connect(&path).await.unwrap();
+
+    assert!(
+        !undo_op(&mut c, "add_shot", &added).await,
+        "an undo with no live history must report reverted: false"
+    );
+    let _ = std::fs::remove_file(&snap);
 }
 
 /// Regression (P2, CON-018): a direct IPC client cannot persist an invalid range
@@ -233,23 +290,34 @@ async fn daemon_rejects_invalid_range() {
     assert_eq!(snapshot_ids(&mut c).await.len(), 1, "the shot still exists");
 }
 
-/// Regression (P2, REQ-080/084): a remote delta applied via the persisting
-/// import path is durable even with no following local IPC mutation.
+/// Regression (P1, REQ-080/084): the cloneable importer is usable *while the
+/// daemon's IPC loop runs* (run(self) consumes the daemon), applies into the
+/// same live doc an IPC client sees, and persists — so deltas received during
+/// operation are not lost on restart.
 #[tokio::test]
-async fn daemon_import_remote_persists() {
+async fn daemon_importer_services_live_sync() {
     let snap = std::env::temp_dir().join(format!("ar-edit-import-{}.loro", std::process::id()));
     let _ = std::fs::remove_file(&snap);
 
     let daemon =
         Daemon::bind_persisting(sock("import"), CollabDoc::new(ActorId(9)), &snap).unwrap();
+    let path = daemon.socket_path().to_path_buf();
+    // Obtain the importer BEFORE run() takes ownership, then start the IPC loop.
+    let importer = daemon.importer();
+    tokio::spawn(daemon.run());
+    let mut c = DaemonClient::connect(&path).await.unwrap();
 
-    // A peer produces a delta containing a new shot.
+    // A peer's delta is applied through the importer while IPC is live.
     let peer = CollabDoc::new(ActorId(99));
     peer.add_shot(&shot("remote-001"));
-    daemon.import_remote(&peer.export_snapshot()).unwrap();
+    importer.import(&peer.export_snapshot()).unwrap();
 
-    // The snapshot on disk already reflects the remote edit — a restart that
-    // reloads it would keep the shot (no local mutation was needed to flush it).
+    // The running daemon's own IPC clients see the merged remote shot...
+    assert!(
+        snapshot_ids(&mut c).await.contains(&"remote-001".to_string()),
+        "importer must apply into the same live document IPC serves"
+    );
+    // ...and it was persisted, so a restart would keep it (no IPC mutation followed).
     let reloaded = CollabDoc::new(ActorId(9));
     reloaded.import(&std::fs::read(&snap).unwrap()).unwrap();
     let ids: Vec<String> = materialise(&reloaded).shots.into_iter().map(|s| s.id).collect();

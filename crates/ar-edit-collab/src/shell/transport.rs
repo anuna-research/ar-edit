@@ -59,10 +59,11 @@ fn iroh_err<E: std::fmt::Display>(e: E) -> TransportError {
     TransportError::Iroh(e.to_string())
 }
 
-/// Default failed-pairing limit before the channel locks (NFR-014). Repeated
-/// wrong-phrase attempts against a hosting endpoint are throttled to this many
-/// online guesses before connections are refused.
-pub const DEFAULT_PAIRING_MAX_ATTEMPTS: u32 = 5;
+/// Default failed-pairing limit before the channel locks. NFR-014 sets this
+/// threshold to three failed key confirmations: an active attacker gets at most
+/// three online guesses against a hosting endpoint before connections are
+/// refused.
+pub const DEFAULT_PAIRING_MAX_ATTEMPTS: u32 = 3;
 
 /// A bound iroh endpoint for collaboration.
 pub struct Transport {
@@ -139,6 +140,11 @@ impl Transport {
     /// attempts will be refused (NFR-014).
     pub fn pairing_is_locked(&self) -> bool {
         self.pairing_guard.lock().unwrap().is_locked()
+    }
+
+    /// The configured failed-pairing threshold (NFR-014 default is 3).
+    pub fn pairing_max(&self) -> u32 {
+        self.pairing_guard.lock().unwrap().max()
     }
 
     /// This peer's CRDT actor id, derived from its iroh node public key

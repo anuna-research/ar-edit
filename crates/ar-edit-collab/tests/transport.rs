@@ -83,6 +83,14 @@ async fn spake2_over_iroh_agrees_on_matching_phrase() {
     initiator.close().await;
 }
 
+/// Regression (P2, NFR-014): the constructor default invalidation threshold is
+/// three failed confirmations (the spec value), not an ad-hoc larger number.
+#[tokio::test]
+async fn pairing_default_threshold_is_three() {
+    let t = Transport::bind_loopback().await.unwrap();
+    assert_eq!(t.pairing_max(), 3, "NFR-014 sets the default to three failed confirmations");
+}
+
 /// Regression (P1, NFR-014): the failed-pairing lockout is enforced on the
 /// responder and RETAINED across hosting attempts. With the limit reached, a
 /// retry is refused outright — no fresh connection, no fresh online guess.

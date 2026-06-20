@@ -47,12 +47,17 @@ pub enum Request {
     AddNote { shot_id: String, note: ShotNote },
     RemoveShot { shot_id: String },
     /// Undo this daemon-actor's most recent change via the CRDT-aware
-    /// [`LocalUndo`] (REQ-086). Unlike forwarding the inverse of an op, this
-    /// reverts only the local operation and is transformed against concurrent
-    /// remote edits, so it never clobbers a peer's winning write.
-    Undo,
-    /// Redo the most recently undone local change.
-    Redo,
+    /// [`LocalUndo`] (REQ-086) — but ONLY if the top of the live undo stack is
+    /// the operation identified by `tag` (`"<kind>:<shot_id>"`). This binds the
+    /// undo to the specific op the caller is reverting on disk, so an unrelated
+    /// op (another client's IPC mutation, a rollback) on top is never silently
+    /// popped, which would diverge live and durable state (REQ-090). The reply
+    /// reports whether it actually reverted so the caller can refuse to commit
+    /// only one side.
+    Undo { tag: String },
+    /// Redo the most recently undone local change, guarded by `tag` like
+    /// [`Request::Undo`].
+    Redo { tag: String },
     /// Read the materialised shot list.
     Snapshot,
     /// Lightweight status.
@@ -66,6 +71,11 @@ pub enum Response {
     Ok,
     /// A live insert succeeded; carries the daemon-minted, actor-scoped shot id.
     Added { shot_id: String },
+    /// Result of a guarded [`Request::Undo`]/[`Request::Redo`]: whether the live
+    /// document was actually reverted. `false` means the top of the stack did
+    /// not match the requested op (or there was nothing to revert) — the caller
+    /// must NOT commit the durable side either.
+    Reverted { reverted: bool },
     Snapshot { shots: Vec<Shot> },
     Status { shot_count: usize },
     Error { message: String },
@@ -128,10 +138,30 @@ fn apply(doc: &CollabDoc, req: Request) -> Response {
             shot_count: materialise(doc).shots.len(),
         },
         // Handled in `handle_client` (needs the LocalUndo); unreachable here.
-        Request::Undo | Request::Redo => Response::Error {
+        Request::Undo { .. } | Request::Redo { .. } => Response::Error {
             message: "internal: undo/redo not dispatched".into(),
         },
     }
+}
+
+/// The op-identity `(kind, shot_id)` a mutation request records on the undo
+/// stack, or `None` for non-recordable requests. `AddShot`'s id is minted during
+/// [`apply`], so it is left empty here and filled from the [`Response::Added`].
+/// The kind strings match the CLI's `op_summary`, so both sides agree on the tag.
+fn request_op_identity(req: &Request) -> Option<(&'static str, String)> {
+    match req {
+        Request::AddShot { .. } => Some(("add_shot", String::new())),
+        Request::MoveShot { shot_id, .. } => Some(("move_shot", shot_id.clone())),
+        Request::TrimShot { shot_id, .. } => Some(("trim_shot", shot_id.clone())),
+        Request::AddNote { shot_id, .. } => Some(("add_note", shot_id.clone())),
+        Request::RemoveShot { shot_id } => Some(("remove_shot", shot_id.clone())),
+        _ => None,
+    }
+}
+
+/// The canonical undo-stack tag for an operation: `"<kind>:<shot_id>"`.
+pub fn op_tag(kind: &str, shot_id: &str) -> String {
+    format!("{kind}:{shot_id}")
 }
 
 /// The session daemon: owns the live document and serves IPC clients.
@@ -213,7 +243,7 @@ impl Daemon {
 
     /// Shared handle to the live document. NOTE: mutating the doc directly
     /// through this handle bypasses snapshot persistence — prefer
-    /// [`Self::import_remote`] for received deltas so newly-merged remote edits
+    /// [`Self::importer`] for received deltas so newly-merged remote edits
     /// (and the advanced counters) survive a restart (REQ-080).
     pub fn doc(&self) -> Arc<Mutex<CollabDoc>> {
         self.doc.clone()
@@ -224,12 +254,20 @@ impl Daemon {
     /// (REQ-080/084). This is the persisting counterpart to mutating [`Self::doc`]
     /// directly.
     pub fn import_remote(&self, delta: &[u8]) -> Result<(), loro::LoroError> {
-        let doc = self.doc.lock().unwrap();
-        doc.import(delta)?;
-        if let Some(path) = self.snapshot_path.as_deref() {
-            persist_snapshot(&doc, path);
+        self.importer().import(delta)
+    }
+
+    /// A **cloneable** persisting-import handle that can be retained by a
+    /// transport receive task while the daemon's IPC loop runs (`run` consumes
+    /// the `Daemon` value, so `import_remote(&self)` alone could not service live
+    /// sync). Route received deltas through this — not the raw [`Self::doc`]
+    /// handle, which bypasses persistence — so edits merged while IPC is running
+    /// still survive a restart (REQ-080/084).
+    pub fn importer(&self) -> RemoteImporter {
+        RemoteImporter {
+            doc: self.doc.clone(),
+            snapshot_path: self.snapshot_path.clone().map(Arc::new),
         }
-        Ok(())
     }
 
     /// Serve clients until the listener closes.
@@ -261,6 +299,28 @@ fn persist_snapshot(doc: &CollabDoc, path: &Path) {
     }
 }
 
+/// A cloneable handle that imports remote CRDT deltas into the live document and
+/// persists the result, obtained from [`Daemon::importer`]. Holds the same
+/// `Arc<Mutex<CollabDoc>>` the IPC loop mutates, so remote sync and local IPC
+/// converge through the one document and every received delta is made durable.
+#[derive(Clone)]
+pub struct RemoteImporter {
+    doc: Arc<Mutex<CollabDoc>>,
+    snapshot_path: Option<Arc<PathBuf>>,
+}
+
+impl RemoteImporter {
+    /// Merge a peer's delta/snapshot and persist (REQ-080/084).
+    pub fn import(&self, delta: &[u8]) -> Result<(), loro::LoroError> {
+        let doc = self.doc.lock().unwrap();
+        doc.import(delta)?;
+        if let Some(path) = &self.snapshot_path {
+            persist_snapshot(&doc, path);
+        }
+        Ok(())
+    }
+}
+
 impl Drop for Daemon {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
@@ -281,26 +341,40 @@ async fn handle_client(
         // Recognise, then apply under the lock (no await held).
         let resp = match parse_request(&body) {
             Ok(req) => {
-                // Read-only ops need no snapshot rewrite.
-                let mutating = !matches!(
-                    req,
-                    Request::Snapshot | Request::Status | Request::Attach { .. }
-                );
                 // Hold the doc lock across the whole op so undo (which mutates
                 // the shared Loro doc) never races a concurrent IPC mutation.
                 let guard = doc.lock().unwrap();
-                let resp = match req {
-                    Request::Undo => {
-                        undo.lock().unwrap().undo();
-                        Response::Ok
+                let mut u = undo.lock().unwrap();
+                let (resp, mutated) = match req {
+                    Request::Undo { tag } => {
+                        let reverted = u.undo_if(&tag);
+                        (Response::Reverted { reverted }, reverted)
                     }
-                    Request::Redo => {
-                        undo.lock().unwrap().redo();
-                        Response::Ok
+                    Request::Redo { tag } => {
+                        let reverted = u.redo_if(&tag);
+                        (Response::Reverted { reverted }, reverted)
                     }
-                    other => apply(&guard, other),
+                    other => match request_op_identity(&other) {
+                        Some((kind, mut shot_id)) => {
+                            // Record the mutation as one tagged, grouped undo
+                            // step so a later guarded undo reverts exactly it.
+                            u.begin();
+                            let resp = apply(&guard, other);
+                            let mutated = !matches!(resp, Response::Error { .. });
+                            if let Response::Added { shot_id: ref minted } = resp {
+                                shot_id = minted.clone();
+                            }
+                            // On a validation Error nothing committed, so commit()
+                            // records no tag and the group closes empty.
+                            u.commit(op_tag(kind, &shot_id));
+                            (resp, mutated)
+                        }
+                        // Attach / Snapshot / Status: no undo step, no persist.
+                        None => (apply(&guard, other), false),
+                    },
                 };
-                if mutating {
+                drop(u);
+                if mutated {
                     if let Some(path) = snapshot_path.as_deref() {
                         persist_snapshot(&guard, path);
                     }
