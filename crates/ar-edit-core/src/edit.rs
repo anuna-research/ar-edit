@@ -208,15 +208,6 @@ impl EditDocument {
         Ok(self.snapshot.shots[idx].notes.last().unwrap())
     }
 
-    /// Record the live-session operation id for the most-recently pushed op
-    /// (SPEC-003 REQ-090), so a later `undo`/`redo` can name the exact live
-    /// operation to revert through the session daemon.
-    pub fn tag_last_op(&mut self, daemon_op_id: String) {
-        if let Some(op) = self.ops.last_mut() {
-            op.daemon_op_id = Some(daemon_op_id);
-        }
-    }
-
     // -- undo / redo ----------------------------------------------------------
 
     /// Undo the last operation: decrement head and recompute the snapshot.
@@ -333,7 +324,6 @@ impl EditDocument {
             id: self.ops.len() as u32,
             ts: Utc::now(),
             op: kind,
-            daemon_op_id: None,
         });
         self.head = (self.ops.len() - 1) as i32;
     }
