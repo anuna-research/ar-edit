@@ -869,8 +869,8 @@ Trace:
 
 ### ADR-011: Edit-Document Migration — Event-Sourced → CRDT
 
-**Status:** Proposed — **supersedes the mutation model of
-[[ADR-001-event-sourced-edits]]**
+**Status:** **Accepted** (implemented, IMPL-003) — **supersedes the mutation
+model of [[ADR-001-event-sourced-edits]]**
 
 **Context:** [[ADR-001-event-sourced-edits]] assumed a single writer and a total
 op order. Multiplayer breaks both. The non-destructive *intent* of ADR-001 must
@@ -889,6 +889,22 @@ materialised view remains the read/agent surface, so
 [[SPEC-001-transcript-video-editor#REQ-028]] (`--json`) and downstream tooling
 are unaffected. [[SPEC-001-transcript-video-editor]] REQ-046–048 require a
 version bump (tracked in [[SPEC-003-realtime-collaborative-editing#OQ-4]]).
+
+**Implementation note (IMPL-003): two undo regimes, deliberately decoupled.**
+Undo is *durable* only in the single-writer / offline case (the long-standing
+local-first norm; it is just persisting the command history). It is implemented
+as a head cursor over the [[Loro]] oplog using `revert_to`, which emits *local*
+ops to move state — staying attached/editable (unlike `checkout`, which
+detaches and rekeys the peer) and durable in the snapshot. In a *live* session
+undo is the per-actor [[Loro]] `UndoManager` and is **ephemeral / session-scoped**
+— matching every collaborative editor (Yjs, Loro, Figma, Google Docs all wipe
+the undo stack on reload and use *version history* for cross-session recovery).
+"Durable online undo" — undo coordinated across a live session and surviving
+restart — is **explicitly out of scope**; attempting it (coordinating a durable
+file cursor with a live daemon's stack) was the root of the review #5–#8
+divergence churn and is not how the field solves this. The two regimes never
+run for the same edit at once (a one-shot CLI edit operates on the file; a live
+host owns the edit — see [[SPEC-003-realtime-collaborative-editing#OQ-8]]).
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#REQ-079]]
@@ -1550,7 +1566,7 @@ artefacts introduced here.
 |---|----|----------|--------|
 | 1 | OQ-1 | De-risking spike: confirm [[Loro]] `MovableList` move/trim convergence, SPAKE2 feasibility, and 2 GB BLAKE3 content-addressing. | **Resolved 2026-06-18** — H-a/H-b/H-c PASS (`spike/oq-1/FINDINGS.md`). Transport-layer empirical run split out to OQ-7. |
 | 7 | OQ-7 | Transport-characterisation spike: real iroh pairing latency ([[SPEC-003-realtime-collaborative-editing#NFR-010]]) and iroh-blobs 2 GB network throughput / resumability ([[SPEC-003-realtime-collaborative-editing#NFR-011]]). Run on macOS, Linux, **and Windows** to confirm [[SPEC-001-transcript-video-editor#NFR-015]] (terminal backend, source-linking via [[ADR-012-cross-platform-source-linking]]) for the collaboration path. Also covers a real [[Mainline DHT]] / [[pkarr]] discovery round-trip ([[SPEC-003-realtime-collaborative-editing#ADR-013]]). | **Partially addressed** (IMPL-003): the iroh transport + content-addressed blob transfer are implemented and **loopback-tested** (`crates/ar-edit-collab`, feature `transport`; requires rustc ≥ 1.91). Remaining: real-network latency/throughput, pkarr/DHT discovery round-trip, and iroh-blobs dedup/resume. |
-| 8 | OQ-8 | Session-daemon lifecycle ([[SPEC-003-realtime-collaborative-editing#ADR-014]]): auto-start on `share`/first attach vs explicit `ar-edit daemon`; idle-shutdown policy; one-daemon-per-project vs global; socket path/permission hardening; Windows named-pipe equivalent ([[SPEC-001-transcript-video-editor#NFR-015]]); how the daemon drives remote sync (push local IPC mutations as deltas, apply remote deltas). | Open — core daemon + IPC implemented (REQ-089/090, CON-018); lifecycle/policy + remote-sync wiring to refine |
+| 8 | OQ-8 | Session-daemon lifecycle ([[SPEC-003-realtime-collaborative-editing#ADR-014]]): auto-start on `share`/first attach vs explicit `ar-edit daemon`; idle-shutdown policy; one-daemon-per-project vs global; socket path/permission hardening; Windows named-pipe equivalent ([[SPEC-001-transcript-video-editor#NFR-015]]); how the daemon drives remote sync (push local IPC mutations as deltas, apply remote deltas). | **Partially resolved** (IMPL-003) — core daemon + IPC implemented (REQ-089/090, CON-018); the on-disk edit is now the single CRDT-backed store (ADR-011) and one-shot CLI commands operate on it with durable cursor undo, so there is no longer a daemon-vs-disk store to reconcile. **Remaining:** make a live host/daemon *own* the canonical file (so a live session and one-shot commands share one store rather than two), then retire the daemon IPC op-id protocol; plus lifecycle/policy (auto-start, idle-shutdown, Windows named pipe). |
 | 2 | OQ-2 | Should lazy/on-demand media fetch be layered on full replication to let a peer start editing before a multi-GB sync finishes? | Deferred — optimisation over [[SPEC-003-realtime-collaborative-editing#ADR-010]] |
 | 3 | OQ-3 | Is the [[Rendezvous Server]] self-hosted by the user, Anuna-operated, or pluggable via config? Affects trust model and NFR-010. | **Resolved (v1.1.0)** — no dedicated server: discovery is serverless via phrase-keyed [[pkarr]] / [[Mainline DHT]] ([[SPEC-003-realtime-collaborative-editing#ADR-013]]). A pkarr HTTP relay (e.g. `relay.pkarr.org`) is configurable; the TCP rendezvous relay remains an optional DHT-blocked fallback. |
 | 4 | OQ-4 | Version-bump and `superseded` bookkeeping on [[SPEC-001-transcript-video-editor]] REQ-046–048 and [[ADR-001-event-sourced-edits]] once SPEC-003 is `implemented`. | Open — tracked, execute at Phase 3 close |
