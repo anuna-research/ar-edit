@@ -66,9 +66,9 @@ fn one_shot_commands_route_through_a_live_host() {
             .spawn()
             .expect("spawn daemon"),
     );
-    // Wait for the socket to come up.
+    // Wait for the socket to come up (generous, to tolerate parallel-test load).
     let sock = tmp.path().join(".ar-edit/session.sock");
-    for _ in 0..100 {
+    for _ in 0..500 {
         if sock.exists() {
             break;
         }
@@ -140,4 +140,41 @@ fn one_shot_mutation_fails_closed_on_dead_socket() {
         .args(["undo", "rc"])
         .assert()
         .failure();
+}
+
+/// Fail-closed on an UNRESPONSIVE host: a process that accepts the socket but
+/// never replies must not hang the command forever — the round-trip times out
+/// and the mutation aborts (file untouched). Uses a stalling listener + a short
+/// AR_EDIT_DAEMON_TIMEOUT_MS so the test stays fast.
+#[test]
+fn one_shot_mutation_fails_closed_on_unresponsive_daemon() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir(tmp.path().join("edits")).unwrap();
+    let edit_path = tmp.path().join("edits/rc.edit.json");
+    let mut store = PersistentEdit::create("rc", ActorId(1));
+    let drop_id = store.add_shot("src-001", words(), None).unwrap();
+    fs::write(&edit_path, store.to_bytes()).unwrap();
+    let before = shot_ids(&edit_path);
+
+    // A listener that accepts a connection and then stalls (never responds).
+    let ar = tmp.path().join(".ar-edit");
+    fs::create_dir_all(&ar).unwrap();
+    let listener = std::os::unix::net::UnixListener::bind(ar.join("session.sock")).unwrap();
+    let _stall = std::thread::spawn(move || {
+        if let Ok((conn, _)) = listener.accept() {
+            std::thread::sleep(Duration::from_secs(3)); // outlive the client timeout
+            drop(conn);
+        }
+    });
+
+    // The probe connects but the Status round-trip never completes → timeout →
+    // Failed → the mutation aborts without touching the file.
+    Command::cargo_bin("ar-edit")
+        .unwrap()
+        .current_dir(tmp.path())
+        .env("AR_EDIT_DAEMON_TIMEOUT_MS", "300")
+        .args(["edit", "remove-segment", "rc", "--shot", &drop_id])
+        .assert()
+        .failure();
+    assert_eq!(shot_ids(&edit_path), before, "file untouched when the host stalled");
 }

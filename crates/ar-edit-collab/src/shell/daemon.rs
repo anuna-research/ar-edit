@@ -300,7 +300,19 @@ impl DaemonClient {
         UnixStream::connect(socket_path.as_ref()).await.is_ok()
     }
 
+    /// Round-trip a request, bounded by [`request_timeout`]. A host that accepts
+    /// the socket but stalls (or sends a partial frame) must not hang the caller
+    /// forever — an expiry is a hard error so callers can fail closed (REQ-090).
     pub async fn request(&mut self, req: &Request) -> Result<Response, DaemonError> {
+        match tokio::time::timeout(request_timeout(), self.request_inner(req)).await {
+            Ok(result) => result,
+            Err(_) => Err(DaemonError::Io(
+                "daemon did not respond within the timeout".into(),
+            )),
+        }
+    }
+
+    async fn request_inner(&mut self, req: &Request) -> Result<Response, DaemonError> {
         let bytes = serde_json::to_vec(req).map_err(|e| DaemonError::Parse(e.to_string()))?;
         write_frame(&mut self.stream, &bytes).await?;
         let body = read_frame(&mut self.stream)
@@ -308,4 +320,14 @@ impl DaemonClient {
             .ok_or(DaemonError::Closed)?;
         serde_json::from_slice(&body).map_err(|e| DaemonError::Parse(e.to_string()))
     }
+}
+
+/// Deadline for a client round-trip (default 5s; override with
+/// `AR_EDIT_DAEMON_TIMEOUT_MS`, mainly for tests).
+fn request_timeout() -> std::time::Duration {
+    std::env::var("AR_EDIT_DAEMON_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(std::time::Duration::from_secs(5))
 }
