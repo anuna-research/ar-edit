@@ -35,7 +35,10 @@ async fn daemon_holds_live_state_across_clients() {
     // Client A applies an edit, then disconnects (drops).
     {
         let mut a = DaemonClient::connect(&path).await.unwrap();
-        let r = a.request(&Request::AddShot { shot: shot("shot-001") }).await.unwrap();
+        let r = a
+            .request(&Request::AddShot { op_id: "op-1".into(), shot: shot("shot-001") })
+            .await
+            .unwrap();
         // The daemon mints its own actor-scoped id (it never preserves the
         // client's sequential id, which would collide across peer daemons).
         let minted = match r {
@@ -98,7 +101,11 @@ async fn daemon_persists_and_restores_counters_across_restart() {
         let path = daemon.socket_path().to_path_buf();
         let handle = tokio::spawn(daemon.run());
         let mut c = DaemonClient::connect(&path).await.unwrap();
-        let minted = match c.request(&Request::AddShot { shot: shot("ignored") }).await.unwrap() {
+        let minted = match c
+            .request(&Request::AddShot { op_id: "op-p1".into(), shot: shot("ignored") })
+            .await
+            .unwrap()
+        {
             Response::Added { shot_id } => shot_id,
             other => panic!("expected added, got {other:?}"),
         };
@@ -121,7 +128,11 @@ async fn daemon_persists_and_restores_counters_across_restart() {
         }
         other => panic!("expected snapshot, got {other:?}"),
     }
-    let minted2 = match c2.request(&Request::AddShot { shot: shot("ignored") }).await.unwrap() {
+    let minted2 = match c2
+        .request(&Request::AddShot { op_id: "op-p2".into(), shot: shot("ignored") })
+        .await
+        .unwrap()
+    {
         Response::Added { shot_id } => shot_id,
         other => panic!("expected added, got {other:?}"),
     };
@@ -141,32 +152,35 @@ async fn snapshot_ids(c: &mut DaemonClient) -> Vec<String> {
     }
 }
 
-async fn add(c: &mut DaemonClient) -> String {
-    match c.request(&Request::AddShot { shot: shot("ignored") }).await.unwrap() {
+/// Add a shot recorded under the unique `op_id`; returns the minted shot id.
+async fn add(c: &mut DaemonClient, op_id: &str) -> String {
+    match c
+        .request(&Request::AddShot { op_id: op_id.into(), shot: shot("ignored") })
+        .await
+        .unwrap()
+    {
         Response::Added { shot_id } => shot_id,
         other => panic!("expected added, got {other:?}"),
     }
 }
 
-/// Send a guarded undo for `kind:shot_id` and return whether it reverted.
-async fn undo_op(c: &mut DaemonClient, kind: &str, shot_id: &str) -> bool {
-    let tag = format!("{kind}:{shot_id}");
-    match c.request(&Request::Undo { tag }).await.unwrap() {
+/// Send a guarded undo for the operation `op_id`; returns whether it reverted.
+async fn undo_op(c: &mut DaemonClient, op_id: &str) -> bool {
+    match c.request(&Request::Undo { tag: op_id.into() }).await.unwrap() {
         Response::Reverted { reverted } => reverted,
         other => panic!("expected reverted, got {other:?}"),
     }
 }
 
-async fn redo_op(c: &mut DaemonClient, kind: &str, shot_id: &str) -> bool {
-    let tag = format!("{kind}:{shot_id}");
-    match c.request(&Request::Redo { tag }).await.unwrap() {
+async fn redo_op(c: &mut DaemonClient, op_id: &str) -> bool {
+    match c.request(&Request::Redo { tag: op_id.into() }).await.unwrap() {
         Response::Reverted { reverted } => reverted,
         other => panic!("expected reverted, got {other:?}"),
     }
 }
 
 /// Regression (P1, REQ-086): a guarded undo/redo reverts only the matching op,
-/// and a tag that is NOT on top of the stack is refused (no mutation) so the
+/// and an op id that is NOT on top of the stack is refused (no mutation) so the
 /// daemon never pops an unrelated operation (REQ-090).
 #[tokio::test]
 async fn daemon_guarded_undo_redo() {
@@ -175,21 +189,48 @@ async fn daemon_guarded_undo_redo() {
     tokio::spawn(daemon.run());
     let mut c = DaemonClient::connect(&path).await.unwrap();
 
-    let a = add(&mut c).await;
-    let b = add(&mut c).await;
+    let a = add(&mut c, "op-a").await;
+    let _b = add(&mut c, "op-b").await;
     assert_eq!(snapshot_ids(&mut c).await.len(), 2);
 
-    // A tag that is not on top (the older add `a`) must be refused.
-    assert!(!undo_op(&mut c, "add_shot", &a).await, "non-top tag must not undo");
+    // An op id that is not on top (the older add `op-a`) must be refused.
+    assert!(!undo_op(&mut c, "op-a").await, "non-top op id must not undo");
     assert_eq!(snapshot_ids(&mut c).await.len(), 2, "refused undo changed nothing");
 
-    // The matching top tag (`b`) reverts exactly that op.
-    assert!(undo_op(&mut c, "add_shot", &b).await, "matching tag reverts");
+    // The matching top op id (`op-b`) reverts exactly that op.
+    assert!(undo_op(&mut c, "op-b").await, "matching op id reverts");
     assert_eq!(snapshot_ids(&mut c).await, vec![a.clone()]);
 
     // Redo of the same op reinstates it.
-    assert!(redo_op(&mut c, "add_shot", &b).await, "matching tag redoes");
+    assert!(redo_op(&mut c, "op-b").await, "matching op id redoes");
     assert_eq!(snapshot_ids(&mut c).await.len(), 2);
+}
+
+/// Regression (P1): two operations of the SAME kind on the SAME shot (e.g. two
+/// trims) carry DISTINCT op ids, so undoing the durable (deeper) one is refused
+/// while an unrelated trim is on top — a "<kind>:<shot>" tag would wrongly match
+/// the top and revert the unrelated op, recreating the divergence (REQ-090).
+#[tokio::test]
+async fn daemon_distinct_op_ids_prevent_wrong_undo() {
+    let daemon = Daemon::bind(sock("collide"), CollabDoc::new(ActorId(15))).unwrap();
+    let path = daemon.socket_path().to_path_buf();
+    tokio::spawn(daemon.run());
+    let mut c = DaemonClient::connect(&path).await.unwrap();
+
+    let s = add(&mut c, "op-add").await;
+    // The caller's trim, then an unrelated client's trim of the SAME shot.
+    let trim = |op: &str, to: u32| Request::TrimShot {
+        op_id: op.into(),
+        shot_id: s.clone(),
+        range: ShotRange::Words { from: 0, to },
+    };
+    assert!(matches!(c.request(&trim("op-trim-1", 5)).await.unwrap(), Response::Ok));
+    assert!(matches!(c.request(&trim("op-trim-2", 7)).await.unwrap(), Response::Ok));
+
+    // Undoing op-trim-1 (NOT on top) is refused — op-trim-2 is not touched.
+    assert!(!undo_op(&mut c, "op-trim-1").await, "deeper trim must not undo out of order");
+    // The top op id reverts correctly.
+    assert!(undo_op(&mut c, "op-trim-2").await, "top trim reverts");
 }
 
 /// Regression (P1): undoing the removal of a NON-final shot restores it at its
@@ -201,19 +242,21 @@ async fn daemon_undo_of_remove_restores_position() {
     tokio::spawn(daemon.run());
     let mut c = DaemonClient::connect(&path).await.unwrap();
 
-    let a = add(&mut c).await;
-    let b = add(&mut c).await;
-    let d = add(&mut c).await;
+    let a = add(&mut c, "op-a").await;
+    let b = add(&mut c, "op-b").await;
+    let d = add(&mut c, "op-d").await;
     assert_eq!(snapshot_ids(&mut c).await, vec![a.clone(), b.clone(), d.clone()]);
 
-    // Remove the MIDDLE shot, then undo it by tag.
+    // Remove the MIDDLE shot, then undo it by op id.
     assert!(matches!(
-        c.request(&Request::RemoveShot { shot_id: b.clone() }).await.unwrap(),
+        c.request(&Request::RemoveShot { op_id: "op-rm-b".into(), shot_id: b.clone() })
+            .await
+            .unwrap(),
         Response::Ok
     ));
     assert_eq!(snapshot_ids(&mut c).await, vec![a.clone(), d.clone()]);
 
-    assert!(undo_op(&mut c, "remove_shot", &b).await);
+    assert!(undo_op(&mut c, "op-rm-b").await);
     assert_eq!(
         snapshot_ids(&mut c).await,
         vec![a, b, d],
@@ -234,9 +277,9 @@ async fn daemon_undo_after_restart_reports_no_revert() {
         let path = daemon.socket_path().to_path_buf();
         let h = tokio::spawn(daemon.run());
         let mut c = DaemonClient::connect(&path).await.unwrap();
-        let id = add(&mut c).await;
+        let _id = add(&mut c, "op-x").await;
         h.abort();
-        id
+        "op-x".to_string()
     };
 
     // Restart: history is empty, even though the shot is restored.
@@ -248,7 +291,7 @@ async fn daemon_undo_after_restart_reports_no_revert() {
     let mut c = DaemonClient::connect(&path).await.unwrap();
 
     assert!(
-        !undo_op(&mut c, "add_shot", &added).await,
+        !undo_op(&mut c, &added).await,
         "an undo with no live history must report reverted: false"
     );
     let _ = std::fs::remove_file(&snap);
@@ -271,18 +314,25 @@ async fn daemon_rejects_invalid_range() {
         notes: vec![],
     };
     assert!(
-        matches!(c.request(&Request::AddShot { shot: zero }).await.unwrap(), Response::Error { .. }),
+        matches!(
+            c.request(&Request::AddShot { op_id: "op-zero".into(), shot: zero }).await.unwrap(),
+            Response::Error { .. }
+        ),
         "zero-length add must be rejected"
     );
     assert_eq!(snapshot_ids(&mut c).await.len(), 0, "no shot was added");
 
     // Inverted range on trim of a valid shot → rejected, range unchanged.
-    let id = add(&mut c).await;
+    let id = add(&mut c, "op-valid").await;
     assert!(
         matches!(
-            c.request(&Request::TrimShot { shot_id: id, range: ShotRange::Words { from: 10, to: 3 } })
-                .await
-                .unwrap(),
+            c.request(&Request::TrimShot {
+                op_id: "op-bad-trim".into(),
+                shot_id: id,
+                range: ShotRange::Words { from: 10, to: 3 }
+            })
+            .await
+            .unwrap(),
             Response::Error { .. }
         ),
         "inverted trim must be rejected"

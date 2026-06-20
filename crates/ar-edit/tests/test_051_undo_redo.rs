@@ -99,6 +99,41 @@ fn undo_reverts_last_op_json() {
     assert_eq!(json["undone_op"]["op"], "add_shot");
 }
 
+/// Regression (P1, REQ-090): when an op is live-tracked (`daemon_op_id` set) and
+/// the daemon socket exists but the round-trip fails, `undo` must fail closed —
+/// abort without reverting the durable edit — rather than mistaking the failure
+/// for "no daemon" and reverting only disk.
+#[cfg(unix)]
+#[test]
+fn undo_fails_closed_on_daemon_round_trip_error() {
+    let (tmp, edit_path) = setup_project("rough-cut");
+    let mut doc = EditDocument::create("rough-cut");
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    // Mark the op as live-tracked so the undo gate engages.
+    doc.ops.last_mut().unwrap().daemon_op_id = Some("op-live-1".into());
+    doc.save(&edit_path).unwrap();
+
+    // A socket path that exists but is not a live daemon: connecting fails, which
+    // must be treated as a failed round-trip (fail closed), NOT "no daemon".
+    let ar = tmp.path().join(".ar-edit");
+    fs::create_dir_all(&ar).unwrap();
+    fs::write(ar.join("session.sock"), b"not a real socket").unwrap();
+
+    let output = ar_edit()
+        .current_dir(tmp.path())
+        .args(["undo", "rough-cut"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "undo must fail closed when the daemon round-trip fails"
+    );
+    // The durable edit was left untouched (head still points at the op).
+    let loaded = EditDocument::load(&edit_path).unwrap();
+    assert_eq!(loaded.head, 0, "durable edit must be unchanged after a failed-closed undo");
+}
+
 #[test]
 fn undo_multiple_times() {
     let (tmp, edit_path) = setup_project("rough-cut");

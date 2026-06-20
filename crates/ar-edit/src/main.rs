@@ -413,19 +413,27 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 }
 
                 // If a session daemon is live, let it mint the canonical
-                // actor-scoped id and adopt it for the persisted/reported shot,
-                // so later id-keyed ops (move/trim/note/remove) target the same
-                // live shot (REQ-090). Otherwise mint the usual sequential id.
+                // actor-scoped id (under a unique op id) and adopt it for the
+                // persisted/reported shot, so later id-keyed ops (move/trim/
+                // note/remove) and undo target the same live shot (REQ-090).
+                // Otherwise mint the usual sequential id. Fails closed if a
+                // daemon is present but the round-trip errors.
                 #[cfg(unix)]
-                let minted = daemon_add_shot(&args.source, &range);
+                let op_id = new_op_id();
+                #[cfg(unix)]
+                let minted = daemon_add_shot(&op_id, &args.source, &range)?;
                 #[cfg(not(unix))]
                 let minted: Option<String> = None;
 
-                let shot = match &minted {
-                    Some(id) => doc.add_shot_with_id(id.clone(), &args.source, range)?,
-                    None => doc.add_shot(&args.source, range)?,
+                let shot_id = match &minted {
+                    Some(id) => doc.add_shot_with_id(id.clone(), &args.source, range)?.id.clone(),
+                    None => doc.add_shot(&args.source, range)?.id.clone(),
                 };
-                let shot_id = shot.id.clone();
+                // Persist the live op id so a later undo names this exact op.
+                #[cfg(unix)]
+                if minted.is_some() {
+                    doc.tag_last_op(op_id.clone());
+                }
 
                 // The live daemon already committed (and persisted) the add. If
                 // the durable on-disk save now fails, roll the live add back so
@@ -434,12 +442,12 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 // (REQ-090).
                 if let Err(e) = doc.save(&path) {
                     #[cfg(unix)]
-                    if let Some(id) = minted {
+                    if minted.is_some() {
                         // Undo the just-recorded live add (top of the daemon's
                         // undo stack) so it leaves no shot AND no stray undo
                         // entry — a plain remove would do neither cleanly.
                         forward_to_daemon(ar_edit_collab::shell::daemon::Request::Undo {
-                            tag: ar_edit_collab::shell::daemon::op_tag("add_shot", &id),
+                            tag: op_id.clone(),
                         });
                     }
                     return Err(anyhow::Error::new(CliError::system(e)));
@@ -459,12 +467,24 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 let path = edit_path(edit);
                 let mut doc = EditDocument::load(&path)?;
                 doc.move_shot(shot, *position as usize)?;
+                // When a daemon is live, mint a unique op id, persist it with the
+                // durable op, and forward the mutation under it so a later undo
+                // can name this exact live op (REQ-090).
+                #[cfg(unix)]
+                let op_id = session_socket().exists().then(new_op_id);
+                #[cfg(unix)]
+                if let Some(id) = &op_id {
+                    doc.tag_last_op(id.clone());
+                }
                 doc.save(&path)?;
                 #[cfg(unix)]
-                forward_to_daemon(ar_edit_collab::shell::daemon::Request::MoveShot {
-                    shot_id: shot.clone(),
-                    to: *position as usize,
-                });
+                if let Some(id) = op_id {
+                    forward_to_daemon(ar_edit_collab::shell::daemon::Request::MoveShot {
+                        op_id: id,
+                        shot_id: shot.clone(),
+                        to: *position as usize,
+                    });
+                }
                 if cli.json {
                     println!("{}", serde_json::to_string_pretty(&doc)?);
                 } else {
@@ -476,11 +496,20 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 let path = edit_path(edit);
                 let mut doc = EditDocument::load(&path)?;
                 doc.remove_shot(shot)?;
+                #[cfg(unix)]
+                let op_id = session_socket().exists().then(new_op_id);
+                #[cfg(unix)]
+                if let Some(id) = &op_id {
+                    doc.tag_last_op(id.clone());
+                }
                 doc.save(&path)?;
                 #[cfg(unix)]
-                forward_to_daemon(ar_edit_collab::shell::daemon::Request::RemoveShot {
-                    shot_id: shot.clone(),
-                });
+                if let Some(id) = op_id {
+                    forward_to_daemon(ar_edit_collab::shell::daemon::Request::RemoveShot {
+                        op_id: id,
+                        shot_id: shot.clone(),
+                    });
+                }
                 if cli.json {
                     println!("{}", serde_json::to_string_pretty(&doc)?);
                 } else {
@@ -519,12 +548,21 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 #[cfg(unix)]
                 let range_for_daemon = range.clone();
                 doc.trim_shot(&args.shot, range)?;
+                #[cfg(unix)]
+                let op_id = session_socket().exists().then(new_op_id);
+                #[cfg(unix)]
+                if let Some(id) = &op_id {
+                    doc.tag_last_op(id.clone());
+                }
                 doc.save(&path)?;
                 #[cfg(unix)]
-                forward_to_daemon(ar_edit_collab::shell::daemon::Request::TrimShot {
-                    shot_id: args.shot.clone(),
-                    range: range_for_daemon,
-                });
+                if let Some(id) = op_id {
+                    forward_to_daemon(ar_edit_collab::shell::daemon::Request::TrimShot {
+                        op_id: id,
+                        shot_id: args.shot.clone(),
+                        range: range_for_daemon,
+                    });
+                }
                 if cli.json {
                     println!("{}", serde_json::to_string_pretty(&doc)?);
                 } else {
@@ -653,54 +691,88 @@ fn forward_to_daemon(req: ar_edit_collab::shell::daemon::Request) {
     }
 }
 
-/// Send `req` to a live daemon and return its response. `None` means no daemon is
-/// running (socket absent) or the round-trip failed — the caller then treats the
-/// operation as durable-only. Used by undo/redo to *gate* the on-disk change on
-/// the live revert (REQ-090), unlike fire-and-forget [`forward_to_daemon`].
+/// Outcome of a daemon round-trip, distinguishing an absent daemon from a failed
+/// round-trip so callers can fail closed on the latter (a transient IPC failure
+/// must not be mistaken for "no daemon" and silently modify only disk — REQ-090).
 #[cfg(unix)]
-fn daemon_request(
-    req: ar_edit_collab::shell::daemon::Request,
-) -> Option<ar_edit_collab::shell::daemon::Response> {
+enum DaemonOutcome {
+    /// No daemon is running (socket absent) — proceed durable-only.
+    Absent,
+    /// The socket exists but connecting/requesting failed — fail closed.
+    Failed,
+    /// The daemon answered.
+    Responded(ar_edit_collab::shell::daemon::Response),
+}
+
+/// Send `req` to a live daemon, distinguishing absent / failed / responded.
+#[cfg(unix)]
+fn daemon_call(req: ar_edit_collab::shell::daemon::Request) -> DaemonOutcome {
     use ar_edit_collab::shell::daemon::DaemonClient;
     let sock = session_socket();
     if !sock.exists() {
-        return None;
+        return DaemonOutcome::Absent;
     }
-    let rt = tokio::runtime::Runtime::new().ok()?;
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(_) => return DaemonOutcome::Failed,
+    };
     rt.block_on(async move {
-        let mut client = DaemonClient::connect(&sock).await.ok()?;
-        client.request(&req).await.ok()
+        match DaemonClient::connect(&sock).await {
+            Ok(mut client) => match client.request(&req).await {
+                Ok(resp) => DaemonOutcome::Responded(resp),
+                Err(_) => DaemonOutcome::Failed,
+            },
+            Err(_) => DaemonOutcome::Failed,
+        }
     })
 }
 
-/// If a session daemon is live, forward an AddShot and return the daemon-minted,
-/// actor-scoped id (REQ-090); `None` means no daemon (or the request failed) and
-/// the caller mints its own id. Forwarding the add first and adopting the
-/// returned id keeps the on-disk document and the live CRDT referring to the
-/// same shot, so subsequent id-keyed ops converge instead of diverging.
+/// A unique id for one durable operation, used as its live-session undo tag. A
+/// "<kind>:<shot>" tag is not unique (two trims of one shot collide); this is.
+/// One CLI invocation performs one mutation, so process id + nanos + a counter
+/// is globally unique across the session.
 #[cfg(unix)]
-fn daemon_add_shot(source: &str, range: &ShotRange) -> Option<String> {
-    use ar_edit_collab::shell::daemon::{DaemonClient, Request, Response};
-    let sock = session_socket();
-    if !sock.exists() {
-        return None;
-    }
-    let rt = tokio::runtime::Runtime::new().ok()?;
-    let source = source.to_string();
-    let range = range.clone();
-    rt.block_on(async move {
-        let mut client = DaemonClient::connect(&sock).await.ok()?;
-        let shot = ar_edit_core::models::Shot {
-            id: String::new(),
-            source,
-            range,
-            notes: vec![],
-        };
-        match client.request(&Request::AddShot { shot }).await.ok()? {
-            Response::Added { shot_id } => Some(shot_id),
-            _ => None,
+fn new_op_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{:x}-{:x}-{:x}", std::process::id(), nanos, seq)
+}
+
+/// If a session daemon is live, forward an AddShot under `op_id` and return the
+/// daemon-minted, actor-scoped id (REQ-090). `Ok(None)` means no daemon (mint
+/// locally); `Err` means the daemon is present but the round-trip (or the
+/// daemon) failed — the caller fails closed rather than diverging. Adopting the
+/// returned id keeps the on-disk document and the live CRDT referring to the
+/// same shot.
+#[cfg(unix)]
+fn daemon_add_shot(op_id: &str, source: &str, range: &ShotRange) -> anyhow::Result<Option<String>> {
+    use ar_edit_collab::shell::daemon::{Request, Response};
+    let shot = ar_edit_core::models::Shot {
+        id: String::new(),
+        source: source.to_string(),
+        range: range.clone(),
+        notes: vec![],
+    };
+    match daemon_call(Request::AddShot {
+        op_id: op_id.to_string(),
+        shot,
+    }) {
+        DaemonOutcome::Absent => Ok(None),
+        DaemonOutcome::Responded(Response::Added { shot_id }) => Ok(Some(shot_id)),
+        DaemonOutcome::Responded(Response::Error { message }) => {
+            Err(anyhow::Error::new(CliError::user(message)))
         }
-    })
+        DaemonOutcome::Responded(_) => Ok(None),
+        DaemonOutcome::Failed => Err(anyhow::Error::new(CliError::system(
+            "session daemon round-trip failed; aborting to keep durable and live state consistent",
+        ))),
+    }
 }
 
 /// Return a human-readable label and the affected shot ID for an op.
@@ -782,28 +854,39 @@ fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
     let path = edit_path(edit);
     let mut doc = load_edit(edit)?;
 
-    // Identify the op an undo would revert (without mutating yet) so the live
-    // session can be asked to revert *exactly that op* first. Binding the live
-    // undo to the specific op prevents the daemon from popping an unrelated op
+    // The op an undo would revert carries the unique live op id it was recorded
+    // under (`None` if it was never forwarded to a daemon). Binding the live
+    // undo to that exact op id prevents the daemon from popping an unrelated op
     // (another client's IPC edit, a rollback) and diverging from disk (REQ-090).
     #[cfg(unix)]
-    let undo_tag = (doc.head >= 0).then(|| {
-        let (kind, shot_id) = op_summary(&doc.ops[doc.head as usize].op);
-        ar_edit_collab::shell::daemon::op_tag(kind, shot_id)
-    });
+    let undo_tag: Option<String> = (doc.head >= 0)
+        .then(|| doc.ops[doc.head as usize].daemon_op_id.clone())
+        .flatten();
 
-    // Gate on the live session: if a daemon is attached it must revert the
-    // matching op first. If it cannot (diverged history, or empty after a
-    // restart), refuse rather than commit only the durable side (REQ-086/090).
+    // Gate on the live session: if this op is live-tracked, the daemon must
+    // revert that exact op first. Refuse (without touching disk) if the daemon
+    // can't (diverged/empty history) OR if the round-trip fails — a transient
+    // IPC error must not be mistaken for "no daemon" and revert only disk
+    // (REQ-086/090).
     #[cfg(unix)]
     if let Some(tag) = &undo_tag {
         use ar_edit_collab::shell::daemon::{Request, Response};
-        if let Some(resp) = daemon_request(Request::Undo { tag: tag.clone() }) {
-            if !matches!(resp, Response::Reverted { reverted: true }) {
+        match daemon_call(Request::Undo { tag: tag.clone() }) {
+            // No daemon now: the live session is gone, so a durable-only undo
+            // diverges nothing live — proceed.
+            DaemonOutcome::Absent => {}
+            DaemonOutcome::Responded(Response::Reverted { reverted: true }) => {}
+            DaemonOutcome::Responded(_) => {
                 return Err(anyhow::Error::new(CliError::user(
                     "a live session is attached but has no matching operation to revert \
                      (the live document may have diverged or the daemon was restarted); \
                      the durable edit was left unchanged",
+                )));
+            }
+            DaemonOutcome::Failed => {
+                return Err(anyhow::Error::new(CliError::system(
+                    "session daemon round-trip failed; aborting the undo to avoid reverting \
+                     only the durable edit",
                 )));
             }
         }
@@ -844,24 +927,33 @@ fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
     let path = edit_path(edit);
     let mut doc = load_edit(edit)?;
 
-    // The op a redo would re-apply is the one just past the head.
+    // The op a redo would re-apply is the one just past the head; it carries the
+    // unique live op id it was recorded under (`None` if never daemon-tracked).
     #[cfg(unix)]
-    let redo_tag = (doc.head + 1 < doc.ops.len() as i32).then(|| {
-        let (kind, shot_id) = op_summary(&doc.ops[(doc.head + 1) as usize].op);
-        ar_edit_collab::shell::daemon::op_tag(kind, shot_id)
-    });
+    let redo_tag: Option<String> = (doc.head + 1 < doc.ops.len() as i32)
+        .then(|| doc.ops[(doc.head + 1) as usize].daemon_op_id.clone())
+        .flatten();
 
-    // Gate the durable redo on the live session re-applying the matching op
-    // (inverse of the undo path, REQ-086/090).
+    // Gate the durable redo on the live session re-applying that exact op
+    // (inverse of the undo path), failing closed on a round-trip error
+    // (REQ-086/090).
     #[cfg(unix)]
     if let Some(tag) = &redo_tag {
         use ar_edit_collab::shell::daemon::{Request, Response};
-        if let Some(resp) = daemon_request(Request::Redo { tag: tag.clone() }) {
-            if !matches!(resp, Response::Reverted { reverted: true }) {
+        match daemon_call(Request::Redo { tag: tag.clone() }) {
+            DaemonOutcome::Absent => {}
+            DaemonOutcome::Responded(Response::Reverted { reverted: true }) => {}
+            DaemonOutcome::Responded(_) => {
                 return Err(anyhow::Error::new(CliError::user(
                     "a live session is attached but has no matching operation to redo \
                      (the live document may have diverged or the daemon was restarted); \
                      the durable edit was left unchanged",
+                )));
+            }
+            DaemonOutcome::Failed => {
+                return Err(anyhow::Error::new(CliError::system(
+                    "session daemon round-trip failed; aborting the redo to avoid re-applying \
+                     only on the durable edit",
                 )));
             }
         }
@@ -1373,12 +1465,21 @@ fn cmd_note(cli: &Cli, edit: &str, shot: &str, text: &str) -> anyhow::Result<()>
             )))
         })?
         .clone();
+    #[cfg(unix)]
+    let op_id = session_socket().exists().then(new_op_id);
+    #[cfg(unix)]
+    if let Some(id) = &op_id {
+        doc.tag_last_op(id.clone());
+    }
     doc.save(&path).system_err()?;
     #[cfg(unix)]
-    forward_to_daemon(ar_edit_collab::shell::daemon::Request::AddNote {
-        shot_id: shot.to_string(),
-        note: note.clone(),
-    });
+    if let Some(id) = op_id {
+        forward_to_daemon(ar_edit_collab::shell::daemon::Request::AddNote {
+            op_id: id,
+            shot_id: shot.to_string(),
+            note: note.clone(),
+        });
+    }
 
     if cli.json {
         println!("{}", serde_json::to_string_pretty(&note)?);

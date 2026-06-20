@@ -11,39 +11,51 @@
 //!
 //! The session daemon owns ONE undo manager but serves a stream of one-shot CLI
 //! commands, direct IPC clients, and its own rollbacks. A bare "undo the last
-//! op" can therefore revert an operation the caller did not intend (e.g. a
-//! direct-IPC mutation sitting on top of the stack), diverging the live CRDT
-//! from the caller's durable, event-sourced edit. To prevent that, every
-//! recorded change carries an **op-identity tag** and undo/redo are *guarded*:
-//! they only fire when the top of the stack matches the caller's expected tag,
-//! returning `false` otherwise so the caller can refuse to commit one side.
+//! op" — or a non-unique `"<kind>:<shot>"` tag — can revert an operation the
+//! caller did not intend (two trims of the same shot share that tag), diverging
+//! the live CRDT from the caller's durable edit. Every recorded change therefore
+//! carries a globally-unique **operation id** (minted by the caller) and
+//! undo/redo are *guarded*: they only fire when the top of the stack carries the
+//! caller's exact op id, returning `false` otherwise.
 //!
-//! The tag stack is kept 1:1 with Loro's own undo stack by wrapping each
-//! recorded change in a Loro undo group (so a multi-commit request is a single
-//! undoable step) and only pushing a tag when a step was actually recorded.
+//! ## Stack alignment under eviction
+//!
+//! The tag stack is kept 1:1 with Loro's undo stack by (a) wrapping each
+//! recorded change in a Loro undo group so a multi-commit request is a single
+//! undoable step, and (b) detecting *pushes* via Loro's `on_push` callback
+//! rather than watching `undo_count()`. At the retention bound Loro evicts the
+//! oldest item as it adds a new one, so the count stays constant; a
+//! count-growth test would miss that push and the stacks would drift. Counting
+//! pushes directly — and evicting the oldest tag in lockstep — keeps the tops
+//! aligned (REQ-086).
 
 use crate::crdt::{CollabDoc, COUNTER_ORIGIN};
-use loro::UndoManager;
+use loro::{UndoItemMeta, UndoManager, UndoOrRedo};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// Retained undo depth. Loro's default is 100; a collaborative editing session
 /// can easily exceed that, and silently dropping the oldest steps would let an
 /// `undo` succeed on disk while doing nothing live. Kept generous but bounded;
-/// the tag stack below is capped to match so the two never drift (REQ-086).
+/// the tag stack below evicts in lockstep so the two never drift (REQ-086).
 const MAX_UNDO_STEPS: usize = 1000;
 
 /// Local-actor undo/redo over a [`CollabDoc`]. Must be created before the
 /// changes it should be able to undo (it tracks the doc from construction).
 pub struct LocalUndo {
     mgr: UndoManager,
-    /// Op-identity tags, one per Loro undo step, newest last. Kept aligned with
-    /// `mgr`'s undo stack so [`Self::undo_if`] can verify the top before acting.
+    /// Count of new-change pushes Loro has made onto the undo stack, maintained
+    /// by the `on_push` callback. Used to detect whether a recorded change
+    /// actually produced an undoable step even when the bounded stack is full
+    /// (where `undo_count()` no longer grows).
+    pushes: Arc<AtomicUsize>,
+    /// Op-ids, one per Loro undo step, newest last; kept aligned with `mgr`'s
+    /// undo stack (including eviction) so [`Self::undo_if`] can match the top.
     undo_tags: Vec<String>,
-    /// Tags for undone steps available to redo, newest last (mirrors `mgr`'s
-    /// redo stack; cleared when a new change is recorded, as Loro does).
+    /// Op-ids for undone steps available to redo, newest last.
     redo_tags: Vec<String>,
-    /// `undo_count()` captured at [`Self::begin`], to detect whether the grouped
-    /// change actually produced an undoable step.
-    pending_pre_count: usize,
+    /// `pushes` captured at [`Self::begin`], to detect a push during the group.
+    pending_pushes: usize,
 }
 
 impl LocalUndo {
@@ -55,11 +67,26 @@ impl LocalUndo {
         // Preserve more than Loro's default 100 steps so a long session's older
         // ops remain undoable instead of silently no-op'ing.
         mgr.set_max_undo_steps(MAX_UNDO_STEPS);
+
+        // Count only `UndoOrRedo::Undo` pushes — i.e. a *new* undoable change
+        // (Loro records these with that direction; see record_checkpoint). This
+        // fires even when the full stack evicts its oldest item, which a
+        // count-based check would miss.
+        let pushes = Arc::new(AtomicUsize::new(0));
+        let counter = pushes.clone();
+        mgr.set_on_push(Some(Box::new(move |kind, _span, _diff| {
+            if matches!(kind, UndoOrRedo::Undo) {
+                counter.fetch_add(1, Ordering::Relaxed);
+            }
+            UndoItemMeta::default()
+        })));
+
         Self {
             mgr,
+            pushes,
             undo_tags: Vec::new(),
             redo_tags: Vec::new(),
-            pending_pre_count: 0,
+            pending_pushes: 0,
         }
     }
 
@@ -67,26 +94,30 @@ impl LocalUndo {
     /// Grouping collapses a multi-commit request into ONE undoable step so the
     /// tag stack stays 1:1 with Loro's undo stack.
     pub fn begin(&mut self) {
-        self.pending_pre_count = self.mgr.undo_count();
+        self.pending_pushes = self.pushes.load(Ordering::Relaxed);
         let _ = self.mgr.group_start();
     }
 
-    /// Close the group opened by [`Self::begin`] and, if it produced a new
-    /// undoable step, record `tag` for it (clearing the redo stack, as any new
-    /// change does). A no-op mutation records nothing, keeping the stacks aligned.
-    pub fn commit(&mut self, tag: String) {
+    /// Close the group opened by [`Self::begin`]. If it produced a new undoable
+    /// step (a push was observed), record `op_id` for it — evicting the oldest
+    /// tag in lockstep with Loro's bounded stack — and clear the redo stack (as
+    /// any new change does). Returns whether a step was recorded; a no-op
+    /// mutation records nothing, keeping the stacks aligned.
+    pub fn commit(&mut self, op_id: String) -> bool {
         self.mgr.group_end();
-        if self.mgr.undo_count() > self.pending_pre_count {
-            self.undo_tags.push(tag);
-            // Match Loro's own eviction so the tag stack never outgrows it.
-            if self.undo_tags.len() > MAX_UNDO_STEPS {
+        let recorded = self.pushes.load(Ordering::Relaxed) > self.pending_pushes;
+        if recorded {
+            self.undo_tags.push(op_id);
+            // Mirror Loro's `while len > max { pop_front }` so the tops align.
+            while self.undo_tags.len() > MAX_UNDO_STEPS {
                 self.undo_tags.remove(0);
             }
             self.redo_tags.clear();
         }
+        recorded
     }
 
-    /// Undo the most recent change **iff** its tag equals `expected`. Returns
+    /// Undo the most recent change **iff** its op-id equals `expected`. Returns
     /// whether it undid. A mismatch (unrelated op on top) or an empty stack
     /// (e.g. after a restart) returns `false` without mutating, so the caller
     /// can refuse to commit the other side (REQ-086/090).
@@ -104,7 +135,7 @@ impl LocalUndo {
         }
     }
 
-    /// Redo the most recently undone change **iff** its tag equals `expected`.
+    /// Redo the most recently undone change **iff** its op-id equals `expected`.
     pub fn redo_if(&mut self, expected: &str) -> bool {
         if self.redo_tags.last().map(String::as_str) != Some(expected) {
             return false;
@@ -117,11 +148,6 @@ impl LocalUndo {
             }
             _ => false,
         }
-    }
-
-    /// The tag of the change a guard-free undo would revert (newest), if any.
-    pub fn top_undo_tag(&self) -> Option<&str> {
-        self.undo_tags.last().map(String::as_str)
     }
 
     /// Unguarded undo of the local actor's most recent change (no op-identity

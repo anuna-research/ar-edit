@@ -19,6 +19,35 @@ fn ids(c: &CollabDoc) -> Vec<String> {
     materialise(c).shots.into_iter().map(|s| s.id).collect()
 }
 
+/// Regression (P2, REQ-086): the guarded op-id stack stays aligned with Loro's
+/// undo stack even past the retention bound, where the bounded stack evicts its
+/// oldest item as it adds a new one and `undo_count()` stops growing. The NEWEST
+/// op must remain undoable by its op id (a count-growth check would miss the
+/// final push and the newest op would fail to undo or target the wrong step).
+#[test]
+fn guarded_undo_aligned_past_retention_bound() {
+    // Exceed the manager's retained depth (1000) by one.
+    const N: usize = 1001;
+    let doc = CollabDoc::new(ActorId(77));
+    let mut undo = LocalUndo::new(&doc);
+
+    for i in 0..N {
+        undo.begin();
+        doc.add_shot(&shot(&format!("u-{i:04}")));
+        assert!(undo.commit(format!("op-{i}")), "each add records a step");
+    }
+
+    // The oldest op was evicted, so it is not on top and must not undo.
+    assert!(!undo.undo_if("op-0"), "evicted op id must not match the top");
+    // The newest op is still on top and undoable — the push at the bound was
+    // detected despite the constant undo_count.
+    assert!(undo.undo_if(&format!("op-{}", N - 1)), "newest op stays undoable");
+    assert!(
+        !ids(&doc).contains(&"u-1000".to_string()),
+        "undo of the newest op removed its shot"
+    );
+}
+
 /// TEST-105/106: peer A's undo reverts only A's own change; peer B's
 /// concurrent change is untouched.
 #[test]

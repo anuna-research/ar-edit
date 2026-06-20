@@ -139,6 +139,14 @@ pub struct EditOp {
     pub ts: DateTime<Utc>,
     #[serde(flatten)]
     pub op: EditOpKind,
+    /// Live-session operation id (SPEC-003 REQ-090). When this op was forwarded
+    /// to a session daemon, this holds the unique id the daemon recorded it
+    /// under, so a later `undo`/`redo` can name the exact live operation to
+    /// revert (a "<kind>:<shot>" tag alone is not unique — two trims of one shot
+    /// would collide). `None` when no daemon was attached. `EditOp.id` cannot
+    /// serve this role: it is a vec index reused after an undo+branch truncation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daemon_op_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -359,6 +367,7 @@ mod tests {
         let op = EditOp {
             id: 0,
             ts: "2026-02-19T13:00:01Z".parse().unwrap(),
+            daemon_op_id: None,
             op: EditOpKind::AddShot {
                 shot: Shot {
                     id: "shot-001".into(),
@@ -389,6 +398,7 @@ mod tests {
         let op = EditOp {
             id: 3,
             ts: "2026-02-19T13:02:30Z".parse().unwrap(),
+            daemon_op_id: None,
             op: EditOpKind::MoveShot {
                 shot_id: "shot-003".into(),
                 from_position: 2,
@@ -411,6 +421,7 @@ mod tests {
         let op = EditOp {
             id: 4,
             ts: "2026-02-19T13:03:45Z".parse().unwrap(),
+            daemon_op_id: None,
             op: EditOpKind::TrimShot {
                 shot_id: "shot-002".into(),
                 old_range: ShotRange::Words { from: 200, to: 280 },
@@ -438,6 +449,7 @@ mod tests {
         let op = EditOp {
             id: 5,
             ts: "2026-02-19T13:04:00Z".parse().unwrap(),
+            daemon_op_id: None,
             op: EditOpKind::ReplaceRangeType {
                 shot_id: "shot-001".into(),
                 old_range: ShotRange::Words { from: 0, to: 52 },
@@ -692,6 +704,7 @@ mod tests {
         let op = EditOp {
             id: 6,
             ts: "2026-02-19T15:00:00Z".parse().unwrap(),
+            daemon_op_id: None,
             op: EditOpKind::AddNote {
                 shot_id: "shot-002".into(),
                 note: ShotNote {

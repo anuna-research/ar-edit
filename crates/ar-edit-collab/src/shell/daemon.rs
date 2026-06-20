@@ -41,19 +41,24 @@ pub enum DaemonError {
 pub enum Request {
     /// Attach to the session for `edit` (informational; the daemon owns one doc).
     Attach { edit: String },
-    AddShot { shot: Shot },
-    MoveShot { shot_id: String, to: usize },
-    TrimShot { shot_id: String, range: ShotRange },
-    AddNote { shot_id: String, note: ShotNote },
-    RemoveShot { shot_id: String },
+    // Each mutation carries a caller-minted, globally-unique `op_id`. The daemon
+    // records it as the undo-stack tag for the resulting step so a later guarded
+    // Undo/Redo names the EXACT operation — a "<kind>:<shot>" tag alone is not
+    // unique (two trims of one shot collide) and could revert the wrong op
+    // (REQ-090). The caller persists the same id with its durable op.
+    AddShot { op_id: String, shot: Shot },
+    MoveShot { op_id: String, shot_id: String, to: usize },
+    TrimShot { op_id: String, shot_id: String, range: ShotRange },
+    AddNote { op_id: String, shot_id: String, note: ShotNote },
+    RemoveShot { op_id: String, shot_id: String },
     /// Undo this daemon-actor's most recent change via the CRDT-aware
     /// [`LocalUndo`] (REQ-086) — but ONLY if the top of the live undo stack is
-    /// the operation identified by `tag` (`"<kind>:<shot_id>"`). This binds the
-    /// undo to the specific op the caller is reverting on disk, so an unrelated
-    /// op (another client's IPC mutation, a rollback) on top is never silently
-    /// popped, which would diverge live and durable state (REQ-090). The reply
-    /// reports whether it actually reverted so the caller can refuse to commit
-    /// only one side.
+    /// the operation identified by `tag` (the op's unique `op_id`). This binds
+    /// the undo to the specific op the caller is reverting on disk, so an
+    /// unrelated op (another client's IPC mutation, a rollback) on top is never
+    /// silently popped, which would diverge live and durable state (REQ-090).
+    /// The reply reports whether it actually reverted so the caller can refuse
+    /// to commit only one side.
     Undo { tag: String },
     /// Redo the most recently undone local change, guarded by `tag` like
     /// [`Request::Undo`].
@@ -62,6 +67,21 @@ pub enum Request {
     Snapshot,
     /// Lightweight status.
     Status,
+}
+
+impl Request {
+    /// The caller-minted op id a mutation records on the undo stack, or `None`
+    /// for non-recordable requests (undo/redo/read).
+    fn op_id(&self) -> Option<&str> {
+        match self {
+            Request::AddShot { op_id, .. }
+            | Request::MoveShot { op_id, .. }
+            | Request::TrimShot { op_id, .. }
+            | Request::AddNote { op_id, .. }
+            | Request::RemoveShot { op_id, .. } => Some(op_id),
+            _ => None,
+        }
+    }
 }
 
 /// A daemon response (CON-018). Externally tagged on `kind`.
@@ -92,7 +112,7 @@ pub fn parse_request(body: &[u8]) -> Result<Request, DaemonError> {
 fn apply(doc: &CollabDoc, req: Request) -> Response {
     match req {
         Request::Attach { .. } => Response::Ok,
-        Request::AddShot { shot } => {
+        Request::AddShot { shot, .. } => {
             // Validate before mutating: a direct IPC client must not be able to
             // persist a zero-length or inverted range the EditDocument path
             // would reject (CON-018, fail-closed).
@@ -109,11 +129,11 @@ fn apply(doc: &CollabDoc, req: Request) -> Response {
             }
             Response::Added { shot_id }
         }
-        Request::MoveShot { shot_id, to } => {
+        Request::MoveShot { shot_id, to, .. } => {
             doc.move_shot(&shot_id, to);
             Response::Ok
         }
-        Request::TrimShot { shot_id, range } => {
+        Request::TrimShot { shot_id, range, .. } => {
             // Same invariant as AddShot: reject an invalid range before it
             // reaches the LWW register (neither this path nor CollabDoc::trim_shot
             // otherwise validates).
@@ -123,11 +143,11 @@ fn apply(doc: &CollabDoc, req: Request) -> Response {
             doc.trim_shot(&shot_id, &range);
             Response::Ok
         }
-        Request::AddNote { shot_id, note } => {
+        Request::AddNote { shot_id, note, .. } => {
             doc.add_note(&shot_id, &note);
             Response::Ok
         }
-        Request::RemoveShot { shot_id } => {
+        Request::RemoveShot { shot_id, .. } => {
             doc.remove_shot(&shot_id);
             Response::Ok
         }
@@ -142,26 +162,6 @@ fn apply(doc: &CollabDoc, req: Request) -> Response {
             message: "internal: undo/redo not dispatched".into(),
         },
     }
-}
-
-/// The op-identity `(kind, shot_id)` a mutation request records on the undo
-/// stack, or `None` for non-recordable requests. `AddShot`'s id is minted during
-/// [`apply`], so it is left empty here and filled from the [`Response::Added`].
-/// The kind strings match the CLI's `op_summary`, so both sides agree on the tag.
-fn request_op_identity(req: &Request) -> Option<(&'static str, String)> {
-    match req {
-        Request::AddShot { .. } => Some(("add_shot", String::new())),
-        Request::MoveShot { shot_id, .. } => Some(("move_shot", shot_id.clone())),
-        Request::TrimShot { shot_id, .. } => Some(("trim_shot", shot_id.clone())),
-        Request::AddNote { shot_id, .. } => Some(("add_note", shot_id.clone())),
-        Request::RemoveShot { shot_id } => Some(("remove_shot", shot_id.clone())),
-        _ => None,
-    }
-}
-
-/// The canonical undo-stack tag for an operation: `"<kind>:<shot_id>"`.
-pub fn op_tag(kind: &str, shot_id: &str) -> String {
-    format!("{kind}:{shot_id}")
 }
 
 /// The session daemon: owns the live document and serves IPC clients.
@@ -354,20 +354,17 @@ async fn handle_client(
                         let reverted = u.redo_if(&tag);
                         (Response::Reverted { reverted }, reverted)
                     }
-                    other => match request_op_identity(&other) {
-                        Some((kind, mut shot_id)) => {
-                            // Record the mutation as one tagged, grouped undo
-                            // step so a later guarded undo reverts exactly it.
+                    other => match other.op_id().map(str::to_owned) {
+                        Some(op_id) => {
+                            // Record the mutation as one grouped undo step tagged
+                            // with the caller's unique op id, so a later guarded
+                            // undo reverts exactly it. On a validation Error
+                            // nothing committed, so commit() records no tag and
+                            // the group closes empty.
                             u.begin();
                             let resp = apply(&guard, other);
-                            let mutated = !matches!(resp, Response::Error { .. });
-                            if let Response::Added { shot_id: ref minted } = resp {
-                                shot_id = minted.clone();
-                            }
-                            // On a validation Error nothing committed, so commit()
-                            // records no tag and the group closes empty.
-                            u.commit(op_tag(kind, &shot_id));
-                            (resp, mutated)
+                            let recorded = u.commit(op_id);
+                            (resp, recorded)
                         }
                         // Attach / Snapshot / Status: no undo step, no persist.
                         None => (apply(&guard, other), false),
