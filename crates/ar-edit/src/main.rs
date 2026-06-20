@@ -416,21 +416,31 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 // actor-scoped id and adopt it for the persisted/reported shot,
                 // so later id-keyed ops (move/trim/note/remove) target the same
                 // live shot (REQ-090). Otherwise mint the usual sequential id.
-                let shot = {
-                    #[cfg(unix)]
-                    {
-                        match daemon_add_shot(&args.source, &range) {
-                            Some(minted) => doc.add_shot_with_id(minted, &args.source, range)?,
-                            None => doc.add_shot(&args.source, range)?,
-                        }
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        doc.add_shot(&args.source, range)?
-                    }
+                #[cfg(unix)]
+                let minted = daemon_add_shot(&args.source, &range);
+                #[cfg(not(unix))]
+                let minted: Option<String> = None;
+
+                let shot = match &minted {
+                    Some(id) => doc.add_shot_with_id(id.clone(), &args.source, range)?,
+                    None => doc.add_shot(&args.source, range)?,
                 };
                 let shot_id = shot.id.clone();
-                doc.save(&path)?;
+
+                // The live daemon already committed (and persisted) the add. If
+                // the durable on-disk save now fails, roll the live add back so
+                // the daemon and peers don't retain a shot the on-disk document
+                // never recorded — otherwise a retry would create a duplicate
+                // (REQ-090).
+                if let Err(e) = doc.save(&path) {
+                    #[cfg(unix)]
+                    if let Some(id) = minted {
+                        forward_to_daemon(
+                            ar_edit_collab::shell::daemon::Request::RemoveShot { shot_id: id },
+                        );
+                    }
+                    return Err(anyhow::Error::new(CliError::system(e)));
+                }
                 if cli.json {
                     println!("{}", serde_json::to_string_pretty(&doc)?);
                 } else {
@@ -670,77 +680,6 @@ fn daemon_add_shot(source: &str, range: &ShotRange) -> Option<String> {
     })
 }
 
-/// The live-document request that *undoes* `op`, or `None` when the operation
-/// cannot be retracted on the live CRDT. When a session daemon is active these
-/// are forwarded so an undo mutates the live document (and propagates to peers)
-/// instead of only rewinding the on-disk head — which would diverge live and
-/// durable state (REQ-090). Ids match because adds made while the daemon was
-/// live adopt the daemon-minted id (see [`daemon_add_shot`]).
-#[cfg(unix)]
-fn daemon_undo_request(op: &EditOpKind) -> Option<ar_edit_collab::shell::daemon::Request> {
-    use ar_edit_collab::shell::daemon::Request;
-    Some(match op {
-        EditOpKind::AddShot { shot } => Request::RemoveShot {
-            shot_id: shot.id.clone(),
-        },
-        EditOpKind::RemoveShot { shot, .. } => Request::RestoreShot { shot: shot.clone() },
-        EditOpKind::MoveShot {
-            shot_id,
-            from_position,
-            ..
-        } => Request::MoveShot {
-            shot_id: shot_id.clone(),
-            to: *from_position as usize,
-        },
-        EditOpKind::TrimShot {
-            shot_id, old_range, ..
-        }
-        | EditOpKind::ReplaceRangeType {
-            shot_id, old_range, ..
-        } => Request::TrimShot {
-            shot_id: shot_id.clone(),
-            range: old_range.clone(),
-        },
-        // Notes are grow-only in the live CRDT (REQ-082): a propagated note
-        // cannot be retracted, so an undo of AddNote is not forwarded.
-        EditOpKind::AddNote { .. } => return None,
-    })
-}
-
-/// The live-document request that *replays* `op` for a redo (inverse of
-/// [`daemon_undo_request`]). `None` for ops with no live counterpart.
-#[cfg(unix)]
-fn daemon_redo_request(op: &EditOpKind) -> Option<ar_edit_collab::shell::daemon::Request> {
-    use ar_edit_collab::shell::daemon::Request;
-    Some(match op {
-        // Re-add preserving the original id so live and durable stay aligned.
-        EditOpKind::AddShot { shot } => Request::RestoreShot { shot: shot.clone() },
-        EditOpKind::RemoveShot { shot_id, .. } => Request::RemoveShot {
-            shot_id: shot_id.clone(),
-        },
-        EditOpKind::MoveShot {
-            shot_id,
-            to_position,
-            ..
-        } => Request::MoveShot {
-            shot_id: shot_id.clone(),
-            to: *to_position as usize,
-        },
-        EditOpKind::TrimShot {
-            shot_id, new_range, ..
-        }
-        | EditOpKind::ReplaceRangeType {
-            shot_id, new_range, ..
-        } => Request::TrimShot {
-            shot_id: shot_id.clone(),
-            range: new_range.clone(),
-        },
-        // A note re-added on redo would duplicate the grow-only note its undo
-        // never removed — so, like the undo, it is not forwarded.
-        EditOpKind::AddNote { .. } => return None,
-    })
-}
-
 /// Return a human-readable label and the affected shot ID for an op.
 fn op_summary(kind: &EditOpKind) -> (&str, &str) {
     match kind {
@@ -826,12 +765,12 @@ fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         .clone();
     doc.save(&path).system_err()?;
 
-    // Mirror the undo onto the live session so the daemon and connected peers
-    // reflect it too — otherwise live and durable state diverge (REQ-090).
+    // Mirror the undo onto the live session via the daemon's CRDT-aware
+    // LocalUndo (REQ-086/090): it reverts only this actor's last operation,
+    // transformed against any concurrent remote edit, so it never clobbers a
+    // peer's winning write the way a blind inverse LWW write would.
     #[cfg(unix)]
-    if let Some(req) = daemon_undo_request(&undone.op) {
-        forward_to_daemon(req);
-    }
+    forward_to_daemon(ar_edit_collab::shell::daemon::Request::Undo);
 
     if cli.json {
         let output = serde_json::json!({
@@ -860,12 +799,10 @@ fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         .clone();
     doc.save(&path).system_err()?;
 
-    // Replay the redo onto the live session (inverse of the undo path) so the
-    // daemon and peers stay in step with the durable document (REQ-090).
+    // Replay the redo onto the live session via the daemon's LocalUndo, the
+    // inverse of the undo path (REQ-086/090).
     #[cfg(unix)]
-    if let Some(req) = daemon_redo_request(&redone.op) {
-        forward_to_daemon(req);
-    }
+    forward_to_daemon(ar_edit_collab::shell::daemon::Request::Redo);
 
     if cli.json {
         let output = serde_json::json!({

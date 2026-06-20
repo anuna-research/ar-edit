@@ -11,7 +11,7 @@
 
 use crate::crdt::CollabDoc;
 use crate::ids::ActorId;
-use crate::pairing::{self, SessionKey};
+use crate::pairing::{self, ChannelGuard, PairingError, SessionKey};
 use crate::recognise::phrase::Phrase;
 use crate::recognise::wire::{self, SyncEnvelope, PROTOCOL_VERSION, TAG_CONFIRM, TAG_PAKE};
 use super::discovery::Discovery;
@@ -59,6 +59,11 @@ fn iroh_err<E: std::fmt::Display>(e: E) -> TransportError {
     TransportError::Iroh(e.to_string())
 }
 
+/// Default failed-pairing limit before the channel locks (NFR-014). Repeated
+/// wrong-phrase attempts against a hosting endpoint are throttled to this many
+/// online guesses before connections are refused.
+pub const DEFAULT_PAIRING_MAX_ATTEMPTS: u32 = 5;
+
 /// A bound iroh endpoint for collaboration.
 pub struct Transport {
     endpoint: Endpoint,
@@ -67,6 +72,11 @@ pub struct Transport {
     /// dialable address; a loopback (relay-disabled) one never gets a relay, so
     /// it must NOT wait (iroh's `online()` blocks forever with no relays).
     relay: bool,
+    /// Failed-pairing limiter shared across every hosting attempt on this
+    /// endpoint (NFR-014). Held here — not created fresh per [`Self::pair_as_responder`]
+    /// call — so a caller that retries hosting after a wrong guess does not get
+    /// a fresh allowance; once the limit is hit, further connections are refused.
+    pairing_guard: std::sync::Mutex<ChannelGuard>,
 }
 
 impl Transport {
@@ -86,7 +96,11 @@ impl Transport {
             .bind()
             .await
             .map_err(iroh_err)?;
-        Ok(Self { endpoint, relay: false })
+        Ok(Self {
+            endpoint,
+            relay: false,
+            pairing_guard: std::sync::Mutex::new(ChannelGuard::new(DEFAULT_PAIRING_MAX_ATTEMPTS)),
+        })
     }
 
     /// Bind a production endpoint reachable from another machine (SPEC-003
@@ -107,7 +121,24 @@ impl Transport {
             .bind()
             .await
             .map_err(iroh_err)?;
-        Ok(Self { endpoint, relay: true })
+        Ok(Self {
+            endpoint,
+            relay: true,
+            pairing_guard: std::sync::Mutex::new(ChannelGuard::new(DEFAULT_PAIRING_MAX_ATTEMPTS)),
+        })
+    }
+
+    /// Override the failed-pairing limit (default [`DEFAULT_PAIRING_MAX_ATTEMPTS`]).
+    /// Builder-style; mainly for tests that want a tight lockout threshold.
+    pub fn with_pairing_max(self, max: u32) -> Self {
+        *self.pairing_guard.lock().unwrap() = ChannelGuard::new(max);
+        self
+    }
+
+    /// Whether the failed-pairing limit has been reached and further hosting
+    /// attempts will be refused (NFR-014).
+    pub fn pairing_is_locked(&self) -> bool {
+        self.pairing_guard.lock().unwrap().is_locked()
     }
 
     /// This peer's CRDT actor id, derived from its iroh node public key
@@ -277,10 +308,19 @@ impl Transport {
     }
 
     /// Run the SPAKE2 pairing handshake as the **accepter** (REQ-070, CON-014).
+    ///
+    /// Enforces the per-endpoint failed-attempt lockout (NFR-014): once the
+    /// limit is reached the call is refused *before* accepting a connection, so
+    /// retrying the host after repeated wrong guesses grants no fresh online
+    /// guess. Each completed attempt's success/failure is recorded so the limit
+    /// actually advances across retries.
     pub async fn pair_as_responder(
         &self,
         phrase: &Phrase,
     ) -> Result<(Connection, SessionKey), TransportError> {
+        if self.pairing_guard.lock().unwrap().is_locked() {
+            return Err(TransportError::Pairing(PairingError::LockedOut.to_string()));
+        }
         let incoming = self
             .endpoint
             .accept()
@@ -299,8 +339,13 @@ impl Transport {
         let (mut s2, mut r2) = conn.accept_bi().await.map_err(iroh_err)?;
         let peer_tag = read_confirm(&mut r2).await?;
         write_tagged(&mut s2, TAG_CONFIRM, &key.confirm_tag()).await?;
-        key.verify_peer(&peer_tag)
-            .map_err(|e| TransportError::Pairing(e.to_string()))?;
+        // Record the attempt outcome against the shared guard FIRST (so a wrong
+        // phrase counts toward the lockout) — then surface the confirmation
+        // result. A failure here both fails this attempt closed and advances the
+        // limiter for the next one.
+        let verify = key.verify_peer(&peer_tag);
+        self.pairing_guard.lock().unwrap().record(verify.is_ok()).ok();
+        verify.map_err(|e| TransportError::Pairing(e.to_string()))?;
         Ok((conn, key))
     }
 

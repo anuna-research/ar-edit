@@ -10,6 +10,8 @@
 
 use crate::crdt::CollabDoc;
 use crate::materialise::materialise;
+use crate::undo::LocalUndo;
+use ar_edit_core::edit::validate_range;
 use ar_edit_core::models::{Shot, ShotNote, ShotRange};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -40,16 +42,17 @@ pub enum Request {
     /// Attach to the session for `edit` (informational; the daemon owns one doc).
     Attach { edit: String },
     AddShot { shot: Shot },
-    /// Re-insert a shot **preserving its id** — the inverse of a forwarded
-    /// remove (undo) and the replay of a forwarded add (redo). Unlike
-    /// [`Request::AddShot`] it does not mint a new id: the supplied id was
-    /// already an actor-scoped, globally-unique id, so reinstating it keeps the
-    /// live document and the on-disk edit referring to the same shot (REQ-090).
-    RestoreShot { shot: Shot },
     MoveShot { shot_id: String, to: usize },
     TrimShot { shot_id: String, range: ShotRange },
     AddNote { shot_id: String, note: ShotNote },
     RemoveShot { shot_id: String },
+    /// Undo this daemon-actor's most recent change via the CRDT-aware
+    /// [`LocalUndo`] (REQ-086). Unlike forwarding the inverse of an op, this
+    /// reverts only the local operation and is transformed against concurrent
+    /// remote edits, so it never clobbers a peer's winning write.
+    Undo,
+    /// Redo the most recently undone local change.
+    Redo,
     /// Read the materialised shot list.
     Snapshot,
     /// Lightweight status.
@@ -74,10 +77,18 @@ pub fn parse_request(body: &[u8]) -> Result<Request, DaemonError> {
     serde_json::from_slice(body).map_err(|e| DaemonError::Parse(e.to_string()))
 }
 
+/// Apply a recognised, non-undo request. `Undo`/`Redo` are handled by the caller
+/// (they need the [`LocalUndo`]) and never reach here.
 fn apply(doc: &CollabDoc, req: Request) -> Response {
     match req {
         Request::Attach { .. } => Response::Ok,
         Request::AddShot { shot } => {
+            // Validate before mutating: a direct IPC client must not be able to
+            // persist a zero-length or inverted range the EditDocument path
+            // would reject (CON-018, fail-closed).
+            if let Err(e) = validate_range(&shot.range) {
+                return Response::Error { message: e.to_string() };
+            }
             // Mint a fresh actor-scoped id rather than preserving the client's
             // (possibly sequential) id: two peer daemons handed the same id would
             // each keep it as "locally free", then collide on merge. add_new_shot
@@ -88,16 +99,17 @@ fn apply(doc: &CollabDoc, req: Request) -> Response {
             }
             Response::Added { shot_id }
         }
-        Request::RestoreShot { shot } => {
-            // Id-preserving re-insert (CollabDoc::add_shot keeps a free id).
-            doc.add_shot(&shot);
-            Response::Ok
-        }
         Request::MoveShot { shot_id, to } => {
             doc.move_shot(&shot_id, to);
             Response::Ok
         }
         Request::TrimShot { shot_id, range } => {
+            // Same invariant as AddShot: reject an invalid range before it
+            // reaches the LWW register (neither this path nor CollabDoc::trim_shot
+            // otherwise validates).
+            if let Err(e) = validate_range(&range) {
+                return Response::Error { message: e.to_string() };
+            }
             doc.trim_shot(&shot_id, &range);
             Response::Ok
         }
@@ -115,12 +127,21 @@ fn apply(doc: &CollabDoc, req: Request) -> Response {
         Request::Status => Response::Status {
             shot_count: materialise(doc).shots.len(),
         },
+        // Handled in `handle_client` (needs the LocalUndo); unreachable here.
+        Request::Undo | Request::Redo => Response::Error {
+            message: "internal: undo/redo not dispatched".into(),
+        },
     }
 }
 
 /// The session daemon: owns the live document and serves IPC clients.
 pub struct Daemon {
     doc: Arc<Mutex<CollabDoc>>,
+    /// CRDT-aware per-actor undo/redo over the live document (REQ-086). Created
+    /// before any mutation so it tracks the daemon-actor's changes; an `Undo`
+    /// request reverts only the local op (transformed against concurrent remote
+    /// edits) rather than blind-writing an old value that could clobber a peer.
+    undo: Arc<Mutex<LocalUndo>>,
     listener: UnixListener,
     path: PathBuf,
     /// Where to persist the live CRDT snapshot after each mutation. When set, a
@@ -173,8 +194,13 @@ impl Daemon {
         let listener = UnixListener::bind(&path).map_err(|e| DaemonError::Io(e.to_string()))?;
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        // Build the undo manager from the doc BEFORE it is moved behind the Mutex
+        // and before any mutation, so it tracks exactly this actor's new changes
+        // (the imported snapshot history is, correctly, not undoable).
+        let undo = LocalUndo::new(&doc);
         Ok(Self {
             doc: Arc::new(Mutex::new(doc)),
+            undo: Arc::new(Mutex::new(undo)),
             listener,
             path,
             snapshot_path,
@@ -185,10 +211,25 @@ impl Daemon {
         &self.path
     }
 
-    /// Shared handle to the live document (so transport/sync can apply remote
-    /// deltas into the same doc the IPC clients mutate).
+    /// Shared handle to the live document. NOTE: mutating the doc directly
+    /// through this handle bypasses snapshot persistence — prefer
+    /// [`Self::import_remote`] for received deltas so newly-merged remote edits
+    /// (and the advanced counters) survive a restart (REQ-080).
     pub fn doc(&self) -> Arc<Mutex<CollabDoc>> {
         self.doc.clone()
+    }
+
+    /// Apply a CRDT delta received from a peer AND persist the result, so remote
+    /// edits are durable even if no local IPC mutation follows before a restart
+    /// (REQ-080/084). This is the persisting counterpart to mutating [`Self::doc`]
+    /// directly.
+    pub fn import_remote(&self, delta: &[u8]) -> Result<(), loro::LoroError> {
+        let doc = self.doc.lock().unwrap();
+        doc.import(delta)?;
+        if let Some(path) = self.snapshot_path.as_deref() {
+            persist_snapshot(&doc, path);
+        }
+        Ok(())
     }
 
     /// Serve clients until the listener closes.
@@ -199,7 +240,8 @@ impl Daemon {
             match self.listener.accept().await {
                 Ok((stream, _)) => {
                     let doc = self.doc.clone();
-                    tokio::spawn(handle_client(stream, doc, snapshot_path.clone()));
+                    let undo = self.undo.clone();
+                    tokio::spawn(handle_client(stream, doc, undo, snapshot_path.clone()));
                 }
                 Err(_) => break,
             }
@@ -228,6 +270,7 @@ impl Drop for Daemon {
 async fn handle_client(
     mut stream: UnixStream,
     doc: Arc<Mutex<CollabDoc>>,
+    undo: Arc<Mutex<LocalUndo>>,
     snapshot_path: Option<Arc<PathBuf>>,
 ) {
     loop {
@@ -243,8 +286,20 @@ async fn handle_client(
                     req,
                     Request::Snapshot | Request::Status | Request::Attach { .. }
                 );
+                // Hold the doc lock across the whole op so undo (which mutates
+                // the shared Loro doc) never races a concurrent IPC mutation.
                 let guard = doc.lock().unwrap();
-                let resp = apply(&guard, req);
+                let resp = match req {
+                    Request::Undo => {
+                        undo.lock().unwrap().undo();
+                        Response::Ok
+                    }
+                    Request::Redo => {
+                        undo.lock().unwrap().redo();
+                        Response::Ok
+                    }
+                    other => apply(&guard, other),
+                };
                 if mutating {
                     if let Some(path) = snapshot_path.as_deref() {
                         persist_snapshot(&guard, path);

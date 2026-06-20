@@ -83,6 +83,41 @@ async fn spake2_over_iroh_agrees_on_matching_phrase() {
     initiator.close().await;
 }
 
+/// Regression (P1, NFR-014): the failed-pairing lockout is enforced on the
+/// responder and RETAINED across hosting attempts. With the limit reached, a
+/// retry is refused outright — no fresh connection, no fresh online guess.
+#[tokio::test]
+async fn pairing_lockout_persists_across_responder_attempts() {
+    // max=1: a single wrong guess locks the channel.
+    let responder = Transport::bind_loopback().await.unwrap().with_pairing_max(1);
+    let initiator = Transport::bind_loopback().await.unwrap();
+    let addr = responder.dial_addr().unwrap();
+    let good = phrase::generate_secure();
+    let wrong = phrase::parse(&format!(
+        "{}-{}-{}",
+        (good.channel + 1) % 1000,
+        good.words[0],
+        good.words[1]
+    ))
+    .unwrap();
+
+    // First (wrong-phrase) attempt fails closed and trips the lockout.
+    let h = tokio::spawn(async move {
+        let res = responder.pair_as_responder(&wrong).await;
+        (responder, res)
+    });
+    let attempt = initiator.pair_as_initiator(addr, &good).await;
+    let (responder, res_r) = h.await.unwrap();
+    assert!(attempt.is_err() && res_r.is_err(), "wrong phrase must fail closed");
+    assert!(responder.pairing_is_locked(), "the channel must lock after the limit");
+
+    // A retry is refused before any connection is accepted — the tested lockout
+    // is no longer dead code.
+    let again = responder.pair_as_responder(&good).await;
+    assert!(again.is_err(), "a locked responder must refuse further attempts");
+    initiator.close().await;
+}
+
 #[tokio::test]
 async fn spake2_over_iroh_wrong_phrase_fails_closed() {
     let responder = Transport::bind_loopback().await.unwrap();
