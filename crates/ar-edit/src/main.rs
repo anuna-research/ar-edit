@@ -114,37 +114,41 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
     match &cli.command {
         // ---- Realtime collaboration (SPEC-003) ----
         Commands::Daemon { edit } => {
-            let _ = edit; // loading/persisting an existing edit is OQ-8
             #[cfg(unix)]
             {
+                // The daemon now OWNS the canonical edit store (ADR-011): it
+                // loads `edits/<name>.edit.json`, applies IPC mutations to it,
+                // and persists it back — a single store, so a live session and a
+                // one-shot command never diverge (OQ-8).
+                let edit_name = edit.clone().ok_or_else(|| {
+                    anyhow::Error::new(CliError::user(
+                        "specify which edit to host: `ar-edit daemon --edit <name>`",
+                    ))
+                })?;
                 let sock = session_socket();
+                let path = edit_path(&edit_name);
+                let store = if path.exists() {
+                    load_store(&edit_name)?
+                } else {
+                    ar_edit_collab::store::PersistentEdit::create(&edit_name, local_actor())
+                };
                 let json = cli.json;
                 let rt = tokio::runtime::Runtime::new()?;
                 rt.block_on(async move {
-                    // Each daemon owns a unique, persisted actor id (not the
-                    // fixed actor 1 every daemon used to take, which made two
-                    // peers' Loro op ids collide). Loading the persisted CRDT
-                    // snapshot then restores this actor's id counters, so a
-                    // restart never re-mints an already-issued id (REQ-072/080).
-                    let actor = session_actor();
-                    let doc = ar_edit_collab::crdt::CollabDoc::new(actor);
-                    let snapshot = session_snapshot_path();
-                    if let Ok(bytes) = std::fs::read(&snapshot) {
-                        doc.import(&bytes).map_err(|e| {
-                            anyhow::anyhow!("loading session snapshot {}: {e}", snapshot.display())
-                        })?;
-                    }
-                    let daemon = ar_edit_collab::shell::daemon::Daemon::bind_persisting(
-                        &sock, doc, snapshot,
-                    )
-                    .map_err(|e| anyhow::anyhow!("daemon bind failed: {e}"))?;
+                    let daemon =
+                        ar_edit_collab::shell::daemon::Daemon::bind(&sock, path, store)
+                            .map_err(|e| anyhow::anyhow!("daemon bind failed: {e}"))?;
                     if json {
                         println!(
                             "{}",
-                            serde_json::json!({ "socket": sock.display().to_string(), "status": "listening" })
+                            serde_json::json!({
+                                "socket": sock.display().to_string(),
+                                "edit": edit_name,
+                                "status": "listening",
+                            })
                         );
                     } else {
-                        println!("Session daemon listening on {}", sock.display());
+                        println!("Session daemon for '{edit_name}' listening on {}", sock.display());
                         println!("(Ctrl-C to stop; clients attach via `ar-edit edit …` — REQ-090.)");
                     }
                     daemon.run().await;
@@ -227,7 +231,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                         }
                     };
                     let shot_count = match client.request(&Request::Status).await {
-                        Ok(Response::Status { shot_count }) => shot_count,
+                        Ok(Response::Status { shot_count, .. }) => shot_count,
                         Ok(other) => {
                             return Err(anyhow::anyhow!("unexpected daemon response: {other:?}"))
                         }
@@ -394,7 +398,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 Ok(())
             }
             EditCommand::AddSegment(args) => {
-                let mut store = load_store(&args.edit)?;
+                let mut store = load_store_mut(&args.edit)?;
                 let range = parse_range(&args.range)?;
 
                 // Eager validation: check source exists and range is in bounds
@@ -427,7 +431,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 shot,
                 position,
             } => {
-                let mut store = load_store(edit)?;
+                let mut store = load_store_mut(edit)?;
                 store.move_shot(shot, *position as usize, None);
                 save_store(&store, edit)?;
                 if cli.json {
@@ -438,7 +442,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 Ok(())
             }
             EditCommand::RemoveSegment { edit, shot } => {
-                let mut store = load_store(edit)?;
+                let mut store = load_store_mut(edit)?;
                 store.remove_shot(shot, None);
                 save_store(&store, edit)?;
                 if cli.json {
@@ -449,7 +453,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 Ok(())
             }
             EditCommand::TrimSegment(args) => {
-                let mut store = load_store(&args.edit)?;
+                let mut store = load_store_mut(&args.edit)?;
                 let range = parse_range(&args.range)?;
 
                 // Find the shot's source for validation
@@ -577,6 +581,44 @@ fn load_store(edit: &str) -> anyhow::Result<ar_edit_collab::store::PersistentEdi
         .map_err(|e| anyhow::Error::new(CliError::user(e)))
 }
 
+/// Whether a live session daemon currently *hosts* `edit` (owns its store).
+/// A one-shot command must not write the edit file directly while a host owns it
+/// — they would fight over persistence. (Full attach-to-host routing is the next
+/// increment; until then, one-shot mutations on a hosted edit are refused.)
+#[cfg(unix)]
+fn daemon_hosts(edit: &str) -> bool {
+    use ar_edit_collab::shell::daemon::{DaemonClient, Request, Response};
+    let sock = session_socket();
+    if !sock.exists() {
+        return false;
+    }
+    let Ok(rt) = tokio::runtime::Runtime::new() else {
+        return false;
+    };
+    rt.block_on(async move {
+        let Ok(mut c) = DaemonClient::connect(&sock).await else {
+            return false;
+        };
+        matches!(
+            c.request(&Request::Status).await,
+            Ok(Response::Status { edit: hosted, .. }) if hosted == edit
+        )
+    })
+}
+
+/// Load the canonical store for a MUTATION, refusing if a live host owns the edit
+/// (see [`daemon_hosts`]).
+fn load_store_mut(edit: &str) -> anyhow::Result<ar_edit_collab::store::PersistentEdit> {
+    #[cfg(unix)]
+    if daemon_hosts(edit) {
+        return Err(anyhow::Error::new(CliError::user(format!(
+            "edit '{edit}' is hosted by a live session (`ar-edit daemon`); stop the host \
+             to make one-shot edits"
+        ))));
+    }
+    load_store(edit)
+}
+
 /// Persist the canonical store back to `edits/<name>.edit.json`.
 fn save_store(store: &ar_edit_collab::store::PersistentEdit, edit: &str) -> anyhow::Result<()> {
     let path = edit_path(edit);
@@ -591,32 +633,6 @@ fn save_store(store: &ar_edit_collab::store::PersistentEdit, edit: &str) -> anyh
 #[cfg(unix)]
 fn session_socket() -> PathBuf {
     PathBuf::from(".ar-edit").join("session.sock")
-}
-
-/// Where the live CRDT snapshot is persisted between daemon runs (REQ-080).
-#[cfg(unix)]
-fn session_snapshot_path() -> PathBuf {
-    PathBuf::from(".ar-edit").join("session.loro")
-}
-
-/// This daemon's persisted, unique CRDT actor id. Read from `.ar-edit/actor` if
-/// present; otherwise a fresh random id is generated and stored, so the actor
-/// is stable across restarts yet distinct from any other daemon's (REQ-072 — a
-/// shared actor would make peers' Loro operation ids collide).
-#[cfg(unix)]
-fn session_actor() -> ar_edit_collab::ids::ActorId {
-    use ar_edit_collab::ids::ActorId;
-    let dir = PathBuf::from(".ar-edit");
-    let path = dir.join("actor");
-    if let Ok(s) = std::fs::read_to_string(&path) {
-        if let Ok(n) = u64::from_str_radix(s.trim(), 16) {
-            return ActorId(n);
-        }
-    }
-    let actor = ActorId::generate();
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(&path, format!("{:016x}\n", actor.0));
-    actor
 }
 
 fn fmt_range(range: &ShotRange) -> String {
@@ -662,7 +678,7 @@ fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
     // Durable undo over the canonical CRDT store's oplog cursor (ADR-011 /
     // REQ-086). Single-store, so there is no live/durable divergence to guard
     // (a live session uses its own ephemeral UndoManager).
-    let mut store = load_store(edit)?;
+    let mut store = load_store_mut(edit)?;
     let before = store.snapshot().shots;
     if !store.undo() {
         return Err(anyhow::Error::new(CliError::user("nothing to undo")));
@@ -691,7 +707,7 @@ fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
 }
 
 fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
-    let mut store = load_store(edit)?;
+    let mut store = load_store_mut(edit)?;
     let before = store.snapshot().shots;
     if !store.redo() {
         return Err(anyhow::Error::new(CliError::user("nothing to redo")));
@@ -1190,7 +1206,7 @@ fn cmd_note(cli: &Cli, edit: &str, shot: &str, text: &str) -> anyhow::Result<()>
     if text.trim().is_empty() {
         anyhow::bail!("note text must not be empty");
     }
-    let mut store = load_store(edit)?;
+    let mut store = load_store_mut(edit)?;
     if !store.has_shot(shot) {
         return Err(anyhow::Error::new(
             CliError::user(format!("shot '{shot}' not found")).with_hint(&format!(
