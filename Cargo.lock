@@ -162,6 +162,7 @@ name = "ar-edit-collab"
 version = "0.1.0"
 dependencies = [
  "ar-edit-core",
+ "base64",
  "bip39",
  "blake3",
  "chrono",

@@ -15,6 +15,7 @@ blake3.workspace = true
 spake2.workspace = true
 rand.workspace = true
 bip39.workspace = true
+base64 = "0.22"
 
 # Shell (Phase S) — optional, enabled by the `transport` feature.
 iroh = { workspace = true, optional = true }

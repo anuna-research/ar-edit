@@ -407,6 +407,40 @@ impl CollabDoc {
         self.orset_live_ids(POIS)
     }
 
+    // ---- durable head-over-oplog undo (SPIKE: SPEC-003 OQ-8 / ADR-011) ----
+    //
+    // Durable single-writer undo without a daemon: model `head` as a cursor over
+    // checkpoints (Loro frontiers) and revert between them with `revert_to`,
+    // which generates *local* ops to move the state — so the doc stays attached
+    // and editable (unlike `checkout`, which detaches), the change is durable in
+    // the oplog/snapshot, and it propagates to peers as an ordinary CRDT update
+    // (REQ-086). This is the offline analog of the per-actor `UndoManager`.
+
+    /// An encoded checkpoint of the current visible state, to record after each
+    /// user edit. Bytes are what a unified on-disk format would persist as the
+    /// undo-cursor history (no Loro types leak to callers).
+    pub fn checkpoint(&self) -> Vec<u8> {
+        self.doc.state_frontiers().encode()
+    }
+
+    /// Durably move the visible state to the encoded `checkpoint` by applying
+    /// revert ops. Stays attached; the move is itself recorded in the oplog (so
+    /// a later revert can undo it — that is "redo").
+    pub fn revert_to(&self, checkpoint: &[u8]) -> Result<(), loro::LoroError> {
+        let target = loro::Frontiers::decode(checkpoint)?;
+        self.doc.revert_to(&target)?;
+        // A revert may resurrect or retire minted ids; keep the counters ahead.
+        self.sync_shot_counter();
+        self.sync_note_counter();
+        Ok(())
+    }
+
+    /// Whether the document is attached to its latest oplog version (editable).
+    /// The `revert_to`-based undo above keeps this true; `checkout` would not.
+    pub fn is_attached(&self) -> bool {
+        !self.doc.is_detached()
+    }
+
     // ---- sync ----
 
     /// Full snapshot for first-contact sync or persistence.

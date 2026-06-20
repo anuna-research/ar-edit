@@ -23,6 +23,7 @@ pub mod pairing;
 pub mod presence;
 pub mod recognise;
 pub mod reconcile;
+pub mod store;
 pub mod undo;
 
 // ---- effectful shell (interfaces; impls gated on OQ-7) ----
