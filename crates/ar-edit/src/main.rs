@@ -607,10 +607,19 @@ fn host_status(edit: &str) -> HostStatus {
     let Ok(rt) = tokio::runtime::Runtime::new() else {
         return HostStatus::Failed;
     };
+    // Bound the WHOLE probe (connect + status) so a stalled accepter can never
+    // hang the command — `request` is already deadlined, this also bounds the
+    // connect for defense-in-depth.
     let answered = rt.block_on(async {
-        let mut c = DaemonClient::connect(&sock).await.ok()?;
-        let resp = c.request(&Request::Status).await.ok()?;
-        Some((c, resp))
+        let probe = async {
+            let mut c = DaemonClient::connect(&sock).await.ok()?;
+            let resp = c.request(&Request::Status).await.ok()?;
+            Some((c, resp))
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(10), probe)
+            .await
+            .ok()
+            .flatten()
     });
     match answered {
         // Socket exists but no clean Status — fail closed (a host may own it).
@@ -873,7 +882,11 @@ fn save_store(store: &ar_edit_collab::store::PersistentEdit, edit: &str) -> anyh
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).system_err()?;
     }
-    std::fs::write(&path, store.to_bytes()).system_err()?;
+    // Atomic write (temp + rename), so a crash mid-write can't truncate the
+    // canonical edit — matching the daemon's persist (REQ-088 durability).
+    let tmp = path.with_extension("edit.tmp");
+    std::fs::write(&tmp, store.to_bytes()).system_err()?;
+    std::fs::rename(&tmp, &path).system_err()?;
     Ok(())
 }
 

@@ -82,11 +82,6 @@ pub fn parse_request(body: &[u8]) -> Result<Request, DaemonError> {
     serde_json::from_slice(body).map_err(|e| DaemonError::Parse(e.to_string()))
 }
 
-/// Whether a request mutates the store (and therefore needs a persist).
-fn is_mutation(req: &Request) -> bool {
-    !matches!(req, Request::Attach { .. } | Request::Snapshot | Request::Status)
-}
-
 /// Apply a recognised request to the owned store and return the response.
 fn apply(store: &mut PersistentEdit, req: Request) -> Response {
     match req {
@@ -231,12 +226,14 @@ async fn handle_client(
         // Recognise, then apply under the lock (no await held).
         let resp = match parse_request(&body) {
             Ok(req) => {
-                let mutating = is_mutation(&req);
                 let mut guard = store.lock().unwrap();
+                // Persist iff the document actually changed (the CRDT version
+                // advanced). This covers reads, validation errors, no-op
+                // move/remove/trim of an absent shot, and refused undo/redo —
+                // none persist — so a client can't drive disk churn with no-ops.
+                let before = guard.frontier();
                 let resp = apply(&mut guard, req);
-                // Persist real changes (not a refused undo or a validation error).
-                let changed = mutating && !matches!(resp, Response::Reverted { reverted: false } | Response::Error { .. });
-                if changed {
+                if guard.frontier() != before {
                     persist_store(&guard, &edit_path);
                 }
                 resp

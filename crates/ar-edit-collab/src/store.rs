@@ -22,6 +22,7 @@
 use crate::crdt::CollabDoc;
 use crate::ids::ActorId;
 use crate::materialise::materialise;
+use crate::migrate::MIGRATION_ACTOR;
 use ar_edit_core::edit::{validate_range, EditError};
 use ar_edit_core::models::{EditDocument, EditOpKind, EditSnapshot, Shot, ShotNote, ShotRange};
 use base64::Engine;
@@ -116,6 +117,12 @@ impl PersistentEdit {
     /// The materialised shot list (REQ-079).
     pub fn snapshot(&self) -> EditSnapshot {
         materialise(&self.doc)
+    }
+
+    /// The current CRDT version frontier (opaque bytes). Equal before and after a
+    /// no-op mutation — used to persist only on a real change.
+    pub fn frontier(&self) -> Vec<u8> {
+        self.doc.checkpoint()
     }
 
     /// A snapshot-only [`EditDocument`] view for the read-side commands
@@ -298,7 +305,8 @@ impl PersistentEdit {
         // New canonical format first.
         if let Ok(on_disk) = serde_json::from_slice::<OnDisk>(bytes) {
             if !on_disk.crdt.is_empty() {
-                return Self::from_on_disk(on_disk, actor);
+                let _ = actor; // the on-disk format carries its own actor
+                return Self::from_on_disk(on_disk);
             }
         }
         // Legacy event-sourced edit document → migrate (REQ-088).
@@ -307,7 +315,7 @@ impl PersistentEdit {
         Ok(Self::migrate_legacy(legacy, actor))
     }
 
-    fn from_on_disk(on_disk: OnDisk, fallback_actor: ActorId) -> Result<Self, StoreError> {
+    fn from_on_disk(on_disk: OnDisk) -> Result<Self, StoreError> {
         let doc = CollabDoc::new(ActorId(on_disk.actor));
         let crdt = b64()
             .decode(on_disk.crdt.as_bytes())
@@ -331,8 +339,11 @@ impl PersistentEdit {
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
         if history.is_empty() {
+            // Corrupt/hand-edited file with a valid crdt but no cursor: baseline
+            // at THIS doc's current frontier (not a fresh foreign doc's), so the
+            // baseline is a real, in-oplog version.
             history.push(Checkpoint {
-                frontier: CollabDoc::new(fallback_actor).checkpoint(),
+                frontier: doc.checkpoint(),
                 op_id: None,
             });
         }
@@ -350,8 +361,15 @@ impl PersistentEdit {
     /// undo cursor by replaying `ops[0..=head]` (so `undo` keeps working after
     /// migration; the redo'd tail beyond `head` is dropped). Snapshot-identical
     /// for the visible state (REQ-088).
+    ///
+    /// The migration ops are written under the fixed [`MIGRATION_ACTOR`] so two
+    /// peers migrating the same legacy edit independently produce *identical*
+    /// Loro ops (idempotent on merge — no duplicated shots, REQ-088); the doc is
+    /// then re-keyed to the caller's `actor` so subsequent edits carry a unique
+    /// peer id. Recorded checkpoint frontiers stay valid across the rekey (their
+    /// ops remain in the oplog).
     fn migrate_legacy(legacy: EditDocument, actor: ActorId) -> Self {
-        let doc = CollabDoc::new(actor);
+        let doc = CollabDoc::new(MIGRATION_ACTOR);
         let mut history = vec![Checkpoint {
             frontier: doc.checkpoint(),
             op_id: None,
@@ -379,6 +397,8 @@ impl PersistentEdit {
                 op_id: None,
             }];
         }
+        // Re-key to the caller's actor for subsequent (collaborative) edits.
+        let _ = doc.rekey_actor(actor);
         let head = history.len() - 1;
         Self {
             name: legacy.name,
@@ -433,6 +453,28 @@ mod tests {
         let mut e = PersistentEdit::from_bytes(&e.to_bytes(), ActorId(0x42)).unwrap();
         let id2 = e.add_shot("src-002", words(0, 10), None).unwrap();
         assert_ne!(id1, id2, "a tombstoned id must never be re-minted after undo + reload");
+    }
+
+    /// Regression (REQ-088): two peers migrating the SAME legacy edit
+    /// independently must converge — the migration ops are written under the
+    /// fixed MIGRATION_ACTOR, so a CRDT merge dedups them instead of duplicating
+    /// every shot.
+    #[test]
+    fn migration_is_idempotent_across_peers() {
+        let mut legacy = EditDocument::create("e");
+        legacy.add_shot("src-001", words(0, 10)).unwrap();
+        legacy.add_shot("src-002", words(0, 10)).unwrap();
+        let bytes = serde_json::to_vec(&legacy).unwrap();
+
+        let a = PersistentEdit::from_bytes(&bytes, ActorId(10)).unwrap();
+        let b = PersistentEdit::from_bytes(&bytes, ActorId(20)).unwrap();
+        // Merge b's state into a, as a CRDT sync would.
+        a.doc.import(&b.doc.export_snapshot()).unwrap();
+        assert_eq!(
+            ids(&a).len(),
+            2,
+            "independent migrations converge — no duplicated shots"
+        );
     }
 
     /// Regression: a no-op mutation (move/remove of a missing shot) must not
