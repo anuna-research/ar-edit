@@ -37,3 +37,4 @@ blobsync = ["transport", "dep:iroh-blobs"]
 
 [dev-dependencies]
 tokio = { workspace = true }
+proptest = "1"

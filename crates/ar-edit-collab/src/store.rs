@@ -24,7 +24,7 @@ use crate::ids::ActorId;
 use crate::materialise::materialise;
 use crate::migrate::MIGRATION_ACTOR;
 use ar_edit_core::edit::{validate_range, EditError};
-use ar_edit_core::models::{EditDocument, EditOpKind, EditSnapshot, Shot, ShotNote, ShotRange};
+use ar_edit_core::models::{EditDocument, EditOpKind, EditSnapshot, ShotNote, ShotRange};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 
@@ -147,13 +147,6 @@ impl PersistentEdit {
         self.history[self.head].op_id.as_deref()
     }
 
-    /// The daemon op-id of the operation a `redo` would re-apply.
-    pub fn redo_op_id(&self) -> Option<&str> {
-        self.history
-            .get(self.head + 1)
-            .and_then(|c| c.op_id.as_deref())
-    }
-
     /// Record a checkpoint after a mutation, truncating any redo branch. A no-op
     /// mutation (e.g. move/remove of a missing shot) leaves the document frontier
     /// unchanged — it records nothing, so undo never has to step over a phantom.
@@ -179,27 +172,6 @@ impl PersistentEdit {
         let id = self.doc.add_new_shot(source, &range);
         self.checkpoint(op_id);
         Ok(id)
-    }
-
-    /// Append a shot preserving `id` (e.g. one a live daemon already minted, so
-    /// disk and the live doc refer to the same shot — REQ-090).
-    pub fn add_shot_with_id(
-        &mut self,
-        id: &str,
-        source: &str,
-        range: ShotRange,
-        op_id: Option<String>,
-    ) -> Result<String, StoreError> {
-        validate_range(&range)?;
-        let shot = Shot {
-            id: id.to_string(),
-            source: source.to_string(),
-            range,
-            notes: vec![],
-        };
-        self.doc.add_shot(&shot);
-        self.checkpoint(op_id);
-        Ok(id.to_string())
     }
 
     /// Relocate a shot (REQ-080: identity-preserving move).
@@ -440,6 +412,108 @@ mod tests {
 
     fn ids(e: &PersistentEdit) -> Vec<String> {
         e.snapshot().shots.into_iter().map(|s| s.id).collect()
+    }
+
+    // --- Behavioural mutation-coverage tests: each method does its job, not a
+    // --- shape-preserving no-op (a no-op'd mutation must be observable). ---
+
+    #[test]
+    fn move_reorders_the_shot_list() {
+        let mut e = PersistentEdit::create("p", ActorId(1));
+        let a = e.add_shot("s1", words(0, 5), None).unwrap();
+        let b = e.add_shot("s2", words(0, 5), None).unwrap();
+        let c = e.add_shot("s3", words(0, 5), None).unwrap();
+        assert_eq!(ids(&e), vec![a.clone(), b.clone(), c.clone()]);
+        e.move_shot(&a, 2, None);
+        assert_eq!(ids(&e), vec![b, c, a], "move reorders, not just preserves the set");
+    }
+
+    #[test]
+    fn remove_deletes_exactly_the_target() {
+        let mut e = PersistentEdit::create("p", ActorId(1));
+        let a = e.add_shot("s1", words(0, 5), None).unwrap();
+        let b = e.add_shot("s2", words(0, 5), None).unwrap();
+        e.remove_shot(&a, None);
+        assert_eq!(ids(&e), vec![b], "remove deletes the target shot");
+    }
+
+    #[test]
+    fn add_note_appears_on_the_shot() {
+        let mut e = PersistentEdit::create("p", ActorId(1));
+        let a = e.add_shot("s1", words(0, 5), None).unwrap();
+        let note = ShotNote { text: "hello".into(), created: Utc::now() };
+        e.add_note(&a, &note, None);
+        let shot = e.snapshot().shots.into_iter().find(|s| s.id == a).unwrap();
+        assert_eq!(shot.notes.len(), 1);
+        assert_eq!(shot.notes[0].text, "hello");
+    }
+
+    #[test]
+    fn has_shot_distinguishes_present_from_absent() {
+        let mut e = PersistentEdit::create("p", ActorId(1));
+        let a = e.add_shot("s1", words(0, 5), None).unwrap();
+        assert!(e.has_shot(&a), "present shot");
+        assert!(!e.has_shot("shot-nope"), "absent shot");
+    }
+
+    #[test]
+    fn redo_restores_the_exact_prior_state() {
+        let mut e = PersistentEdit::create("p", ActorId(1));
+        e.add_shot("s1", words(0, 5), None).unwrap();
+        let two = e.add_shot("s2", words(0, 5), None).unwrap();
+        let full = ids(&e);
+        assert!(e.undo());
+        assert_eq!(ids(&e).len(), 1, "undo dropped the second shot");
+        assert!(e.redo());
+        assert_eq!(ids(&e), full, "redo restored the exact prior list (not the current state)");
+        assert!(e.has_shot(&two));
+    }
+
+    #[test]
+    fn snapshot_only_legacy_migrates_its_shots() {
+        // A legacy doc with shots in its snapshot but an EMPTY op log (head >= 0)
+        // must seed the shots from the snapshot, not the (empty) replay branch
+        // — guards migrate_legacy's `head >= 0 && !ops.is_empty()` condition.
+        use ar_edit_core::models::Shot;
+        let mk = |id: &str, src: &str| Shot {
+            id: id.into(),
+            source: src.into(),
+            range: words(0, 10),
+            notes: vec![],
+        };
+        let mut legacy = EditDocument::create("e");
+        legacy.head = 0; // >= 0, so the && short-circuits on empty ops
+        legacy.snapshot = EditSnapshot { shots: vec![mk("shot-001", "s1"), mk("shot-002", "s2")] };
+
+        let e =
+            PersistentEdit::from_bytes(&serde_json::to_vec(&legacy).unwrap(), ActorId(1)).unwrap();
+        assert_eq!(ids(&e).len(), 2, "snapshot-only migration seeded both shots");
+    }
+
+    #[test]
+    fn oversized_undo_head_is_clamped_on_load() {
+        // Poison a valid store's undo_head; from_on_disk must clamp it to the
+        // last valid index (history.len() - 1), not overrun the history.
+        let mut e = PersistentEdit::create("p", ActorId(1));
+        e.add_shot("s1", words(0, 5), None).unwrap();
+        let mut v: serde_json::Value = serde_json::from_slice(&e.to_bytes()).unwrap();
+        v["undo_head"] = serde_json::json!(9999);
+        let mut e2 =
+            PersistentEdit::from_bytes(&serde_json::to_vec(&v).unwrap(), ActorId(1)).unwrap();
+        assert!(!e2.can_redo(), "clamped to the tip — nothing to redo");
+        assert!(e2.undo(), "head is a valid index, so undo works");
+        assert_eq!(ids(&e2).len(), 0, "undo from the clamped tip reaches the empty baseline");
+    }
+
+    #[test]
+    fn frontier_tracks_real_changes_only() {
+        let mut e = PersistentEdit::create("p", ActorId(1));
+        let f0 = e.frontier();
+        e.add_shot("s1", words(0, 5), None).unwrap();
+        let f1 = e.frontier();
+        assert_ne!(f0, f1, "a real add advances the frontier");
+        e.remove_shot("shot-absent", None); // no-op
+        assert_eq!(e.frontier(), f1, "a no-op leaves the frontier unchanged");
     }
 
     /// Regression (REQ-080): a cursor undo reverts the in-document counter map,
