@@ -92,8 +92,8 @@ presence, and rendezvous relay are implemented and tested in the
 pairing is pending a mandatory security review** (ADR-009) before production
 use — so `pair` currently validates the phrase and reports status rather than
 opening a live session in default builds. See
-[SPEC-003](specs/SPEC-003-realtime-collaborative-editing.md) and
-[IMPL-003 status](plans/IMPL-003-STATUS.md).
+[SPEC-003](specs/SPEC-003-realtime-collaborative-editing.md) (implementation
+status is tracked in its Open Questions, OQ-7/OQ-8).
 
 ## Shot ranges
 
@@ -164,7 +164,6 @@ See [`specs/`](specs/) for the full specification:
 - [SPEC-003](specs/SPEC-003-realtime-collaborative-editing.md) — realtime collaborative editing via p2p CRDTs
 - [DATA-MODEL](specs/DATA-MODEL.md) — data structures and relationships
 - [IMPL-001](specs/IMPL-001-implementation-plan.md) — implementation phases
-- [IMPL-003 status](plans/IMPL-003-STATUS.md) — collaboration implementation status
 - [ADR-001](specs/ADR-001-event-sourced-edits.md) — event-sourced edit document
 - [ADR-002](specs/ADR-002-tagged-union-shot-ranges.md) — tagged union shot ranges
 - [ADR-003](specs/ADR-003-subprocess-architecture.md) — subprocess architecture

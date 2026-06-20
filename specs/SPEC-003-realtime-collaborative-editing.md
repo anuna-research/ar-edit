@@ -2,20 +2,77 @@
 id: SPEC-003
 title: "SPEC-003: Realtime Collaborative Editing via P2P CRDTs"
 type: specification
-version: 1.1.0
+version: 1.2.0
 status: implementing
+last-updated: 2026-06-21
 parent: SPEC-001
 ---
 
-<!-- Revision 1.1.0 (2026-06-19): pairing rendezvous reworked from a dedicated
-     server to serverless phrase-keyed pkarr / BitTorrent Mainline DHT discovery
-     with SPAKE2 run over the resulting direct iroh connection. Resolves OQ-3;
-     revises ADR-009; adds ADR-013 and CON-017; repurposes CON-014; demotes the
-     s7 TCP relay to an optional DHT-blocked fallback. Pattern after
-     ../did-crdt ADR-006 (pkarr-derived keypair for keyed DHT discovery). -->
----
-
 # SPEC-003: Realtime Collaborative Editing via P2P CRDTs
+
+## Orientation
+
+**Intent:** Turn single-machine [[SPEC-001-transcript-video-editor|ar-edit]] into a
+realtime multiplayer editor — two or more instances edit one project over a
+direct peer-to-peer connection, with no central server holding project state.
+
+**Metaphor:** Every peer holds the *whole* cut. Edits are gossiped as
+[[CRDT]] deltas and always settle to one identical cut — like musicians each
+reading an independent copy of the same score that re-syncs after every bar
+([[Strong Eventual Consistency]]). Pairing is the bouncer at the door: a spoken
+phrase is checked in full before anyone is admitted.
+
+**Structure:**
+
+```
+                two humans read a phrase aloud
+                          │  ar-edit pair <phrase>
+        ┌─────────────────▼───────────────────────────────┐
+        │             Effectful Shell (per peer)           │
+        │  ┌──────────┐  ┌──────────┐  ┌────────────────┐  │
+ DHT ◀──┼─▶│ Pairing  │  │Transport │  │  Source Sync   │  │
+pkarr   │  │ SPAKE2   │  │  iroh    │  │  iroh-blobs    │  │
+        │  │(CON-014) │  │(CON-015) │  │  (CON-016)     │  │
+        │  └────┬─────┘  └────┬─────┘  └───────┬────────┘  │
+        │       └─────────────┴────────────────┘           │
+        │                     │ recognised deltas          │
+        │            ┌────────▼──────────┐                 │
+        │            │  CRDT Edit Store  │ ◀── Session     │
+        │            │  Loro (pure core) │     Daemon      │
+        │            │  ADR-007 / ADR-011│     (CON-018)   │
+        │            └───────────────────┘                 │
+        └──────────────────────────────────────────────────┘
+        arrows point inward → core never imports shell (Purity Boundary Map)
+        CON-014/015/016/018 are LangSec trust boundaries: recognise-before-act
+```
+
+**Decisions** (deliberate before implementing):
+[[SPEC-003-realtime-collaborative-editing#ADR-007]] off-the-shelf [[Loro]] CRDT ·
+[[SPEC-003-realtime-collaborative-editing#ADR-009]] [[SPAKE2]] pairing (⚠ cryptography no-go area — Tier-1 review owed) ·
+[[SPEC-003-realtime-collaborative-editing#ADR-011]] CRDT as the canonical edit store + decoupled durable undo ·
+[[SPEC-003-realtime-collaborative-editing#ADR-013]] serverless phrase-keyed [[pkarr]] / [[Mainline DHT]] discovery ·
+[[SPEC-003-realtime-collaborative-editing#ADR-014]] TUI host + background session daemon.
+
+**Load-bearing:**
+[[SPEC-003-realtime-collaborative-editing#REQ-079]] CRDT is the canonical store ·
+[[SPEC-003-realtime-collaborative-editing#REQ-080]] identity-preserving move (no id reuse) ·
+[[SPEC-003-realtime-collaborative-editing#REQ-083]] convergence ([[Strong Eventual Consistency]]) ·
+[[SPEC-003-realtime-collaborative-editing#REQ-089]]/[[SPEC-003-realtime-collaborative-editing#REQ-090]] the daemon owns the canonical file ·
+[[SPEC-003-realtime-collaborative-editing#NFR-009]] change visible ≤ 400 ms p95 ·
+[[SPEC-003-realtime-collaborative-editing#NFR-014]] single-guess pairing.
+
+**Open:**
+[[SPEC-003-realtime-collaborative-editing#OQ-7]] real-network transport characterisation (owner: HOC) ·
+[[SPEC-003-realtime-collaborative-editing#OQ-8]] daemon lifecycle + wiring remote sync into the owned store (owner: HOC) ·
+[[SPEC-003-realtime-collaborative-editing#ADR-009]] cryptographic Tier-1 cross-model + domain-expert review (owner: HOC).
+
+**Detail:** the full requirement, contract, ADR, and test nodes follow below;
+this one-pager is the door, not the room.
+
+> The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
+> RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
+> described in BCP 14 (RFC 2119, RFC 8174) when, and only when, they appear in
+> all capitals.
 
 ## Overview
 
@@ -34,8 +91,10 @@ Three capabilities compose to deliver this:
    can derive from observing the handshake.
 2. **Transport** — Once paired, peers communicate directly over [[iroh]]
    (a [[QUIC]]-based p2p library) for both control messages and bulk data.
-   A lightweight [[Rendezvous Server]] is used only to broker the initial
-   handshake; all project data flows peer-to-peer.
+   The initial meeting point is serverless: a phrase-keyed [[pkarr]] record on
+   the [[Mainline DHT]] lets the peers find each other (see
+   [[SPEC-003-realtime-collaborative-editing#ADR-013]]); an optional TCP relay
+   survives only as a DHT-blocked fallback. All project data flows peer-to-peer.
 3. **Convergent state** — The mutable project state (the edit document, plus
    source markers and points of interest) is reformulated as a collection of
    [[CRDT]]s so that concurrent edits from multiple peers merge automatically
@@ -582,9 +641,12 @@ Trace:
 
 A pairing attempt (`ar-edit pair <phrase>` → established direct iroh connection)
 SHALL complete within **5 seconds** at the 95th percentile UNDER conditions
-where both peers can reach the [[Rendezvous Server]] and a direct or relayed
-iroh path exists, WITH a structured timeout error if no path is found within a
-bounded interval (default 30 s).
+where both peers can publish/resolve the phrase-keyed [[pkarr]] record on the
+[[Mainline DHT]] (or the configured pkarr relay) and a direct or relayed iroh
+path exists, WITH a structured timeout error if no path is found within a
+bounded interval (default 30 s). (Serverless discovery per
+[[SPEC-003-realtime-collaborative-editing#ADR-013]]; the dedicated rendezvous
+server of v1.0.0 is retired.)
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-112]]
@@ -741,7 +803,8 @@ This is a **no-go cryptographic area** under [[PROTO-001]] AI Trust Boundaries �
 audited implementation + cross-model + human expert review (Tier 1) required.
 The in-house [[SPAKE2]] reference (`cbcl-bus` SPEC-007) informs open review
 items: proof-of-possession binding the session to the iroh node key, transcript
-binding, RFC 9382 / ristretto255 vs Ed25519Group, and a labelled KDF/AEAD.
+binding, [[RFC 9382]] / [[ristretto255]] vs [[Ed25519]]Group, and a labelled
+[[KDF]]/[[AEAD]].
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#REQ-067]]
@@ -869,7 +932,7 @@ Trace:
 
 ### ADR-011: Edit-Document Migration — Event-Sourced → CRDT
 
-**Status:** **Accepted** (implemented, IMPL-003) — **supersedes the mutation
+**Status:** **Accepted** (implemented, [[IMPL-003-realtime-collaborative-editing|IMPL-003]]) — **supersedes the mutation
 model of [[ADR-001-event-sourced-edits]]**
 
 **Context:** [[ADR-001-event-sourced-edits]] assumed a single writer and a total
@@ -890,7 +953,7 @@ materialised view remains the read/agent surface, so
 are unaffected. [[SPEC-001-transcript-video-editor]] REQ-046–048 require a
 version bump (tracked in [[SPEC-003-realtime-collaborative-editing#OQ-4]]).
 
-**Implementation note (IMPL-003): two undo regimes, deliberately decoupled.**
+**Implementation note ([[IMPL-003-realtime-collaborative-editing|IMPL-003]]): two undo regimes, deliberately decoupled.**
 Undo is *durable* only in the single-writer / offline case (the long-standing
 local-first norm; it is just persisting the command history). It is implemented
 as a head cursor over the [[Loro]] oplog using `revert_to`, which emits *local*
@@ -928,12 +991,13 @@ human at the pairing boundary are untrusted.
 Opens the current project for collaboration and prints a pairing phrase.
 
 ```
-Pre-conditions:  Inside a valid project directory; rendezvous reachable
-Post-conditions: Pairing phrase generated; host registered on a rendezvous
-                 channel; host enters accept loop; phrase invalidated after TTL
-Exit codes:      0 = session closed cleanly, 1 = not a project, 2 = rendezvous
-                 unreachable
-Output (--json): { "phrase": "7-saturn-pioneer", "channel": 7,
+Pre-conditions:  Inside a valid project directory; DHT/pkarr discovery reachable
+Post-conditions: Pairing phrase generated; host published a phrase-keyed pkarr
+                 discovery record; host enters accept loop; phrase invalidated
+                 after TTL
+Exit codes:      0 = session closed cleanly, 1 = not a project, 2 = discovery
+                 unreachable (DHT / pkarr relay)
+Output (--json): { "phrase": "7-saturn-pioneer", "discovery": "pkarr",
                    "node_id": "<iroh-node-id>", "expires": "<iso8601>" }
 ```
 
@@ -948,12 +1012,13 @@ Joins a session identified by the phrase.
 
 ```
 Pre-conditions:  <phrase> matches the CON-013 grammar; inside a project
-                 directory; rendezvous reachable
+                 directory; DHT/pkarr discovery reachable
 Post-conditions: SPAKE2 completed; direct iroh connection established; source
                  sync begun; peer admitted to the session
 Exit codes:      0 = joined and synced, 1 = malformed phrase (rejected before
-                 any network action), 2 = rendezvous unreachable, 3 = key
-                 confirmation failed (wrong phrase), 4 = no iroh path / timeout
+                 any network action), 2 = discovery unreachable (DHT / pkarr
+                 relay), 3 = key confirmation failed (wrong phrase), 4 = no iroh
+                 path / timeout
 Output (--json): { "session": "<id>", "peers": [...], "actor_id": "<id>",
                    "sync": { "sources_total": N, "sources_present": M } }
 ```
@@ -1532,6 +1597,8 @@ REQ-085 → TEST-104           → CON-012, CON-015
 REQ-086 → TEST-105, TEST-106
 REQ-087 → TEST-107, TEST-108 → CON-015 ; NFR-012
 REQ-088 → TEST-109, TEST-110 → ADR-011
+REQ-089 → TEST-119           → CON-018 ; ADR-014
+REQ-090 → TEST-120           → CON-018 ; ADR-014
 NFR-009 → TEST-111 → OBS-003
 NFR-010 → TEST-112 → OBS-003
 NFR-011 → TEST-113 → OBS-003
@@ -1540,8 +1607,11 @@ NFR-013 → TEST-115 → OBS-003
 NFR-014 → TEST-116, TEST-117
 ```
 
-Every REQ has ≥ 1 TEST per applicable type; the π map is total over the
-artefacts introduced here.
+Every REQ (REQ-067–090) and NFR (NFR-009–014) has ≥ 1 TEST per applicable type,
+and every TEST attributes a requirement; the π map is total over the artefacts
+introduced here. (TEST-118 is intentionally unused — a deleted draft test whose
+number is not reused, per the naming rules; the sequence is TEST-074–117, 119,
+120.)
 
 ---
 
@@ -1565,8 +1635,8 @@ artefacts introduced here.
 | # | id | Question | Status |
 |---|----|----------|--------|
 | 1 | OQ-1 | De-risking spike: confirm [[Loro]] `MovableList` move/trim convergence, SPAKE2 feasibility, and 2 GB BLAKE3 content-addressing. | **Resolved 2026-06-18** — H-a/H-b/H-c PASS (`spike/oq-1/FINDINGS.md`). Transport-layer empirical run split out to OQ-7. |
-| 7 | OQ-7 | Transport-characterisation spike: real iroh pairing latency ([[SPEC-003-realtime-collaborative-editing#NFR-010]]) and iroh-blobs 2 GB network throughput / resumability ([[SPEC-003-realtime-collaborative-editing#NFR-011]]). Run on macOS, Linux, **and Windows** to confirm [[SPEC-001-transcript-video-editor#NFR-015]] (terminal backend, source-linking via [[ADR-012-cross-platform-source-linking]]) for the collaboration path. Also covers a real [[Mainline DHT]] / [[pkarr]] discovery round-trip ([[SPEC-003-realtime-collaborative-editing#ADR-013]]). | **Partially addressed** (IMPL-003): the iroh transport + content-addressed blob transfer are implemented and **loopback-tested** (`crates/ar-edit-collab`, feature `transport`; requires rustc ≥ 1.91). Remaining: real-network latency/throughput, pkarr/DHT discovery round-trip, and iroh-blobs dedup/resume. |
-| 8 | OQ-8 | Session-daemon lifecycle ([[SPEC-003-realtime-collaborative-editing#ADR-014]]): auto-start on `share`/first attach vs explicit `ar-edit daemon`; idle-shutdown policy; one-daemon-per-project vs global; socket path/permission hardening; Windows named-pipe equivalent ([[SPEC-001-transcript-video-editor#NFR-015]]); how the daemon drives remote sync (push local IPC mutations as deltas, apply remote deltas). | **Largely resolved** (IMPL-003) — core daemon + IPC implemented (REQ-089/090, CON-018); the on-disk edit is the single CRDT-backed store (ADR-011) and one-shot CLI commands operate on it with durable cursor undo. The daemon now **owns** that canonical file: `ar-edit daemon --edit <name>` loads `edits/<name>.edit.json`, applies IPC mutations, and persists it back — one store, so a live session and the file never diverge. The IPC op-id/gating protocol (review #5–#8) is retired. One-shot commands **attach** to a live host that owns the edit and mutate through it (the host applies + persists the canonical file), so the live session and the file are one store. **Remaining:** lifecycle/policy (auto-start, idle-shutdown, one-vs-many, Windows named pipe); and wiring the daemon to remote sync (apply peer deltas into the owned store — the network-collaboration path, OQ-7). |
+| 7 | OQ-7 | Transport-characterisation spike: real iroh pairing latency ([[SPEC-003-realtime-collaborative-editing#NFR-010]]) and iroh-blobs 2 GB network throughput / resumability ([[SPEC-003-realtime-collaborative-editing#NFR-011]]). Run on macOS, Linux, **and Windows** to confirm [[SPEC-001-transcript-video-editor#NFR-015]] (terminal backend, source-linking via [[ADR-012-cross-platform-source-linking]]) for the collaboration path. Also covers a real [[Mainline DHT]] / [[pkarr]] discovery round-trip ([[SPEC-003-realtime-collaborative-editing#ADR-013]]). | **Partially addressed** ([[IMPL-003-realtime-collaborative-editing|IMPL-003]]): the iroh transport + content-addressed blob transfer are implemented and **loopback-tested** (`crates/ar-edit-collab`, feature `transport`; requires rustc ≥ 1.91). Remaining: real-network latency/throughput, pkarr/DHT discovery round-trip, and iroh-blobs dedup/resume. |
+| 8 | OQ-8 | Session-daemon lifecycle ([[SPEC-003-realtime-collaborative-editing#ADR-014]]): auto-start on `share`/first attach vs explicit `ar-edit daemon`; idle-shutdown policy; one-daemon-per-project vs global; socket path/permission hardening; Windows named-pipe equivalent ([[SPEC-001-transcript-video-editor#NFR-015]]); how the daemon drives remote sync (push local IPC mutations as deltas, apply remote deltas). | **Largely resolved** ([[IMPL-003-realtime-collaborative-editing|IMPL-003]]) — core daemon + IPC implemented (REQ-089/090, CON-018); the on-disk edit is the single CRDT-backed store (ADR-011) and one-shot CLI commands operate on it with durable cursor undo. The daemon now **owns** that canonical file: `ar-edit daemon --edit <name>` loads `edits/<name>.edit.json`, applies IPC mutations, and persists it back — one store, so a live session and the file never diverge. The IPC op-id/gating protocol (review #5–#8) is retired. One-shot commands **attach** to a live host that owns the edit and mutate through it (the host applies + persists the canonical file), so the live session and the file are one store. **Remaining:** lifecycle/policy (auto-start, idle-shutdown, one-vs-many, Windows named pipe); and wiring the daemon to remote sync (apply peer deltas into the owned store — the network-collaboration path, OQ-7). |
 | 2 | OQ-2 | Should lazy/on-demand media fetch be layered on full replication to let a peer start editing before a multi-GB sync finishes? | Deferred — optimisation over [[SPEC-003-realtime-collaborative-editing#ADR-010]] |
 | 3 | OQ-3 | Is the [[Rendezvous Server]] self-hosted by the user, Anuna-operated, or pluggable via config? Affects trust model and NFR-010. | **Resolved (v1.1.0)** — no dedicated server: discovery is serverless via phrase-keyed [[pkarr]] / [[Mainline DHT]] ([[SPEC-003-realtime-collaborative-editing#ADR-013]]). A pkarr HTTP relay (e.g. `relay.pkarr.org`) is configurable; the TCP rendezvous relay remains an optional DHT-blocked fallback. |
 | 4 | OQ-4 | Version-bump and `superseded` bookkeeping on [[SPEC-001-transcript-video-editor]] REQ-046–048 and [[ADR-001-event-sourced-edits]] once SPEC-003 is `implemented`. | Open — tracked, execute at Phase 3 close |
@@ -1588,3 +1658,29 @@ artefacts introduced here.
 | Async runtime | `tokio` (already a workspace dep) | iroh, pkarr, and the optional relay are async |
 | Session process | TUI / blocking `share`, or `ar-edit daemon` + Unix-socket IPC ([[SPEC-003-realtime-collaborative-editing#ADR-014]]) | One-shot CLI can't hold live state; the daemon owns the CRDT + connections + pkarr refresh |
 | Platform support | macOS · Linux · Windows 10+ ([[SPEC-001-transcript-video-editor#NFR-015]]) | All collaboration crates (loro, iroh, iroh-blobs, spake2, blake3) are cross-platform Rust; iroh officially supports Windows; source-linking variance per [[ADR-012-cross-platform-source-linking]]; empirical Windows run is [[SPEC-003-realtime-collaborative-editing#OQ-7]] |
+
+---
+
+## Changelog
+
+<details>
+<summary>Revision history — 1.0.0 → 1.2.0</summary>
+
+- **1.2.0** (2026-06-21) — implementation round ([[IMPL-003-realtime-collaborative-editing|IMPL-003]]) folded back into the
+  spec: ADR-011 accepted (CRDT is the canonical edit store; durable undo
+  decoupled from the daemon); REQ-089/090 + CON-018 daemon owns the canonical
+  file; OQ-8 largely resolved (attach-to-host routing, fail-closed IPC). Added
+  the Orientation block and BCP 14 conformance declaration; completed the
+  traceability matrix (REQ-089/090); reconciled CON-012/NFR-010 to the
+  serverless-discovery model (ADR-013). Documentation-and-spec-hygiene plus the
+  normative ADR-011/REQ-089/090 additions.
+- **1.1.0** (2026-06-19) — pairing rendezvous reworked from a dedicated server to
+  serverless phrase-keyed [[pkarr]] / [[Mainline DHT]] discovery with [[SPAKE2]]
+  run over the resulting direct [[iroh]] connection. Resolves OQ-3; revises
+  ADR-009; adds ADR-013 and CON-017; repurposes CON-014; demotes the s7 TCP relay
+  to an optional DHT-blocked fallback. Pattern after `../did-crdt` ADR-006
+  (pkarr-derived keypair for keyed DHT discovery). Normative.
+- **1.0.0** — initial specification: pairing, transport, convergent CRDT state,
+  source-material synchronisation.
+
+</details>
