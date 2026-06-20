@@ -398,7 +398,6 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 Ok(())
             }
             EditCommand::AddSegment(args) => {
-                let mut store = load_store_mut(&args.edit)?;
                 let range = parse_range(&args.range)?;
 
                 // Eager validation: check source exists and range is in bounds
@@ -415,12 +414,11 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     anyhow::bail!("invalid segment:\n{}", details.join("\n"));
                 }
 
-                let shot_id = store
-                    .add_shot(&args.source, range, None)
-                    .map_err(|e| anyhow::Error::new(CliError::user(e)))?;
-                save_store(&store, &args.edit)?;
+                let mut session = EditSession::open(&args.edit)?;
+                let shot_id = session.add_shot(&args.source, range)?;
+                session.commit()?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&store.to_edit_document())?);
+                    print_shots_json(&mut session)?;
                 } else {
                     println!("Added {} to '{}'", shot_id, args.edit);
                 }
@@ -431,38 +429,37 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 shot,
                 position,
             } => {
-                let mut store = load_store_mut(edit)?;
-                store.move_shot(shot, *position as usize, None);
-                save_store(&store, edit)?;
+                let mut session = EditSession::open(edit)?;
+                session.move_shot(shot, *position as usize)?;
+                session.commit()?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&store.to_edit_document())?);
+                    print_shots_json(&mut session)?;
                 } else {
                     println!("Moved {} to position {} in '{}'", shot, position, edit);
                 }
                 Ok(())
             }
             EditCommand::RemoveSegment { edit, shot } => {
-                let mut store = load_store_mut(edit)?;
-                store.remove_shot(shot, None);
-                save_store(&store, edit)?;
+                let mut session = EditSession::open(edit)?;
+                session.remove_shot(shot)?;
+                session.commit()?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&store.to_edit_document())?);
+                    print_shots_json(&mut session)?;
                 } else {
                     println!("Removed {} from '{}'", shot, edit);
                 }
                 Ok(())
             }
             EditCommand::TrimSegment(args) => {
-                let mut store = load_store_mut(&args.edit)?;
                 let range = parse_range(&args.range)?;
+                let mut session = EditSession::open(&args.edit)?;
 
                 // Find the shot's source for validation
-                let shot_source = store
-                    .snapshot()
-                    .shots
-                    .iter()
+                let shot_source = session
+                    .shots()?
+                    .into_iter()
                     .find(|s| s.id == args.shot)
-                    .map(|s| s.source.clone())
+                    .map(|s| s.source)
                     .ok_or_else(|| anyhow::anyhow!("shot '{}' not found", args.shot))?;
 
                 // Eager validation: check range is in bounds for the source
@@ -479,12 +476,10 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     anyhow::bail!("invalid segment:\n{}", details.join("\n"));
                 }
 
-                store
-                    .trim_shot(&args.shot, range, None)
-                    .map_err(|e| anyhow::Error::new(CliError::user(e)))?;
-                save_store(&store, &args.edit)?;
+                session.trim_shot(&args.shot, range)?;
+                session.commit()?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&store.to_edit_document())?);
+                    print_shots_json(&mut session)?;
                 } else {
                     println!("Trimmed {} in '{}'", args.shot, args.edit);
                 }
@@ -581,42 +576,258 @@ fn load_store(edit: &str) -> anyhow::Result<ar_edit_collab::store::PersistentEdi
         .map_err(|e| anyhow::Error::new(CliError::user(e)))
 }
 
-/// Whether a live session daemon currently *hosts* `edit` (owns its store).
-/// A one-shot command must not write the edit file directly while a host owns it
-/// — they would fight over persistence. (Full attach-to-host routing is the next
-/// increment; until then, one-shot mutations on a hosted edit are refused.)
+/// Connect to a live host that owns `edit` (matched via `Status`), returning a
+/// blocking runtime + client to drive it. `None` if no daemon, it hosts a
+/// different edit, or the round-trip fails (the caller then uses the file store).
 #[cfg(unix)]
-fn daemon_hosts(edit: &str) -> bool {
+fn attach_if_hosted(
+    edit: &str,
+) -> Option<(tokio::runtime::Runtime, ar_edit_collab::shell::daemon::DaemonClient)> {
     use ar_edit_collab::shell::daemon::{DaemonClient, Request, Response};
     let sock = session_socket();
     if !sock.exists() {
-        return false;
+        return None;
     }
-    let Ok(rt) = tokio::runtime::Runtime::new() else {
-        return false;
-    };
-    rt.block_on(async move {
-        let Ok(mut c) = DaemonClient::connect(&sock).await else {
-            return false;
-        };
-        matches!(
-            c.request(&Request::Status).await,
-            Ok(Response::Status { edit: hosted, .. }) if hosted == edit
-        )
-    })
+    let rt = tokio::runtime::Runtime::new().ok()?;
+    let client = rt.block_on(async {
+        let mut c = DaemonClient::connect(&sock).await.ok()?;
+        match c.request(&Request::Status).await {
+            Ok(Response::Status { edit: hosted, .. }) if hosted == edit => Some(c),
+            _ => None,
+        }
+    })?;
+    Some((rt, client))
 }
 
-/// Load the canonical store for a MUTATION, refusing if a live host owns the edit
-/// (see [`daemon_hosts`]).
-fn load_store_mut(edit: &str) -> anyhow::Result<ar_edit_collab::store::PersistentEdit> {
+/// A mutation handle to an edit (REQ-090). Routed to a live host when one *owns*
+/// the edit — so the host and the canonical file remain ONE store and never
+/// diverge — or to the file store directly otherwise.
+enum EditSession {
+    File {
+        store: ar_edit_collab::store::PersistentEdit,
+        edit: String,
+        dirty: bool,
+    },
     #[cfg(unix)]
-    if daemon_hosts(edit) {
-        return Err(anyhow::Error::new(CliError::user(format!(
-            "edit '{edit}' is hosted by a live session (`ar-edit daemon`); stop the host \
-             to make one-shot edits"
-        ))));
+    Attached {
+        rt: tokio::runtime::Runtime,
+        client: ar_edit_collab::shell::daemon::DaemonClient,
+    },
+}
+
+impl EditSession {
+    /// Open `edit` for mutation, attaching to a live host if one owns it.
+    fn open(edit: &str) -> anyhow::Result<Self> {
+        #[cfg(unix)]
+        if let Some((rt, client)) = attach_if_hosted(edit) {
+            return Ok(EditSession::Attached { rt, client });
+        }
+        Ok(EditSession::File {
+            store: load_store(edit)?,
+            edit: edit.to_string(),
+            dirty: false,
+        })
     }
-    load_store(edit)
+
+    /// Round-trip a request to the attached host.
+    #[cfg(unix)]
+    fn call(
+        rt: &tokio::runtime::Runtime,
+        client: &mut ar_edit_collab::shell::daemon::DaemonClient,
+        req: ar_edit_collab::shell::daemon::Request,
+    ) -> anyhow::Result<ar_edit_collab::shell::daemon::Response> {
+        rt.block_on(client.request(&req))
+            .map_err(|e| anyhow::Error::new(CliError::system(format!("session daemon: {e}"))))
+    }
+
+    /// Expect `Response::Ok` (or surface an `Error`) from the host.
+    #[cfg(unix)]
+    fn expect_ok(
+        rt: &tokio::runtime::Runtime,
+        client: &mut ar_edit_collab::shell::daemon::DaemonClient,
+        req: ar_edit_collab::shell::daemon::Request,
+    ) -> anyhow::Result<()> {
+        use ar_edit_collab::shell::daemon::Response;
+        match Self::call(rt, client, req)? {
+            Response::Ok => Ok(()),
+            Response::Error { message } => Err(anyhow::Error::new(CliError::user(message))),
+            other => anyhow::bail!("unexpected daemon response: {other:?}"),
+        }
+    }
+
+    /// The current ordered shots.
+    fn shots(&mut self) -> anyhow::Result<Vec<Shot>> {
+        match self {
+            EditSession::File { store, .. } => Ok(store.snapshot().shots),
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => {
+                use ar_edit_collab::shell::daemon::{Request, Response};
+                match Self::call(rt, client, Request::Snapshot)? {
+                    Response::Snapshot { shots } => Ok(shots),
+                    other => anyhow::bail!("unexpected daemon response: {other:?}"),
+                }
+            }
+        }
+    }
+
+    fn add_shot(&mut self, source: &str, range: ShotRange) -> anyhow::Result<String> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                let id = store
+                    .add_shot(source, range, None)
+                    .map_err(|e| anyhow::Error::new(CliError::user(e)))?;
+                *dirty = true;
+                Ok(id)
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => {
+                use ar_edit_collab::shell::daemon::{Request, Response};
+                let shot = Shot {
+                    id: String::new(),
+                    source: source.to_string(),
+                    range,
+                    notes: vec![],
+                };
+                match Self::call(rt, client, Request::AddShot { shot })? {
+                    Response::Added { shot_id } => Ok(shot_id),
+                    Response::Error { message } => Err(anyhow::Error::new(CliError::user(message))),
+                    other => anyhow::bail!("unexpected daemon response: {other:?}"),
+                }
+            }
+        }
+    }
+
+    fn move_shot(&mut self, shot_id: &str, to: usize) -> anyhow::Result<()> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                store.move_shot(shot_id, to, None);
+                *dirty = true;
+                Ok(())
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => Self::expect_ok(
+                rt,
+                client,
+                ar_edit_collab::shell::daemon::Request::MoveShot {
+                    shot_id: shot_id.to_string(),
+                    to,
+                },
+            ),
+        }
+    }
+
+    fn trim_shot(&mut self, shot_id: &str, range: ShotRange) -> anyhow::Result<()> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                store
+                    .trim_shot(shot_id, range, None)
+                    .map_err(|e| anyhow::Error::new(CliError::user(e)))?;
+                *dirty = true;
+                Ok(())
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => Self::expect_ok(
+                rt,
+                client,
+                ar_edit_collab::shell::daemon::Request::TrimShot {
+                    shot_id: shot_id.to_string(),
+                    range,
+                },
+            ),
+        }
+    }
+
+    fn remove_shot(&mut self, shot_id: &str) -> anyhow::Result<()> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                store.remove_shot(shot_id, None);
+                *dirty = true;
+                Ok(())
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => Self::expect_ok(
+                rt,
+                client,
+                ar_edit_collab::shell::daemon::Request::RemoveShot {
+                    shot_id: shot_id.to_string(),
+                },
+            ),
+        }
+    }
+
+    fn add_note(&mut self, shot_id: &str, text: &str) -> anyhow::Result<()> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                store.add_note_text(shot_id, text, None);
+                *dirty = true;
+                Ok(())
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => Self::expect_ok(
+                rt,
+                client,
+                ar_edit_collab::shell::daemon::Request::AddNote {
+                    shot_id: shot_id.to_string(),
+                    text: text.to_string(),
+                },
+            ),
+        }
+    }
+
+    /// Undo the most recent change; returns whether anything was reverted.
+    fn undo(&mut self) -> anyhow::Result<bool> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                let did = store.undo();
+                if did {
+                    *dirty = true;
+                }
+                Ok(did)
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => {
+                use ar_edit_collab::shell::daemon::{Request, Response};
+                match Self::call(rt, client, Request::Undo)? {
+                    Response::Reverted { reverted } => Ok(reverted),
+                    other => anyhow::bail!("unexpected daemon response: {other:?}"),
+                }
+            }
+        }
+    }
+
+    fn redo(&mut self) -> anyhow::Result<bool> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                let did = store.redo();
+                if did {
+                    *dirty = true;
+                }
+                Ok(did)
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => {
+                use ar_edit_collab::shell::daemon::{Request, Response};
+                match Self::call(rt, client, Request::Redo)? {
+                    Response::Reverted { reverted } => Ok(reverted),
+                    other => anyhow::bail!("unexpected daemon response: {other:?}"),
+                }
+            }
+        }
+    }
+
+    /// Persist a file session (a host persists itself per mutation).
+    fn commit(&mut self) -> anyhow::Result<()> {
+        match self {
+            EditSession::File { store, edit, dirty } => {
+                if *dirty {
+                    save_store(store, edit)?;
+                }
+                Ok(())
+            }
+            #[cfg(unix)]
+            EditSession::Attached { .. } => Ok(()),
+        }
+    }
 }
 
 /// Persist the canonical store back to `edits/<name>.edit.json`.
@@ -674,17 +885,26 @@ fn describe_change(before: &[Shot], after: &[Shot]) -> String {
     }
 }
 
+/// Print `{ "shots": [...] }` for the current edit state (JSON mode).
+fn print_shots_json(session: &mut EditSession) -> anyhow::Result<()> {
+    let shots = session.shots()?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({ "shots": shots }))?
+    );
+    Ok(())
+}
+
 fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
     // Durable undo over the canonical CRDT store's oplog cursor (ADR-011 /
-    // REQ-086). Single-store, so there is no live/durable divergence to guard
-    // (a live session uses its own ephemeral UndoManager).
-    let mut store = load_store_mut(edit)?;
-    let before = store.snapshot().shots;
-    if !store.undo() {
+    // REQ-086), routed to a live host if one owns the edit (single store).
+    let mut session = EditSession::open(edit)?;
+    let before = session.shots()?;
+    if !session.undo()? {
         return Err(anyhow::Error::new(CliError::user("nothing to undo")));
     }
-    save_store(&store, edit)?;
-    let after = store.snapshot().shots;
+    session.commit()?;
+    let after = session.shots()?;
 
     if cli.json {
         println!(
@@ -692,7 +912,6 @@ fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
             serde_json::to_string_pretty(&serde_json::json!({
                 "undone": true,
                 "shots": after.len(),
-                "snapshot": store.to_edit_document().snapshot,
             }))?
         );
     } else {
@@ -707,13 +926,13 @@ fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
 }
 
 fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
-    let mut store = load_store_mut(edit)?;
-    let before = store.snapshot().shots;
-    if !store.redo() {
+    let mut session = EditSession::open(edit)?;
+    let before = session.shots()?;
+    if !session.redo()? {
         return Err(anyhow::Error::new(CliError::user("nothing to redo")));
     }
-    save_store(&store, edit)?;
-    let after = store.snapshot().shots;
+    session.commit()?;
+    let after = session.shots()?;
 
     if cli.json {
         println!(
@@ -721,7 +940,6 @@ fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
             serde_json::to_string_pretty(&serde_json::json!({
                 "redone": true,
                 "shots": after.len(),
-                "snapshot": store.to_edit_document().snapshot,
             }))?
         );
     } else {
@@ -1206,19 +1424,22 @@ fn cmd_note(cli: &Cli, edit: &str, shot: &str, text: &str) -> anyhow::Result<()>
     if text.trim().is_empty() {
         anyhow::bail!("note text must not be empty");
     }
-    let mut store = load_store_mut(edit)?;
-    if !store.has_shot(shot) {
+    let mut session = EditSession::open(edit)?;
+    if !session.shots()?.iter().any(|s| s.id == shot) {
         return Err(anyhow::Error::new(
             CliError::user(format!("shot '{shot}' not found")).with_hint(&format!(
                 "run `ar-edit edit show {edit}` to list available shots"
             )),
         ));
     }
-    let note = store.add_note_text(shot, text, None);
-    save_store(&store, edit)?;
+    session.add_note(shot, text)?;
+    session.commit()?;
 
     if cli.json {
-        println!("{}", serde_json::to_string_pretty(&note)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({ "shot": shot, "text": text }))?
+        );
     } else {
         println!("Added note to {shot}: {text}");
     }

@@ -14,7 +14,7 @@
 //! like any other change.
 
 use crate::store::PersistentEdit;
-use ar_edit_core::models::{Shot, ShotNote, ShotRange};
+use ar_edit_core::models::{Shot, ShotRange};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -50,7 +50,7 @@ pub enum Request {
     AddShot { shot: Shot },
     MoveShot { shot_id: String, to: usize },
     TrimShot { shot_id: String, range: ShotRange },
-    AddNote { shot_id: String, note: ShotNote },
+    AddNote { shot_id: String, text: String },
     RemoveShot { shot_id: String },
     /// Undo the most recent change via the store's durable cursor (REQ-086).
     Undo,
@@ -108,8 +108,8 @@ fn apply(store: &mut PersistentEdit, req: Request) -> Response {
             Ok(()) => Response::Ok,
             Err(e) => Response::Error { message: e.to_string() },
         },
-        Request::AddNote { shot_id, note } => {
-            store.add_note(&shot_id, &note, None);
+        Request::AddNote { shot_id, text } => {
+            store.add_note_text(&shot_id, &text, None);
             Response::Ok
         }
         Request::RemoveShot { shot_id } => {

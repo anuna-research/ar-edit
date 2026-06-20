@@ -107,7 +107,7 @@ fn undo_reverts_last_op_json() {
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["undone"], true);
     assert_eq!(json["shots"], 2);
-    assert_eq!(json["snapshot"]["shots"].as_array().unwrap().len(), 2);
+    assert_eq!(shot_ids(&edit_path).len(), 2);
 }
 
 #[test]
