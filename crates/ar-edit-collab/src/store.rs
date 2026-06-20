@@ -357,13 +357,16 @@ impl PersistentEdit {
             op_id: None,
         }];
         if legacy.head >= 0 && !legacy.ops.is_empty() {
-            // Replay the visible op log to reconstruct the undo cursor.
+            // Replay the visible op log to reconstruct the undo cursor. Skip a
+            // replayed op that doesn't change the document (e.g. a legacy
+            // remove/trim of an absent id) so migration records no phantom step
+            // — same no-op contract as `checkpoint`.
             for op in legacy.ops.iter().take((legacy.head + 1) as usize) {
                 replay(&doc, &op.op);
-                history.push(Checkpoint {
-                    frontier: doc.checkpoint(),
-                    op_id: None,
-                });
+                let frontier = doc.checkpoint();
+                if frontier != history.last().expect("baseline present").frontier {
+                    history.push(Checkpoint { frontier, op_id: None });
+                }
             }
         } else if !legacy.snapshot.shots.is_empty() {
             // Snapshot-only document (no op log): seed the materialised state.
