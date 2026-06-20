@@ -855,8 +855,19 @@ fn fmt_range(range: &ShotRange) -> String {
 }
 
 /// Load the materialised read view of an edit (REQ-079) for the read-side
-/// commands (`show`/`validate`/`render`/`--json`), via the canonical store.
+/// commands (`show`/`validate`/`render`/`--json`). If a live host owns the edit,
+/// read its in-memory snapshot so reads reflect the live session (no stale-file
+/// window); otherwise read the canonical file store.
 fn load_edit(edit: &str) -> anyhow::Result<EditDocument> {
+    #[cfg(unix)]
+    if let Some((rt, mut client)) = attach_if_hosted(edit) {
+        use ar_edit_collab::shell::daemon::{Request, Response};
+        if let Ok(Response::Snapshot { shots }) = rt.block_on(client.request(&Request::Snapshot)) {
+            let mut ed = EditDocument::create(edit);
+            ed.snapshot = ar_edit_core::models::EditSnapshot { shots };
+            return Ok(ed);
+        }
+    }
     Ok(load_store(edit)?.to_edit_document())
 }
 
@@ -1355,19 +1366,13 @@ fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         let total_duration_ms: u64 = resolved.iter().map(|s| s.duration_ms).sum();
         let output = serde_json::json!({
             "name": doc.name,
-            "head": doc.head,
             "shot_count": resolved.len(),
             "total_duration_ms": total_duration_ms,
             "shots": resolved,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        println!(
-            "Edit: {}  ({} shots, head: {})",
-            doc.name,
-            resolved.len(),
-            doc.head
-        );
+        println!("Edit: {}  ({} shots)", doc.name, resolved.len());
         println!();
 
         if resolved.is_empty() {
