@@ -580,23 +580,50 @@ fn load_store(edit: &str) -> anyhow::Result<ar_edit_collab::store::PersistentEdi
 /// blocking runtime + client to drive it. `None` if no daemon, it hosts a
 /// different edit, or the round-trip fails (the caller then uses the file store).
 #[cfg(unix)]
-fn attach_if_hosted(
-    edit: &str,
-) -> Option<(tokio::runtime::Runtime, ar_edit_collab::shell::daemon::DaemonClient)> {
+/// Result of probing whether a live host owns `edit`. Distinguishes an absent
+/// daemon from a failed round-trip so a *mutation* can fail closed on the latter
+/// (a transient IPC failure must NOT be mistaken for "no host" and modify the
+/// file behind a possibly-live host's back).
+#[cfg(unix)]
+enum HostStatus {
+    /// No daemon socket — operate the file directly.
+    Absent,
+    /// Socket present but connect/Status failed (or returned garbage) — a host
+    /// may own this edit; mutations must abort rather than touch the file.
+    Failed,
+    /// A daemon is live but hosts a DIFFERENT edit — file-direct is safe.
+    OtherEdit,
+    /// A live host owns this edit; drive it over `client`.
+    Hosting(tokio::runtime::Runtime, ar_edit_collab::shell::daemon::DaemonClient),
+}
+
+#[cfg(unix)]
+fn host_status(edit: &str) -> HostStatus {
     use ar_edit_collab::shell::daemon::{DaemonClient, Request, Response};
     let sock = session_socket();
     if !sock.exists() {
-        return None;
+        return HostStatus::Absent;
     }
-    let rt = tokio::runtime::Runtime::new().ok()?;
-    let client = rt.block_on(async {
+    let Ok(rt) = tokio::runtime::Runtime::new() else {
+        return HostStatus::Failed;
+    };
+    let answered = rt.block_on(async {
         let mut c = DaemonClient::connect(&sock).await.ok()?;
-        match c.request(&Request::Status).await {
-            Ok(Response::Status { edit: hosted, .. }) if hosted == edit => Some(c),
-            _ => None,
+        let resp = c.request(&Request::Status).await.ok()?;
+        Some((c, resp))
+    });
+    match answered {
+        // Socket exists but no clean Status — fail closed (a host may own it).
+        None => HostStatus::Failed,
+        Some((client, Response::Status { edit: hosted, .. })) => {
+            if hosted == edit {
+                HostStatus::Hosting(rt, client)
+            } else {
+                HostStatus::OtherEdit
+            }
         }
-    })?;
-    Some((rt, client))
+        Some((_, _)) => HostStatus::Failed,
+    }
 }
 
 /// A mutation handle to an edit (REQ-090). Routed to a live host when one *owns*
@@ -616,11 +643,21 @@ enum EditSession {
 }
 
 impl EditSession {
-    /// Open `edit` for mutation, attaching to a live host if one owns it.
+    /// Open `edit` for mutation, attaching to a live host if one owns it. Fails
+    /// closed if a daemon socket is present but unresponsive (REQ-090): the host
+    /// might own this edit, so a file-direct write could diverge from it.
     fn open(edit: &str) -> anyhow::Result<Self> {
         #[cfg(unix)]
-        if let Some((rt, client)) = attach_if_hosted(edit) {
-            return Ok(EditSession::Attached { rt, client });
+        match host_status(edit) {
+            HostStatus::Hosting(rt, client) => return Ok(EditSession::Attached { rt, client }),
+            HostStatus::Failed => {
+                return Err(anyhow::Error::new(CliError::system(
+                    "a session daemon socket is present but did not respond; aborting to avoid \
+                     diverging from a possibly-live host — retry, or remove a stale \
+                     .ar-edit/session.sock if no daemon is running",
+                )))
+            }
+            HostStatus::Absent | HostStatus::OtherEdit => {}
         }
         Ok(EditSession::File {
             store: load_store(edit)?,
@@ -859,8 +896,11 @@ fn fmt_range(range: &ShotRange) -> String {
 /// read its in-memory snapshot so reads reflect the live session (no stale-file
 /// window); otherwise read the canonical file store.
 fn load_edit(edit: &str) -> anyhow::Result<EditDocument> {
+    // Reads never write, so they don't fail closed: only attach when a host
+    // definitely owns this edit; otherwise (absent / failed / other edit) read
+    // the canonical file, which a host keeps current by persisting per mutation.
     #[cfg(unix)]
-    if let Some((rt, mut client)) = attach_if_hosted(edit) {
+    if let HostStatus::Hosting(rt, mut client) = host_status(edit) {
         use ar_edit_collab::shell::daemon::{Request, Response};
         if let Ok(Response::Snapshot { shots }) = rt.block_on(client.request(&Request::Snapshot)) {
             let mut ed = EditDocument::create(edit);

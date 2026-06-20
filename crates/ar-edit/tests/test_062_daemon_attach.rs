@@ -6,6 +6,7 @@
 //! store, no divergence. Spawns a real daemon child and drives the CLI against
 //! it. Unix-only (the daemon uses a Unix socket).
 #![cfg(unix)]
+#![allow(deprecated)] // assert_cmd::cargo_bin — matches the rest of the suite
 
 use assert_cmd::cargo::cargo_bin;
 use assert_cmd::Command;
@@ -101,4 +102,42 @@ fn one_shot_commands_route_through_a_live_host() {
         original,
         "undo routed through the host restored the shot in the file"
     );
+}
+
+/// Fail-closed (REQ-090): if a daemon socket is present but unresponsive, a
+/// one-shot MUTATION must abort rather than write the file behind a possibly-live
+/// host's back. A reviewer flagged this exact class for the old undo path; it
+/// must not reappear through `attach_if_hosted`/`host_status`.
+#[test]
+fn one_shot_mutation_fails_closed_on_dead_socket() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir(tmp.path().join("edits")).unwrap();
+    let edit_path = tmp.path().join("edits/rc.edit.json");
+
+    let mut store = PersistentEdit::create("rc", ActorId(1));
+    let drop_id = store.add_shot("src-001", words(), None).unwrap();
+    fs::write(&edit_path, store.to_bytes()).unwrap();
+    let before = shot_ids(&edit_path);
+
+    // A socket file that exists but is NOT a live daemon (connecting fails).
+    let ar = tmp.path().join(".ar-edit");
+    fs::create_dir_all(&ar).unwrap();
+    fs::write(ar.join("session.sock"), b"not a socket").unwrap();
+
+    // A mutation must fail closed (non-zero) and leave the file untouched.
+    Command::cargo_bin("ar-edit")
+        .unwrap()
+        .current_dir(tmp.path())
+        .args(["edit", "remove-segment", "rc", "--shot", &drop_id])
+        .assert()
+        .failure();
+    assert_eq!(shot_ids(&edit_path), before, "file untouched after fail-closed mutation");
+
+    // ...and undo too.
+    Command::cargo_bin("ar-edit")
+        .unwrap()
+        .current_dir(tmp.path())
+        .args(["undo", "rc"])
+        .assert()
+        .failure();
 }
