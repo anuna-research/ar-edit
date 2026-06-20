@@ -1,14 +1,19 @@
 //! TEST-051 / TEST-052 / TEST-053 / TEST-053b: Undo, redo, fork, and history
+//! over the CRDT-backed canonical store (ADR-011).
 //!
-//! Integration tests that exercise `ar-edit undo`, `ar-edit redo`, and
-//! `ar-edit edit history` via the compiled binary.  Each test creates a
-//! temporary project directory with an edit document, runs the CLI, and
-//! asserts on exit codes and output.
+//! Each test builds an edit (a legacy event-sourced doc is transparently
+//! migrated on first open, REQ-088), drives `ar-edit undo`/`redo`/`history` via
+//! the compiled binary, and asserts on the durable, single-store behaviour:
+//! undo is durable over the CRDT oplog cursor and survives across one-shot CLI
+//! invocations.
 
 use assert_cmd::Command;
 use std::fs;
+use std::path::Path;
 use tempfile::TempDir;
 
+use ar_edit_collab::ids::ActorId;
+use ar_edit_collab::store::PersistentEdit;
 use ar_edit_core::models::{EditDocument, ShotRange};
 
 // ---------------------------------------------------------------------------
@@ -30,19 +35,17 @@ fn setup_project(name: &str) -> (TempDir, std::path::PathBuf) {
     (tmp, edit_path)
 }
 
-/// Build a document with three add_shot ops (head=2).
+/// A legacy event-sourced document with three add_shot ops (head=2). On first
+/// open the CLI migrates it to the canonical CRDT store, reconstructing the undo
+/// cursor from its op log so `undo` keeps working (REQ-088).
 fn doc_with_three_shots() -> EditDocument {
     let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
-        .unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
-        .unwrap();
-    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 })
-        .unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
+    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 }).unwrap();
     doc
 }
 
-/// Assert a string contains a substring (with a nice error message).
 fn assert_contains(haystack: &str, needle: &str) {
     assert!(
         haystack.contains(needle),
@@ -50,15 +53,27 @@ fn assert_contains(haystack: &str, needle: &str) {
     );
 }
 
+/// The materialised shot ids of an on-disk edit, read back through the canonical
+/// store (the file is the CRDT format after the first CLI command saves it).
+fn shot_ids(edit_path: &Path) -> Vec<String> {
+    let bytes = fs::read(edit_path).unwrap();
+    PersistentEdit::from_bytes(&bytes, ActorId(1))
+        .unwrap()
+        .snapshot()
+        .shots
+        .into_iter()
+        .map(|s| s.id)
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
-// TEST-051: Undo reverts last operation
+// TEST-051: Undo reverts the last operation, durably
 // ---------------------------------------------------------------------------
 
 #[test]
 fn undo_reverts_last_op_text() {
     let (tmp, edit_path) = setup_project("rough-cut");
-    let doc = doc_with_three_shots();
-    doc.save(&edit_path).unwrap();
+    doc_with_three_shots().save(&edit_path).unwrap();
 
     let output = ar_edit()
         .current_dir(tmp.path())
@@ -69,21 +84,18 @@ fn undo_reverts_last_op_text() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_contains(&stdout, "Undone");
-    assert_contains(&stdout, "add_shot");
-    assert_contains(&stdout, "shot-003");
+    assert_contains(&stdout, "shot-003"); // the reverted add's shot
 
-    // Verify on-disk state
-    let loaded = EditDocument::load(&edit_path).unwrap();
-    assert_eq!(loaded.head, 1);
-    assert_eq!(loaded.snapshot.shots.len(), 2);
-    assert_eq!(loaded.ops.len(), 3); // ops preserved for redo
+    // Durable: the last shot is gone, the first two remain.
+    let ids = shot_ids(&edit_path);
+    assert_eq!(ids.len(), 2);
+    assert_eq!(ids, vec!["shot-001".to_string(), "shot-002".to_string()]);
 }
 
 #[test]
 fn undo_reverts_last_op_json() {
     let (tmp, edit_path) = setup_project("rough-cut");
-    let doc = doc_with_three_shots();
-    doc.save(&edit_path).unwrap();
+    doc_with_three_shots().save(&edit_path).unwrap();
 
     let output = ar_edit()
         .current_dir(tmp.path())
@@ -93,54 +105,17 @@ fn undo_reverts_last_op_json() {
 
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(json["head"], 1);
-    assert!(json["undone_op"].is_object());
-    assert_eq!(json["undone_op"]["id"], 2);
-    assert_eq!(json["undone_op"]["op"], "add_shot");
-}
-
-/// Regression (P1, REQ-090): when an op is live-tracked (`daemon_op_id` set) and
-/// the daemon socket exists but the round-trip fails, `undo` must fail closed —
-/// abort without reverting the durable edit — rather than mistaking the failure
-/// for "no daemon" and reverting only disk.
-#[cfg(unix)]
-#[test]
-fn undo_fails_closed_on_daemon_round_trip_error() {
-    let (tmp, edit_path) = setup_project("rough-cut");
-    let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
-    // Mark the op as live-tracked so the undo gate engages.
-    doc.ops.last_mut().unwrap().daemon_op_id = Some("op-live-1".into());
-    doc.save(&edit_path).unwrap();
-
-    // A socket path that exists but is not a live daemon: connecting fails, which
-    // must be treated as a failed round-trip (fail closed), NOT "no daemon".
-    let ar = tmp.path().join(".ar-edit");
-    fs::create_dir_all(&ar).unwrap();
-    fs::write(ar.join("session.sock"), b"not a real socket").unwrap();
-
-    let output = ar_edit()
-        .current_dir(tmp.path())
-        .args(["undo", "rough-cut"])
-        .output()
-        .unwrap();
-
-    assert!(
-        !output.status.success(),
-        "undo must fail closed when the daemon round-trip fails"
-    );
-    // The durable edit was left untouched (head still points at the op).
-    let loaded = EditDocument::load(&edit_path).unwrap();
-    assert_eq!(loaded.head, 0, "durable edit must be unchanged after a failed-closed undo");
+    assert_eq!(json["undone"], true);
+    assert_eq!(json["shots"], 2);
+    assert_eq!(json["snapshot"]["shots"].as_array().unwrap().len(), 2);
 }
 
 #[test]
-fn undo_multiple_times() {
+fn undo_is_durable_across_invocations() {
     let (tmp, edit_path) = setup_project("rough-cut");
-    let doc = doc_with_three_shots();
-    doc.save(&edit_path).unwrap();
+    doc_with_three_shots().save(&edit_path).unwrap();
 
-    // Undo three times
+    // Undo three times — each a SEPARATE process, proving durable cursor undo.
     for _ in 0..3 {
         ar_edit()
             .current_dir(tmp.path())
@@ -148,18 +123,20 @@ fn undo_multiple_times() {
             .assert()
             .success();
     }
+    assert!(shot_ids(&edit_path).is_empty());
 
-    let loaded = EditDocument::load(&edit_path).unwrap();
-    assert_eq!(loaded.head, -1);
-    assert!(loaded.snapshot.shots.is_empty());
-    assert_eq!(loaded.ops.len(), 3); // all ops preserved
+    // A fourth undo has nothing left.
+    ar_edit()
+        .current_dir(tmp.path())
+        .args(["undo", "rough-cut"])
+        .assert()
+        .code(1);
 }
 
 #[test]
 fn undo_nothing_to_undo_exits_1() {
     let (tmp, edit_path) = setup_project("empty");
-    let doc = EditDocument::create("empty");
-    doc.save(&edit_path).unwrap();
+    EditDocument::create("empty").save(&edit_path).unwrap();
 
     let output = ar_edit()
         .current_dir(tmp.path())
@@ -168,15 +145,13 @@ fn undo_nothing_to_undo_exits_1() {
         .unwrap();
 
     assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_contains(&stderr, "nothing to undo");
+    assert_contains(&String::from_utf8_lossy(&output.stderr), "nothing to undo");
 }
 
 #[test]
 fn undo_nothing_to_undo_json() {
     let (tmp, edit_path) = setup_project("empty");
-    let doc = EditDocument::create("empty");
-    doc.save(&edit_path).unwrap();
+    EditDocument::create("empty").save(&edit_path).unwrap();
 
     let output = ar_edit()
         .current_dir(tmp.path())
@@ -193,9 +168,7 @@ fn undo_nothing_to_undo_json() {
 #[test]
 fn undo_nonexistent_edit_exits_1() {
     let tmp = TempDir::new().unwrap();
-    let edits_dir = tmp.path().join("edits");
-    fs::create_dir(&edits_dir).unwrap();
-
+    fs::create_dir(tmp.path().join("edits")).unwrap();
     ar_edit()
         .current_dir(tmp.path())
         .args(["undo", "nonexistent"])
@@ -210,17 +183,9 @@ fn undo_nonexistent_edit_exits_1() {
 #[test]
 fn redo_after_undo_text() {
     let (tmp, edit_path) = setup_project("rough-cut");
-    let doc = doc_with_three_shots();
-    doc.save(&edit_path).unwrap();
+    doc_with_three_shots().save(&edit_path).unwrap();
 
-    // Undo once
-    ar_edit()
-        .current_dir(tmp.path())
-        .args(["undo", "rough-cut"])
-        .assert()
-        .success();
-
-    // Redo
+    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
     let output = ar_edit()
         .current_dir(tmp.path())
         .args(["redo", "rough-cut"])
@@ -230,28 +195,16 @@ fn redo_after_undo_text() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_contains(&stdout, "Redone");
-    assert_contains(&stdout, "add_shot");
     assert_contains(&stdout, "shot-003");
-
-    let loaded = EditDocument::load(&edit_path).unwrap();
-    assert_eq!(loaded.head, 2);
-    assert_eq!(loaded.snapshot.shots.len(), 3);
+    assert_eq!(shot_ids(&edit_path).len(), 3);
 }
 
 #[test]
 fn redo_after_undo_json() {
     let (tmp, edit_path) = setup_project("rough-cut");
-    let doc = doc_with_three_shots();
-    doc.save(&edit_path).unwrap();
+    doc_with_three_shots().save(&edit_path).unwrap();
 
-    // Undo once
-    ar_edit()
-        .current_dir(tmp.path())
-        .args(["undo", "rough-cut"])
-        .assert()
-        .success();
-
-    // Redo with JSON
+    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
     let output = ar_edit()
         .current_dir(tmp.path())
         .args(["--json", "redo", "rough-cut"])
@@ -260,16 +213,14 @@ fn redo_after_undo_json() {
 
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(json["head"], 2);
-    assert_eq!(json["redone_op"]["id"], 2);
-    assert_eq!(json["redone_op"]["op"], "add_shot");
+    assert_eq!(json["redone"], true);
+    assert_eq!(json["shots"], 3);
 }
 
 #[test]
 fn redo_nothing_to_redo_exits_1() {
     let (tmp, edit_path) = setup_project("rough-cut");
-    let doc = doc_with_three_shots();
-    doc.save(&edit_path).unwrap();
+    doc_with_three_shots().save(&edit_path).unwrap();
 
     let output = ar_edit()
         .current_dir(tmp.path())
@@ -278,96 +229,65 @@ fn redo_nothing_to_redo_exits_1() {
         .unwrap();
 
     assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_contains(&stderr, "nothing to redo");
+    assert_contains(&String::from_utf8_lossy(&output.stderr), "nothing to redo");
 }
 
 #[test]
-fn undo_redo_roundtrip_preserves_snapshot() {
+fn undo_redo_roundtrip_preserves_shots() {
     let (tmp, edit_path) = setup_project("rough-cut");
-    let doc = doc_with_three_shots();
-    let original_snapshot = doc.snapshot.clone();
-    doc.save(&edit_path).unwrap();
+    doc_with_three_shots().save(&edit_path).unwrap();
+    let original = shot_ids(&edit_path);
 
-    // Undo all three
     for _ in 0..3 {
-        ar_edit()
-            .current_dir(tmp.path())
-            .args(["undo", "rough-cut"])
-            .assert()
-            .success();
+        ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
     }
-
-    // Redo all three
     for _ in 0..3 {
-        ar_edit()
-            .current_dir(tmp.path())
-            .args(["redo", "rough-cut"])
-            .assert()
-            .success();
+        ar_edit().current_dir(tmp.path()).args(["redo", "rough-cut"]).assert().success();
     }
-
-    let loaded = EditDocument::load(&edit_path).unwrap();
-    assert_eq!(loaded.head, 2);
-    assert_eq!(loaded.snapshot, original_snapshot);
+    assert_eq!(shot_ids(&edit_path), original);
 }
 
 // ---------------------------------------------------------------------------
-// TEST-053: New edit after undo forks history
+// TEST-053: A new edit after undo truncates the redo branch
 // ---------------------------------------------------------------------------
 
 #[test]
-fn new_op_after_undo_truncates_redo_history() {
+fn new_edit_after_undo_truncates_redo() {
     let (tmp, edit_path) = setup_project("rough-cut");
-    let mut doc = doc_with_three_shots();
+    doc_with_three_shots().save(&edit_path).unwrap();
 
-    // Undo two ops (head moves to 0)
-    doc.undo().unwrap();
-    doc.undo().unwrap();
-    assert_eq!(doc.head, 0);
+    // Undo twice (→ 1 shot), then make a NEW edit (remove the remaining shot —
+    // no project manifest needed), forking the history.
+    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
+    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
+    let remaining = shot_ids(&edit_path);
+    assert_eq!(remaining.len(), 1);
 
-    // Add a new shot — this forks: ops[1] and ops[2] are discarded
-    doc.add_shot(
-        "src-004",
-        ShotRange::Time {
-            from_ms: 0,
-            to_ms: 5000,
-        },
-    )
-    .unwrap();
-    doc.save(&edit_path).unwrap();
+    ar_edit()
+        .current_dir(tmp.path())
+        .args(["edit", "remove-segment", "rough-cut", "--shot", &remaining[0]])
+        .assert()
+        .success();
+    assert!(shot_ids(&edit_path).is_empty());
 
-    // Verify fork happened
-    let loaded = EditDocument::load(&edit_path).unwrap();
-    assert_eq!(loaded.ops.len(), 2);
-    assert_eq!(loaded.head, 1);
-    assert_eq!(loaded.snapshot.shots.len(), 2);
-    assert_eq!(loaded.snapshot.shots[0].id, "shot-001");
-    assert_eq!(loaded.snapshot.shots[1].id, "shot-004");
-
-    // Redo should fail since the redo history was discarded
-    let output = ar_edit()
+    // Redo must now fail — the redo branch was discarded.
+    ar_edit()
         .current_dir(tmp.path())
         .args(["redo", "rough-cut"])
-        .output()
-        .unwrap();
-
-    assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_contains(&stderr, "nothing to redo");
+        .assert()
+        .code(1);
 }
 
 // ---------------------------------------------------------------------------
-// TEST-053b: Operation history display
+// TEST-053b: history shows the current timeline + undo/redo availability
 // ---------------------------------------------------------------------------
 
 #[test]
-fn history_text_shows_all_ops_with_head_marker() {
+fn history_text_shows_timeline_and_undo_state() {
     let (tmp, edit_path) = setup_project("rough-cut");
-    let mut doc = doc_with_three_shots();
-    // Undo once so head=1, ops[2] is "undone"
-    doc.undo().unwrap();
-    doc.save(&edit_path).unwrap();
+    doc_with_three_shots().save(&edit_path).unwrap();
+    // Undo once so an undo is available and a redo is too.
+    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
 
     let output = ar_edit()
         .current_dir(tmp.path())
@@ -377,24 +297,18 @@ fn history_text_shows_all_ops_with_head_marker() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // All three ops should be listed
+    assert_contains(&stdout, "Timeline");
     assert_contains(&stdout, "shot-001");
     assert_contains(&stdout, "shot-002");
-    assert_contains(&stdout, "shot-003");
-
-    // Head marker (→) should appear on op at index 1
-    assert_contains(&stdout, "\u{2192}");
-    // Op at index 2 should be marked as undone
-    assert_contains(&stdout, "(undone)");
+    assert_contains(&stdout, "undo available: true");
+    assert_contains(&stdout, "redo available: true");
 }
 
 #[test]
 fn history_json_output() {
     let (tmp, edit_path) = setup_project("rough-cut");
-    let mut doc = doc_with_three_shots();
-    doc.undo().unwrap(); // head=1
-    doc.save(&edit_path).unwrap();
+    doc_with_three_shots().save(&edit_path).unwrap();
+    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
 
     let output = ar_edit()
         .current_dir(tmp.path())
@@ -404,19 +318,15 @@ fn history_json_output() {
 
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(json["head"], 1);
-    let ops = json["ops"].as_array().unwrap();
-    assert_eq!(ops.len(), 3);
-    assert_eq!(ops[0]["op"], "add_shot");
-    assert_eq!(ops[1]["op"], "add_shot");
-    assert_eq!(ops[2]["op"], "add_shot");
+    assert_eq!(json["shots"].as_array().unwrap().len(), 2);
+    assert_eq!(json["can_undo"], true);
+    assert_eq!(json["can_redo"], true);
 }
 
 #[test]
 fn history_empty_edit() {
     let (tmp, edit_path) = setup_project("empty");
-    let doc = EditDocument::create("empty");
-    doc.save(&edit_path).unwrap();
+    EditDocument::create("empty").save(&edit_path).unwrap();
 
     let output = ar_edit()
         .current_dir(tmp.path())
@@ -425,15 +335,13 @@ fn history_empty_edit() {
         .unwrap();
 
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_contains(&stdout, "No operations");
+    assert_contains(&String::from_utf8_lossy(&output.stdout), "No shots");
 }
 
 #[test]
 fn history_json_empty_edit() {
     let (tmp, edit_path) = setup_project("empty");
-    let doc = EditDocument::create("empty");
-    doc.save(&edit_path).unwrap();
+    EditDocument::create("empty").save(&edit_path).unwrap();
 
     let output = ar_edit()
         .current_dir(tmp.path())
@@ -443,29 +351,6 @@ fn history_json_empty_edit() {
 
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(json["head"], -1);
-    assert_eq!(json["ops"].as_array().unwrap().len(), 0);
-}
-
-#[test]
-fn history_shows_mixed_op_types() {
-    let (tmp, edit_path) = setup_project("rough-cut");
-    let mut doc = doc_with_three_shots();
-    doc.move_shot("shot-003", 0).unwrap();
-    doc.trim_shot("shot-001", ShotRange::Words { from: 5, to: 45 })
-        .unwrap();
-    doc.save(&edit_path).unwrap();
-
-    let output = ar_edit()
-        .current_dir(tmp.path())
-        .args(["edit", "history", "rough-cut"])
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    assert_contains(&stdout, "add_shot");
-    assert_contains(&stdout, "move_shot");
-    assert_contains(&stdout, "trim_shot");
+    assert_eq!(json["shots"].as_array().unwrap().len(), 0);
+    assert_eq!(json["can_undo"], false);
 }

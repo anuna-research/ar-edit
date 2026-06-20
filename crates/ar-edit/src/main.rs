@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process;
 
-use ar_edit_core::models::{EditDocument, EditOpKind, ShotRange, Source};
+use ar_edit_core::models::{EditDocument, Shot, ShotRange, Source};
 use ar_edit_core::playback;
 use clap::Parser;
 use cli::{
@@ -384,18 +384,17 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 if path.exists() {
                     anyhow::bail!("edit '{}' already exists", name);
                 }
-                let doc = EditDocument::create(name);
-                doc.save(&path)?;
+                let store = ar_edit_collab::store::PersistentEdit::create(name, local_actor());
+                save_store(&store, name)?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                    println!("{}", serde_json::to_string_pretty(&store.to_edit_document())?);
                 } else {
                     println!("Created edit '{}'", name);
                 }
                 Ok(())
             }
             EditCommand::AddSegment(args) => {
-                let path = edit_path(&args.edit);
-                let mut doc = EditDocument::load(&path)?;
+                let mut store = load_store(&args.edit)?;
                 let range = parse_range(&args.range)?;
 
                 // Eager validation: check source exists and range is in bounds
@@ -412,48 +411,12 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     anyhow::bail!("invalid segment:\n{}", details.join("\n"));
                 }
 
-                // If a session daemon is live, let it mint the canonical
-                // actor-scoped id (under a unique op id) and adopt it for the
-                // persisted/reported shot, so later id-keyed ops (move/trim/
-                // note/remove) and undo target the same live shot (REQ-090).
-                // Otherwise mint the usual sequential id. Fails closed if a
-                // daemon is present but the round-trip errors.
-                #[cfg(unix)]
-                let op_id = new_op_id();
-                #[cfg(unix)]
-                let minted = daemon_add_shot(&op_id, &args.source, &range)?;
-                #[cfg(not(unix))]
-                let minted: Option<String> = None;
-
-                let shot_id = match &minted {
-                    Some(id) => doc.add_shot_with_id(id.clone(), &args.source, range)?.id.clone(),
-                    None => doc.add_shot(&args.source, range)?.id.clone(),
-                };
-                // Persist the live op id so a later undo names this exact op.
-                #[cfg(unix)]
-                if minted.is_some() {
-                    doc.tag_last_op(op_id.clone());
-                }
-
-                // The live daemon already committed (and persisted) the add. If
-                // the durable on-disk save now fails, roll the live add back so
-                // the daemon and peers don't retain a shot the on-disk document
-                // never recorded — otherwise a retry would create a duplicate
-                // (REQ-090).
-                if let Err(e) = doc.save(&path) {
-                    #[cfg(unix)]
-                    if minted.is_some() {
-                        // Undo the just-recorded live add (top of the daemon's
-                        // undo stack) so it leaves no shot AND no stray undo
-                        // entry — a plain remove would do neither cleanly.
-                        forward_to_daemon(ar_edit_collab::shell::daemon::Request::Undo {
-                            tag: op_id.clone(),
-                        });
-                    }
-                    return Err(anyhow::Error::new(CliError::system(e)));
-                }
+                let shot_id = store
+                    .add_shot(&args.source, range, None)
+                    .map_err(|e| anyhow::Error::new(CliError::user(e)))?;
+                save_store(&store, &args.edit)?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                    println!("{}", serde_json::to_string_pretty(&store.to_edit_document())?);
                 } else {
                     println!("Added {} to '{}'", shot_id, args.edit);
                 }
@@ -464,67 +427,34 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 shot,
                 position,
             } => {
-                let path = edit_path(edit);
-                let mut doc = EditDocument::load(&path)?;
-                doc.move_shot(shot, *position as usize)?;
-                // When a daemon is live, mint a unique op id, persist it with the
-                // durable op, and forward the mutation under it so a later undo
-                // can name this exact live op (REQ-090).
-                #[cfg(unix)]
-                let op_id = session_socket().exists().then(new_op_id);
-                #[cfg(unix)]
-                if let Some(id) = &op_id {
-                    doc.tag_last_op(id.clone());
-                }
-                doc.save(&path)?;
-                #[cfg(unix)]
-                if let Some(id) = op_id {
-                    forward_to_daemon(ar_edit_collab::shell::daemon::Request::MoveShot {
-                        op_id: id,
-                        shot_id: shot.clone(),
-                        to: *position as usize,
-                    });
-                }
+                let mut store = load_store(edit)?;
+                store.move_shot(shot, *position as usize, None);
+                save_store(&store, edit)?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                    println!("{}", serde_json::to_string_pretty(&store.to_edit_document())?);
                 } else {
                     println!("Moved {} to position {} in '{}'", shot, position, edit);
                 }
                 Ok(())
             }
             EditCommand::RemoveSegment { edit, shot } => {
-                let path = edit_path(edit);
-                let mut doc = EditDocument::load(&path)?;
-                doc.remove_shot(shot)?;
-                #[cfg(unix)]
-                let op_id = session_socket().exists().then(new_op_id);
-                #[cfg(unix)]
-                if let Some(id) = &op_id {
-                    doc.tag_last_op(id.clone());
-                }
-                doc.save(&path)?;
-                #[cfg(unix)]
-                if let Some(id) = op_id {
-                    forward_to_daemon(ar_edit_collab::shell::daemon::Request::RemoveShot {
-                        op_id: id,
-                        shot_id: shot.clone(),
-                    });
-                }
+                let mut store = load_store(edit)?;
+                store.remove_shot(shot, None);
+                save_store(&store, edit)?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                    println!("{}", serde_json::to_string_pretty(&store.to_edit_document())?);
                 } else {
                     println!("Removed {} from '{}'", shot, edit);
                 }
                 Ok(())
             }
             EditCommand::TrimSegment(args) => {
-                let path = edit_path(&args.edit);
-                let mut doc = EditDocument::load(&path)?;
+                let mut store = load_store(&args.edit)?;
                 let range = parse_range(&args.range)?;
 
                 // Find the shot's source for validation
-                let shot_source = doc
-                    .snapshot
+                let shot_source = store
+                    .snapshot()
                     .shots
                     .iter()
                     .find(|s| s.id == args.shot)
@@ -545,26 +475,12 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     anyhow::bail!("invalid segment:\n{}", details.join("\n"));
                 }
 
-                #[cfg(unix)]
-                let range_for_daemon = range.clone();
-                doc.trim_shot(&args.shot, range)?;
-                #[cfg(unix)]
-                let op_id = session_socket().exists().then(new_op_id);
-                #[cfg(unix)]
-                if let Some(id) = &op_id {
-                    doc.tag_last_op(id.clone());
-                }
-                doc.save(&path)?;
-                #[cfg(unix)]
-                if let Some(id) = op_id {
-                    forward_to_daemon(ar_edit_collab::shell::daemon::Request::TrimShot {
-                        op_id: id,
-                        shot_id: args.shot.clone(),
-                        range: range_for_daemon,
-                    });
-                }
+                store
+                    .trim_shot(&args.shot, range, None)
+                    .map_err(|e| anyhow::Error::new(CliError::user(e)))?;
+                save_store(&store, &args.edit)?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                    println!("{}", serde_json::to_string_pretty(&store.to_edit_document())?);
                 } else {
                     println!("Trimmed {} in '{}'", args.shot, args.edit);
                 }
@@ -630,6 +546,47 @@ fn edit_path(name: &str) -> PathBuf {
     PathBuf::from("edits").join(format!("{name}.edit.json"))
 }
 
+/// The project-local CRDT actor id for file-store edits (ADR-011). Persisted at
+/// `.ar-edit/actor` and shared with the session daemon, so an edit and its live
+/// session carry the same site identity. New edits / migrations are owned by it.
+fn local_actor() -> ar_edit_collab::ids::ActorId {
+    use ar_edit_collab::ids::ActorId;
+    let dir = PathBuf::from(".ar-edit");
+    let path = dir.join("actor");
+    if let Ok(s) = std::fs::read_to_string(&path) {
+        if let Ok(n) = u64::from_str_radix(s.trim(), 16) {
+            return ActorId(n);
+        }
+    }
+    let actor = ActorId::generate();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(&path, format!("{:016x}\n", actor.0));
+    actor
+}
+
+/// Load the canonical CRDT-backed edit store (ADR-011), transparently migrating
+/// a legacy event-sourced document on first open (REQ-088).
+fn load_store(edit: &str) -> anyhow::Result<ar_edit_collab::store::PersistentEdit> {
+    let path = edit_path(edit);
+    let bytes = std::fs::read(&path).map_err(|e| {
+        anyhow::Error::new(CliError::user(e).with_hint(&format!(
+            "check that edit '{edit}' exists in the edits/ directory"
+        )))
+    })?;
+    ar_edit_collab::store::PersistentEdit::from_bytes(&bytes, local_actor())
+        .map_err(|e| anyhow::Error::new(CliError::user(e)))
+}
+
+/// Persist the canonical store back to `edits/<name>.edit.json`.
+fn save_store(store: &ar_edit_collab::store::PersistentEdit, edit: &str) -> anyhow::Result<()> {
+    let path = edit_path(edit);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).system_err()?;
+    }
+    std::fs::write(&path, store.to_bytes()).system_err()?;
+    Ok(())
+}
+
 /// This project's session-daemon IPC socket (REQ-089/090).
 #[cfg(unix)]
 fn session_socket() -> PathBuf {
@@ -662,131 +619,6 @@ fn session_actor() -> ar_edit_collab::ids::ActorId {
     actor
 }
 
-/// Best-effort: if a session daemon is listening for this project, forward `req`
-/// so the edit enters the live CRDT and propagates to peers (REQ-090). The
-/// on-disk event-sourced document remains the durable local store; this
-/// connects the live-collaboration path that was previously disconnected. When
-/// no daemon is running the socket is absent and this is a cheap no-op (no
-/// runtime is spun up).
-///
-/// Id alignment: an add made while the daemon is live adopts the daemon-minted
-/// actor-scoped id (see [`daemon_add_shot`]), so subsequent id-keyed ops
-/// (move/trim/remove/note and the undo/redo mirrors) target the same live shot.
-/// Re-importing the on-disk edit into a fresh daemon is still OQ-8; an op naming
-/// an id the daemon has never seen is harmlessly ignored.
-#[cfg(unix)]
-fn forward_to_daemon(req: ar_edit_collab::shell::daemon::Request) {
-    let sock = session_socket();
-    if !sock.exists() {
-        return;
-    }
-    if let Ok(rt) = tokio::runtime::Runtime::new() {
-        rt.block_on(async move {
-            if let Ok(mut client) =
-                ar_edit_collab::shell::daemon::DaemonClient::connect(&sock).await
-            {
-                let _ = client.request(&req).await;
-            }
-        });
-    }
-}
-
-/// Outcome of a daemon round-trip, distinguishing an absent daemon from a failed
-/// round-trip so callers can fail closed on the latter (a transient IPC failure
-/// must not be mistaken for "no daemon" and silently modify only disk — REQ-090).
-#[cfg(unix)]
-enum DaemonOutcome {
-    /// No daemon is running (socket absent) — proceed durable-only.
-    Absent,
-    /// The socket exists but connecting/requesting failed — fail closed.
-    Failed,
-    /// The daemon answered.
-    Responded(ar_edit_collab::shell::daemon::Response),
-}
-
-/// Send `req` to a live daemon, distinguishing absent / failed / responded.
-#[cfg(unix)]
-fn daemon_call(req: ar_edit_collab::shell::daemon::Request) -> DaemonOutcome {
-    use ar_edit_collab::shell::daemon::DaemonClient;
-    let sock = session_socket();
-    if !sock.exists() {
-        return DaemonOutcome::Absent;
-    }
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
-        Err(_) => return DaemonOutcome::Failed,
-    };
-    rt.block_on(async move {
-        match DaemonClient::connect(&sock).await {
-            Ok(mut client) => match client.request(&req).await {
-                Ok(resp) => DaemonOutcome::Responded(resp),
-                Err(_) => DaemonOutcome::Failed,
-            },
-            Err(_) => DaemonOutcome::Failed,
-        }
-    })
-}
-
-/// A unique id for one durable operation, used as its live-session undo tag. A
-/// "<kind>:<shot>" tag is not unique (two trims of one shot collide); this is.
-/// One CLI invocation performs one mutation, so process id + nanos + a counter
-/// is globally unique across the session.
-#[cfg(unix)]
-fn new_op_id() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    format!("{:x}-{:x}-{:x}", std::process::id(), nanos, seq)
-}
-
-/// If a session daemon is live, forward an AddShot under `op_id` and return the
-/// daemon-minted, actor-scoped id (REQ-090). `Ok(None)` means no daemon (mint
-/// locally); `Err` means the daemon is present but the round-trip (or the
-/// daemon) failed — the caller fails closed rather than diverging. Adopting the
-/// returned id keeps the on-disk document and the live CRDT referring to the
-/// same shot.
-#[cfg(unix)]
-fn daemon_add_shot(op_id: &str, source: &str, range: &ShotRange) -> anyhow::Result<Option<String>> {
-    use ar_edit_collab::shell::daemon::{Request, Response};
-    let shot = ar_edit_core::models::Shot {
-        id: String::new(),
-        source: source.to_string(),
-        range: range.clone(),
-        notes: vec![],
-    };
-    match daemon_call(Request::AddShot {
-        op_id: op_id.to_string(),
-        shot,
-    }) {
-        DaemonOutcome::Absent => Ok(None),
-        DaemonOutcome::Responded(Response::Added { shot_id }) => Ok(Some(shot_id)),
-        DaemonOutcome::Responded(Response::Error { message }) => {
-            Err(anyhow::Error::new(CliError::user(message)))
-        }
-        DaemonOutcome::Responded(_) => Ok(None),
-        DaemonOutcome::Failed => Err(anyhow::Error::new(CliError::system(
-            "session daemon round-trip failed; aborting to keep durable and live state consistent",
-        ))),
-    }
-}
-
-/// Return a human-readable label and the affected shot ID for an op.
-fn op_summary(kind: &EditOpKind) -> (&str, &str) {
-    match kind {
-        EditOpKind::AddShot { shot } => ("add_shot", &shot.id),
-        EditOpKind::RemoveShot { shot_id, .. } => ("remove_shot", shot_id),
-        EditOpKind::MoveShot { shot_id, .. } => ("move_shot", shot_id),
-        EditOpKind::TrimShot { shot_id, .. } => ("trim_shot", shot_id),
-        EditOpKind::ReplaceRangeType { shot_id, .. } => ("replace_range_type", shot_id),
-        EditOpKind::AddNote { shot_id, .. } => ("add_note", shot_id),
-    }
-}
-
 fn fmt_range(range: &ShotRange) -> String {
     match range {
         ShotRange::Words { from, to } => format!("words[{}..{}]", from, to),
@@ -795,231 +627,135 @@ fn fmt_range(range: &ShotRange) -> String {
     }
 }
 
-fn op_detail(kind: &EditOpKind) -> String {
-    match kind {
-        EditOpKind::AddShot { shot } => {
-            format!("{} {}", shot.source, fmt_range(&shot.range))
-        }
-        EditOpKind::RemoveShot { shot, .. } => {
-            format!("{} {}", shot.source, fmt_range(&shot.range))
-        }
-        EditOpKind::MoveShot {
-            from_position,
-            to_position,
-            ..
-        } => {
-            format!("pos {} \u{2192} {}", from_position, to_position)
-        }
-        EditOpKind::TrimShot {
-            old_range,
-            new_range,
-            ..
-        } => {
-            format!("{} \u{2192} {}", fmt_range(old_range), fmt_range(new_range))
-        }
-        EditOpKind::ReplaceRangeType {
-            old_range,
-            new_range,
-            ..
-        } => {
-            format!("{} \u{2192} {}", fmt_range(old_range), fmt_range(new_range))
-        }
-        EditOpKind::AddNote { note, .. } => {
-            let text = &note.text;
-            let truncated: String = text.chars().take(40).collect();
-            if truncated.len() < text.len() {
-                format!("\"{}…\"", truncated)
-            } else {
-                format!("\"{}\"", text)
-            }
-        }
-    }
-}
-
-/// Load an edit document, producing a user-error with hint on failure.
+/// Load the materialised read view of an edit (REQ-079) for the read-side
+/// commands (`show`/`validate`/`render`/`--json`), via the canonical store.
 fn load_edit(edit: &str) -> anyhow::Result<EditDocument> {
-    let path = edit_path(edit);
-    EditDocument::load(&path).map_err(|e| {
-        anyhow::Error::new(CliError::user(e).with_hint(&format!(
-            "check that edit '{edit}' exists in the edits/ directory"
-        )))
-    })
+    Ok(load_store(edit)?.to_edit_document())
 }
 
 // ---------------------------------------------------------------------------
 // Command handlers: undo / redo / history
 // ---------------------------------------------------------------------------
 
+/// Describe the difference an undo/redo made, for human output: shots removed
+/// vs. added between `before` and `after` (a move/trim shows neither).
+fn describe_change(before: &[Shot], after: &[Shot]) -> String {
+    let removed: Vec<&str> = before
+        .iter()
+        .filter(|b| !after.iter().any(|a| a.id == b.id))
+        .map(|s| s.id.as_str())
+        .collect();
+    let added: Vec<&str> = after
+        .iter()
+        .filter(|a| !before.iter().any(|b| b.id == a.id))
+        .map(|s| s.id.as_str())
+        .collect();
+    match (removed.as_slice(), added.as_slice()) {
+        ([], []) => "reordered/retrimmed".to_string(),
+        (r, []) => format!("removed {}", r.join(", ")),
+        ([], a) => format!("restored {}", a.join(", ")),
+        (r, a) => format!("removed {}, restored {}", r.join(", "), a.join(", ")),
+    }
+}
+
 fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
-    let path = edit_path(edit);
-    let mut doc = load_edit(edit)?;
-
-    // The op an undo would revert carries the unique live op id it was recorded
-    // under (`None` if it was never forwarded to a daemon). Binding the live
-    // undo to that exact op id prevents the daemon from popping an unrelated op
-    // (another client's IPC edit, a rollback) and diverging from disk (REQ-090).
-    #[cfg(unix)]
-    let undo_tag: Option<String> = (doc.head >= 0)
-        .then(|| doc.ops[doc.head as usize].daemon_op_id.clone())
-        .flatten();
-
-    // Gate on the live session: if this op is live-tracked, the daemon must
-    // revert that exact op first. Refuse (without touching disk) if the daemon
-    // can't (diverged/empty history) OR if the round-trip fails — a transient
-    // IPC error must not be mistaken for "no daemon" and revert only disk
-    // (REQ-086/090).
-    #[cfg(unix)]
-    if let Some(tag) = &undo_tag {
-        use ar_edit_collab::shell::daemon::{Request, Response};
-        match daemon_call(Request::Undo { tag: tag.clone() }) {
-            // No daemon now: the live session is gone, so a durable-only undo
-            // diverges nothing live — proceed.
-            DaemonOutcome::Absent => {}
-            DaemonOutcome::Responded(Response::Reverted { reverted: true }) => {}
-            DaemonOutcome::Responded(_) => {
-                return Err(anyhow::Error::new(CliError::user(
-                    "a live session is attached but has no matching operation to revert \
-                     (the live document may have diverged or the daemon was restarted); \
-                     the durable edit was left unchanged",
-                )));
-            }
-            DaemonOutcome::Failed => {
-                return Err(anyhow::Error::new(CliError::system(
-                    "session daemon round-trip failed; aborting the undo to avoid reverting \
-                     only the durable edit",
-                )));
-            }
-        }
+    // Durable undo over the canonical CRDT store's oplog cursor (ADR-011 /
+    // REQ-086). Single-store, so there is no live/durable divergence to guard
+    // (a live session uses its own ephemeral UndoManager).
+    let mut store = load_store(edit)?;
+    let before = store.snapshot().shots;
+    if !store.undo() {
+        return Err(anyhow::Error::new(CliError::user("nothing to undo")));
     }
-
-    let undone = doc
-        .undo()
-        .map_err(|e| anyhow::Error::new(CliError::user(e)))?
-        .clone();
-    if let Err(e) = doc.save(&path) {
-        // The live side already reverted but the durable save failed; replay it
-        // live so both sides stay consistent (mirror of the add rollback).
-        #[cfg(unix)]
-        if let Some(tag) = undo_tag {
-            forward_to_daemon(ar_edit_collab::shell::daemon::Request::Redo { tag });
-        }
-        return Err(anyhow::Error::new(CliError::system(e)));
-    }
+    save_store(&store, edit)?;
+    let after = store.snapshot().shots;
 
     if cli.json {
-        let output = serde_json::json!({
-            "head": doc.head,
-            "undone_op": undone,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        let (op_type, shot_id) = op_summary(&undone.op);
-        let detail = op_detail(&undone.op);
         println!(
-            "Undone: #{} {} {} — {} (head \u{2192} {})",
-            undone.id, op_type, shot_id, detail, doc.head
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "undone": true,
+                "shots": after.len(),
+                "snapshot": store.to_edit_document().snapshot,
+            }))?
+        );
+    } else {
+        println!(
+            "Undone in '{}': {} ({} shots)",
+            edit,
+            describe_change(&before, &after),
+            after.len()
         );
     }
     Ok(())
 }
 
 fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
-    let path = edit_path(edit);
-    let mut doc = load_edit(edit)?;
-
-    // The op a redo would re-apply is the one just past the head; it carries the
-    // unique live op id it was recorded under (`None` if never daemon-tracked).
-    #[cfg(unix)]
-    let redo_tag: Option<String> = (doc.head + 1 < doc.ops.len() as i32)
-        .then(|| doc.ops[(doc.head + 1) as usize].daemon_op_id.clone())
-        .flatten();
-
-    // Gate the durable redo on the live session re-applying that exact op
-    // (inverse of the undo path), failing closed on a round-trip error
-    // (REQ-086/090).
-    #[cfg(unix)]
-    if let Some(tag) = &redo_tag {
-        use ar_edit_collab::shell::daemon::{Request, Response};
-        match daemon_call(Request::Redo { tag: tag.clone() }) {
-            DaemonOutcome::Absent => {}
-            DaemonOutcome::Responded(Response::Reverted { reverted: true }) => {}
-            DaemonOutcome::Responded(_) => {
-                return Err(anyhow::Error::new(CliError::user(
-                    "a live session is attached but has no matching operation to redo \
-                     (the live document may have diverged or the daemon was restarted); \
-                     the durable edit was left unchanged",
-                )));
-            }
-            DaemonOutcome::Failed => {
-                return Err(anyhow::Error::new(CliError::system(
-                    "session daemon round-trip failed; aborting the redo to avoid re-applying \
-                     only on the durable edit",
-                )));
-            }
-        }
+    let mut store = load_store(edit)?;
+    let before = store.snapshot().shots;
+    if !store.redo() {
+        return Err(anyhow::Error::new(CliError::user("nothing to redo")));
     }
-
-    let redone = doc
-        .redo()
-        .map_err(|e| anyhow::Error::new(CliError::user(e)))?
-        .clone();
-    if let Err(e) = doc.save(&path) {
-        // Durable save failed after the live re-apply; undo it live again.
-        #[cfg(unix)]
-        if let Some(tag) = redo_tag {
-            forward_to_daemon(ar_edit_collab::shell::daemon::Request::Undo { tag });
-        }
-        return Err(anyhow::Error::new(CliError::system(e)));
-    }
+    save_store(&store, edit)?;
+    let after = store.snapshot().shots;
 
     if cli.json {
-        let output = serde_json::json!({
-            "head": doc.head,
-            "redone_op": redone,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        let (op_type, shot_id) = op_summary(&redone.op);
-        let detail = op_detail(&redone.op);
         println!(
-            "Redone: #{} {} {} — {} (head \u{2192} {})",
-            redone.id, op_type, shot_id, detail, doc.head
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "redone": true,
+                "shots": after.len(),
+                "snapshot": store.to_edit_document().snapshot,
+            }))?
+        );
+    } else {
+        println!(
+            "Redone in '{}': {} ({} shots)",
+            edit,
+            describe_change(&before, &after),
+            after.len()
         );
     }
     Ok(())
 }
 
 fn cmd_history(cli: &Cli, edit: &str) -> anyhow::Result<()> {
-    let doc = load_edit(edit)?;
+    // The CRDT is the canonical store (ADR-011): the timeline is the current
+    // ordered shot list, plus whether durable undo/redo is available. (The
+    // event-sourced per-op log is retired with the single-store model.)
+    let store = load_store(edit)?;
+    let shots = store.snapshot().shots;
 
     if cli.json {
-        let output = serde_json::json!({
-            "head": doc.head,
-            "ops": doc.ops,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else if doc.ops.is_empty() {
-        println!("No operations.");
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "shots": shots,
+                "can_undo": store.can_undo(),
+                "can_redo": store.can_redo(),
+            }))?
+        );
+    } else if shots.is_empty() {
+        println!(
+            "No shots in '{edit}'. (undo: {}, redo: {})",
+            store.can_undo(),
+            store.can_redo()
+        );
     } else {
-        for (i, op) in doc.ops.iter().enumerate() {
-            let (op_type, shot_id) = op_summary(&op.op);
-            let detail = op_detail(&op.op);
-            let marker = if i as i32 == doc.head {
-                "\u{2192}"
-            } else {
-                " "
-            };
-            let ts = op.ts.format("%Y-%m-%d %H:%M:%S");
-            let suffix = if (i as i32) > doc.head {
-                "  (undone)"
-            } else {
-                ""
-            };
+        println!("Timeline for '{edit}':");
+        for (i, s) in shots.iter().enumerate() {
             println!(
-                "{marker} {id:>3}  {op_type:<19} {shot_id:<12} {detail:<40} {ts}{suffix}",
-                id = op.id
+                "  {i:>3}  {id:<14} {src:<10} {range}",
+                id = s.id,
+                src = s.source,
+                range = fmt_range(&s.range)
             );
         }
+        println!(
+            "(undo available: {}, redo available: {})",
+            store.can_undo(),
+            store.can_redo()
+        );
     }
     Ok(())
 }
@@ -1454,32 +1190,16 @@ fn cmd_note(cli: &Cli, edit: &str, shot: &str, text: &str) -> anyhow::Result<()>
     if text.trim().is_empty() {
         anyhow::bail!("note text must not be empty");
     }
-    let path = edit_path(edit);
-    let mut doc = load_edit(edit)?;
-
-    let note = doc
-        .add_note(shot, text)
-        .map_err(|e| {
-            anyhow::Error::new(CliError::user(e).with_hint(&format!(
+    let mut store = load_store(edit)?;
+    if !store.has_shot(shot) {
+        return Err(anyhow::Error::new(
+            CliError::user(format!("shot '{shot}' not found")).with_hint(&format!(
                 "run `ar-edit edit show {edit}` to list available shots"
-            )))
-        })?
-        .clone();
-    #[cfg(unix)]
-    let op_id = session_socket().exists().then(new_op_id);
-    #[cfg(unix)]
-    if let Some(id) = &op_id {
-        doc.tag_last_op(id.clone());
+            )),
+        ));
     }
-    doc.save(&path).system_err()?;
-    #[cfg(unix)]
-    if let Some(id) = op_id {
-        forward_to_daemon(ar_edit_collab::shell::daemon::Request::AddNote {
-            op_id: id,
-            shot_id: shot.to_string(),
-            note: note.clone(),
-        });
-    }
+    let note = store.add_note_text(shot, text, None);
+    save_store(&store, edit)?;
 
     if cli.json {
         println!("{}", serde_json::to_string_pretty(&note)?);
@@ -2483,16 +2203,20 @@ fn cmd_from_transcript(cli: &Cli, file: &Path, output: Option<&str>) -> anyhow::
     let edits_dir = PathBuf::from("edits");
     std::fs::create_dir_all(&edits_dir)?;
 
-    let path = edits_dir.join(format!("{}.edit.json", doc.name));
     let shot_count = doc.snapshot.shots.len();
     let name = doc.name.clone();
 
-    doc.save(&path).system_err()?;
+    // Persist as the canonical CRDT store (ADR-011): migrate the imported
+    // event-sourced document into the store format and write it.
+    let bytes = serde_json::to_vec(&doc).system_err()?;
+    let store = ar_edit_collab::store::PersistentEdit::from_bytes(&bytes, local_actor())
+        .map_err(|e| anyhow::Error::new(CliError::system(e)))?;
+    save_store(&store, &name)?;
 
     if cli.json {
         let output = serde_json::json!({
             "name": name,
-            "path": path.display().to_string(),
+            "path": edit_path(&name).display().to_string(),
             "shot_count": shot_count,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);

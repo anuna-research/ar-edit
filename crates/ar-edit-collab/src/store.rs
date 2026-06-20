@@ -218,6 +218,23 @@ impl PersistentEdit {
         self.checkpoint(op_id);
     }
 
+    /// Whether a shot with `shot_id` is currently present.
+    pub fn has_shot(&self, shot_id: &str) -> bool {
+        self.snapshot().shots.iter().any(|s| s.id == shot_id)
+    }
+
+    /// Append a note from `text` (timestamped now); returns it. Keeps `chrono`
+    /// out of one-shot callers.
+    pub fn add_note_text(&mut self, shot_id: &str, text: &str, op_id: Option<String>) -> ShotNote {
+        let note = ShotNote {
+            text: text.to_string(),
+            created: Utc::now(),
+        };
+        self.doc.add_note(shot_id, &note);
+        self.checkpoint(op_id);
+        note
+    }
+
     /// Durably undo the most recent local change; returns whether anything was
     /// undone. Survives a save/reload (the revert is recorded in the snapshot).
     pub fn undo(&mut self) -> bool {
@@ -324,7 +341,8 @@ impl PersistentEdit {
             frontier: doc.checkpoint(),
             op_id: None,
         }];
-        if legacy.head >= 0 {
+        if legacy.head >= 0 && !legacy.ops.is_empty() {
+            // Replay the visible op log to reconstruct the undo cursor.
             for op in legacy.ops.iter().take((legacy.head + 1) as usize) {
                 replay(&doc, &op.op);
                 history.push(Checkpoint {
@@ -332,6 +350,16 @@ impl PersistentEdit {
                     op_id: None,
                 });
             }
+        } else if !legacy.snapshot.shots.is_empty() {
+            // Snapshot-only document (no op log): seed the materialised state.
+            // No undo history to reconstruct — re-baseline at the seeded state.
+            for shot in &legacy.snapshot.shots {
+                doc.add_shot(shot);
+            }
+            history = vec![Checkpoint {
+                frontier: doc.checkpoint(),
+                op_id: None,
+            }];
         }
         let head = history.len() - 1;
         Self {
