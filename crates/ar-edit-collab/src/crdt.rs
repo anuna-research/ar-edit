@@ -285,15 +285,6 @@ impl CollabDoc {
         self.doc.commit();
     }
 
-    /// Change a shot's source (REQ-081: LWW register).
-    pub fn set_source(&self, shot_id: &str, source: &str) {
-        self.doc
-            .get_map(SHOT_SOURCE)
-            .insert(shot_id, source)
-            .expect("set source");
-        self.doc.commit();
-    }
-
     /// Append a note to a shot (REQ-082: grow-only; never lost on merge).
     pub fn add_note(&self, shot_id: &str, note: &ShotNote) {
         let counter = self.note_counter.fetch_add(1, Ordering::Relaxed);
