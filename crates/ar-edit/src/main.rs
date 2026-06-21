@@ -2432,7 +2432,7 @@ fn cmd_poi_add(cli: &Cli, args: &cli::PoiAddArgs) -> anyhow::Result<()> {
 }
 
 fn cmd_poi_list(cli: &Cli, args: &cli::PoiListArgs) -> anyhow::Result<()> {
-    use ar_edit_core::models::{Poi, PoiCategory, SourcePois};
+    use ar_edit_core::models::{Poi, PoiCategory};
 
     let sources: Vec<(String, Vec<Poi>)> = match &args.source_id {
         Some(sid) => vec![(sid.clone(), load_annotations(sid)?.pois())],
@@ -2459,23 +2459,25 @@ fn cmd_poi_list(cli: &Cli, args: &cli::PoiListArgs) -> anyhow::Result<()> {
     };
 
     if cli.json {
-        let mut docs: Vec<SourcePois> = Vec::new();
+        // Flat list of POIs, each tagged with its source_id — mirrors the
+        // shape of `markers --json` so the two annotation commands stay
+        // consistent for scripting.
+        let mut pois_json: Vec<serde_json::Value> = Vec::new();
         for (sid, pois) in &sources {
-            let filtered: Vec<_> = pois
+            for poi in pois
                 .iter()
                 .filter(|p| cat_filter.map_or(true, |c| p.category == c))
-                .cloned()
-                .collect();
-            if !filtered.is_empty() {
-                docs.push(SourcePois {
-                    source_id: sid.clone(),
-                    pois: filtered,
-                });
+            {
+                let mut value = serde_json::to_value(poi)?;
+                if let serde_json::Value::Object(map) = &mut value {
+                    map.insert("source_id".to_string(), serde_json::json!(sid));
+                }
+                pois_json.push(value);
             }
         }
         println!(
             "{}",
-            serde_json::to_string_pretty(&serde_json::json!({ "pois": docs }))?
+            serde_json::to_string_pretty(&serde_json::json!({ "pois": pois_json }))?
         );
         return Ok(());
     }

@@ -157,7 +157,11 @@ fn poi_add_list_remove_through_crdt_store() {
         .output()
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["pois"][0]["pois"].as_array().unwrap().len(), 1);
+    // Flat list, each POI tagged with its source_id (consistent with `markers --json`).
+    let pois = v["pois"].as_array().unwrap();
+    assert_eq!(pois.len(), 1);
+    assert_eq!(pois[0]["id"], "poi-001");
+    assert_eq!(pois[0]["source_id"], "src-001");
 
     // Remove it.
     ar().args(["poi", "remove", "src-001", "--id", "poi-001"])
