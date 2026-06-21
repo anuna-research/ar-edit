@@ -30,8 +30,7 @@ pub fn validate_range(range: &ShotRange) -> Result<(), EditError> {
         ShotRange::Words { from, to } => {
             if from > to {
                 return Err(EditError::InvalidRange(format!(
-                    "from ({}) must be <= to ({})",
-                    from, to
+                    "from ({from}) must be <= to ({to})"
                 )));
             }
             if from == to {
@@ -41,8 +40,7 @@ pub fn validate_range(range: &ShotRange) -> Result<(), EditError> {
         ShotRange::Scenes { from, to } => {
             if from > to {
                 return Err(EditError::InvalidRange(format!(
-                    "from ({}) must be <= to ({})",
-                    from, to
+                    "from ({from}) must be <= to ({to})"
                 )));
             }
             if from == to {
@@ -52,8 +50,7 @@ pub fn validate_range(range: &ShotRange) -> Result<(), EditError> {
         ShotRange::Time { from_ms, to_ms } => {
             if from_ms > to_ms {
                 return Err(EditError::InvalidRange(format!(
-                    "from ({}ms) must be <= to ({}ms)",
-                    from_ms, to_ms
+                    "from ({from_ms}ms) must be <= to ({to_ms}ms)"
                 )));
             }
             if from_ms == to_ms {

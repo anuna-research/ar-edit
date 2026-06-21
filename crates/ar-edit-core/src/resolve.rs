@@ -65,7 +65,7 @@ pub fn resolve_range_from_dir(
     match range {
         ShotRange::Time { .. } => resolve_range(range, None, None),
         ShotRange::Words { .. } => {
-            let path = dir.join(format!("{}.transcript.json", source_id));
+            let path = dir.join(format!("{source_id}.transcript.json"));
             let data = std::fs::read_to_string(&path).map_err(|e| ResolveError::Io {
                 path: path.clone(),
                 source: e,
@@ -75,7 +75,7 @@ pub fn resolve_range_from_dir(
             resolve_range(range, Some(&transcript), None)
         }
         ShotRange::Scenes { .. } => {
-            let path = dir.join(format!("{}.index.json", source_id));
+            let path = dir.join(format!("{source_id}.index.json"));
             let data = std::fs::read_to_string(&path).map_err(|e| ResolveError::Io {
                 path: path.clone(),
                 source: e,

@@ -139,7 +139,7 @@ pub fn resolve_markers(
         let text_preview = match &marker.range {
             ShotRange::Words { from, to } => {
                 if fallback {
-                    Some(format!("(transcript not available) words {}..{}", from, to))
+                    Some(format!("(transcript not available) words {from}..{to}"))
                 } else {
                     transcript
                         .as_ref()
@@ -152,7 +152,7 @@ pub fn resolve_markers(
         let scene_preview = match &marker.range {
             ShotRange::Scenes { from, to } => {
                 if fallback {
-                    Some(format!("(index not available) scenes {}..{}", from, to))
+                    Some(format!("(index not available) scenes {from}..{to}"))
                 } else {
                     index
                         .as_ref()

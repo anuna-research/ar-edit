@@ -270,9 +270,7 @@ fn word_indices_sequential_across_segments() {
     assert_eq!(
         first_of_seg1,
         last_of_seg0 + 1,
-        "word indices not sequential across segment boundary: seg0 ends at {}, seg1 starts at {}",
-        last_of_seg0,
-        first_of_seg1
+        "word indices not sequential across segment boundary: seg0 ends at {last_of_seg0}, seg1 starts at {first_of_seg1}"
     );
 }
 

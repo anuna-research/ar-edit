@@ -353,14 +353,14 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                             .as_deref()
                             .map(|h| format!("  Install: {h}"))
                             .unwrap_or_default();
-                        println!("  {} missing (fallback: {}){}", name, fb, hint);
+                        println!("  {name} missing (fallback: {fb}){hint}");
                     } else {
                         let hint = dep
                             .install_hint
                             .as_deref()
                             .map(|h| format!("  Install: {h}"))
                             .unwrap_or_default();
-                        println!("  {} MISSING{}", name, hint);
+                        println!("  {name} MISSING{hint}");
                     }
                 };
                 println!("Dependencies:");
@@ -392,7 +392,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 }
                 let path = edit_path(name);
                 if path.exists() {
-                    anyhow::bail!("edit '{}' already exists", name);
+                    anyhow::bail!("edit '{name}' already exists");
                 }
                 let store = ar_edit_collab::store::PersistentEdit::create(name, local_actor());
                 save_store(&store, name)?;
@@ -402,7 +402,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                         serde_json::to_string_pretty(&store.to_edit_document())?
                     );
                 } else {
-                    println!("Created edit '{}'", name);
+                    println!("Created edit '{name}'");
                 }
                 Ok(())
             }
@@ -445,7 +445,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 if cli.json {
                     print_shots_json(&mut session)?;
                 } else {
-                    println!("Moved {} to position {} in '{}'", shot, position, edit);
+                    println!("Moved {shot} to position {position} in '{edit}'");
                 }
                 Ok(())
             }
@@ -456,7 +456,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 if cli.json {
                     print_shots_json(&mut session)?;
                 } else {
-                    println!("Removed {} from '{}'", shot, edit);
+                    println!("Removed {shot} from '{edit}'");
                 }
                 Ok(())
             }
@@ -635,10 +635,6 @@ fn load_store(edit: &str) -> anyhow::Result<ar_edit_collab::store::PersistentEdi
         .map_err(|e| anyhow::Error::new(CliError::user(e)))
 }
 
-/// Connect to a live host that owns `edit` (matched via `Status`), returning a
-/// blocking runtime + client to drive it. `None` if no daemon, it hosts a
-/// different edit, or the round-trip fails (the caller then uses the file store).
-#[cfg(unix)]
 /// Result of probing whether a live host owns `edit`. Distinguishes an absent
 /// daemon from a failed round-trip so a *mutation* can fail closed on the latter
 /// (a transient IPC failure must NOT be mistaken for "no host" and modify the
@@ -962,9 +958,9 @@ fn session_socket() -> PathBuf {
 
 fn fmt_range(range: &ShotRange) -> String {
     match range {
-        ShotRange::Words { from, to } => format!("words[{}..{}]", from, to),
-        ShotRange::Scenes { from, to } => format!("scenes[{}..{}]", from, to),
-        ShotRange::Time { from_ms, to_ms } => format!("time[{}ms..{}ms]", from_ms, to_ms),
+        ShotRange::Words { from, to } => format!("words[{from}..{to}]"),
+        ShotRange::Scenes { from, to } => format!("scenes[{from}..{to}]"),
+        ShotRange::Time { from_ms, to_ms } => format!("time[{from_ms}ms..{to_ms}ms]"),
     }
 }
 
@@ -1175,7 +1171,7 @@ fn cmd_transcribe(cli: &Cli, args: &cli::TranscribeArgs) -> anyhow::Result<()> {
             .collect()
     } else if let Some(ref id) = args.source_id {
         if !manifest.sources.iter().any(|s| s.id == *id) {
-            anyhow::bail!("source '{}' not found in manifest", id);
+            anyhow::bail!("source '{id}' not found in manifest");
         }
         vec![id.clone()]
     } else {
@@ -1222,10 +1218,7 @@ fn cmd_transcribe(cli: &Cli, args: &cli::TranscribeArgs) -> anyhow::Result<()> {
         Ok(path) => path,
         Err(transcript::TranscriptError::ModelNotFound { .. }) => {
             if !cli.json {
-                eprintln!(
-                    "Whisper model '{}' not found locally, downloading...",
-                    model_name
-                );
+                eprintln!("Whisper model '{model_name}' not found locally, downloading...");
             }
             transcript::download_model(model_name)?
         }
@@ -1246,7 +1239,7 @@ fn cmd_transcribe(cli: &Cli, args: &cli::TranscribeArgs) -> anyhow::Result<()> {
             .unwrap();
 
         if !cli.json {
-            eprintln!("Transcribing {}...", source_id);
+            eprintln!("Transcribing {source_id}...");
         }
 
         // Extract audio
@@ -1868,8 +1861,7 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
         let normalized = ar_edit_core::render::normalize_codec(codec);
         if !known.contains(&normalized) {
             anyhow::bail!(
-                "unknown video codec '{}' — expected one of: h264, h265, vp9, av1, prores",
-                codec
+                "unknown video codec '{codec}' — expected one of: h264, h265, vp9, av1, prores"
             );
         }
     }
@@ -1882,7 +1874,7 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
 
     if cli.verbose {
         eprintln!("Edit: {}", args.edit);
-        eprintln!("Shots: {}", shot_count);
+        eprintln!("Shots: {shot_count}");
         eprintln!("Output: {}", args.output.display());
         eprintln!(
             "Overlay: {}",
@@ -1999,7 +1991,7 @@ fn cmd_render(cli: &Cli, args: &cli::RenderArgs) -> anyhow::Result<()> {
                     "current_shot": rp.current_shot,
                     "eta_seconds": rp.eta_seconds.unwrap_or(0),
                 });
-                let _ = writeln!(std::io::stderr(), "{}", line);
+                let _ = writeln!(std::io::stderr(), "{line}");
             },
         )
         .map_err(render_err)?;
@@ -2466,7 +2458,7 @@ fn cmd_poi_list(cli: &Cli, args: &cli::PoiListArgs) -> anyhow::Result<()> {
         for (sid, pois) in &sources {
             for poi in pois
                 .iter()
-                .filter(|p| cat_filter.map_or(true, |c| p.category == c))
+                .filter(|p| cat_filter.is_none_or(|c| p.category == c))
             {
                 let mut value = serde_json::to_value(poi)?;
                 if let serde_json::Value::Object(map) = &mut value {
@@ -2485,7 +2477,7 @@ fn cmd_poi_list(cli: &Cli, args: &cli::PoiListArgs) -> anyhow::Result<()> {
     let mut rows: Vec<(&str, &Poi)> = Vec::new();
     for (sid, pois) in &sources {
         for p in pois {
-            if cat_filter.map_or(true, |c| p.category == c) {
+            if cat_filter.is_none_or(|c| p.category == c) {
                 rows.push((sid.as_str(), p));
             }
         }
@@ -2497,8 +2489,8 @@ fn cmd_poi_list(cli: &Cli, args: &cli::PoiListArgs) -> anyhow::Result<()> {
         }
     } else {
         println!(
-            "  {:<10} {:<12} {:<14} {:<12} {:<12} {}",
-            "ID", "Source", "Point", "Category", "Author", "Note"
+            "  {:<10} {:<12} {:<14} {:<12} {:<12} Note",
+            "ID", "Source", "Point", "Category", "Author"
         );
         for (sid, poi) in &rows {
             let note = poi.note.as_deref().unwrap_or("");
@@ -2845,15 +2837,9 @@ fn cmd_index_set_description(
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         if let Some(ref old) = old_description {
-            eprintln!(
-                "Replaced description for {} scene {}: {}",
-                source_id, scene, old
-            );
+            eprintln!("Replaced description for {source_id} scene {scene}: {old}");
         }
-        println!(
-            "Set description for {} scene {}: {}",
-            source_id, scene, text
-        );
+        println!("Set description for {source_id} scene {scene}: {text}");
     }
 
     Ok(())

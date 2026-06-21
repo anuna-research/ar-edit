@@ -172,8 +172,7 @@ fn interval_thumbnails_at_10s_boundaries() {
     for ts in &expected_intervals {
         assert!(
             thumb_timestamps.contains(ts),
-            "expected interval thumbnail at {}ms",
-            ts
+            "expected interval thumbnail at {ts}ms"
         );
     }
 }

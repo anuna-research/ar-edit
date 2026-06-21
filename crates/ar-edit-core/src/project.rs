@@ -264,7 +264,7 @@ fn register_source(
 ) -> Result<Source, ProjectError> {
     let id_num = manifest.next_source_id;
     manifest.next_source_id += 1;
-    let id = format!("src-{:03}", id_num);
+    let id = format!("src-{id_num:03}");
 
     let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
 
