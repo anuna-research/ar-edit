@@ -126,6 +126,7 @@ fn make_shot(id: &str, source: &str, range: ShotRange, start_ms: u64, end_ms: u6
         text_preview: None,
         scene_preview: None,
         notes: vec![],
+        author: String::new(),
     }
 }
 

@@ -1,0 +1,21 @@
+# Standalone — detached from the ar-edit workspace on purpose (Experiment
+# Governance isolation). The empty [workspace] table makes this its own root.
+[workspace]
+
+[package]
+name = "oq-1-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "oq-1-spike"
+path = "src/main.rs"
+
+[dependencies]
+loro = "1"
+spake2 = "0.4"
+blake3 = "1"
+
+[profile.release]
+opt-level = 3

@@ -1,0 +1,40 @@
+[package]
+name = "ar-edit-collab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ar-edit-core = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+loro.workspace = true
+blake3.workspace = true
+spake2.workspace = true
+rand.workspace = true
+bip39.workspace = true
+base64 = "0.22"
+
+# Shell (Phase S) — optional, enabled by the `transport` feature.
+iroh = { workspace = true, optional = true }
+iroh-blobs = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+pkarr = { workspace = true, optional = true }
+
+[features]
+# Pure core builds with no features (no iroh/tokio), per p0 acceptance.
+default = []
+# Rendezvous relay needs only tokio (TCP) — no iroh, fast to build/test.
+rendezvous = ["dep:tokio"]
+# Session daemon + local IPC (Unix socket) — tokio only, no iroh.
+daemon = ["dep:tokio"]
+# iroh delta transport.
+transport = ["dep:iroh", "dep:tokio", "dep:rustls", "dep:pkarr"]
+blobsync = ["transport", "dep:iroh-blobs"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+proptest = "1"

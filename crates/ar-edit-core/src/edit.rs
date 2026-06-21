@@ -97,6 +97,32 @@ impl EditDocument {
             source: source.into(),
             range,
             notes: vec![],
+            author: String::new(),
+        };
+
+        self.push_op(EditOpKind::AddShot { shot: shot.clone() });
+        self.snapshot.shots.push(shot);
+        Ok(self.snapshot.shots.last().unwrap())
+    }
+
+    /// Add a shot using a caller-supplied `id` rather than one derived from
+    /// `next_shot_id`. Used when a live collaboration daemon has already minted
+    /// the canonical actor-scoped id (SPEC-003 REQ-090): the CLI must persist and
+    /// report that id so later move/trim/note/remove target the live shot.
+    pub fn add_shot_with_id(
+        &mut self,
+        id: impl Into<String>,
+        source: impl Into<String>,
+        range: ShotRange,
+    ) -> Result<&Shot, EditError> {
+        validate_range(&range)?;
+
+        let shot = Shot {
+            id: id.into(),
+            source: source.into(),
+            range,
+            notes: vec![],
+            author: String::new(),
         };
 
         self.push_op(EditOpKind::AddShot { shot: shot.clone() });
@@ -172,6 +198,7 @@ impl EditDocument {
 
         let note = ShotNote {
             text: text.into(),
+            author: String::new(),
             created: Utc::now(),
         };
 
@@ -328,6 +355,63 @@ mod tests {
         assert!(doc.ops.is_empty());
         assert!(doc.snapshot.shots.is_empty());
         assert_eq!(doc.next_shot_id, 1);
+    }
+
+    // -- validate_range -------------------------------------------------------
+
+    #[test]
+    fn validate_range_rejects_inverted_with_ordering_message() {
+        for range in [
+            ShotRange::Words { from: 10, to: 3 },
+            ShotRange::Scenes { from: 5, to: 2 },
+            ShotRange::Time {
+                from_ms: 9000,
+                to_ms: 1000,
+            },
+        ] {
+            let err = validate_range(&range).unwrap_err().to_string();
+            assert!(
+                err.contains("must be <= to"),
+                "inverted range message: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_range_rejects_zero_width_with_zero_duration_message() {
+        // A zero-width range (from == to) is rejected as "zero duration", NOT as
+        // an ordering error — distinguishes `from > to` from `from >= to`.
+        for range in [
+            ShotRange::Words { from: 7, to: 7 },
+            ShotRange::Scenes { from: 0, to: 0 },
+            ShotRange::Time {
+                from_ms: 500,
+                to_ms: 500,
+            },
+        ] {
+            let err = validate_range(&range).unwrap_err().to_string();
+            assert!(
+                err.contains("zero duration"),
+                "zero-width range message: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_range_accepts_proper_ranges() {
+        for range in [
+            ShotRange::Words { from: 0, to: 1 },
+            ShotRange::Scenes { from: 0, to: 3 },
+            ShotRange::Time {
+                from_ms: 0,
+                to_ms: 1,
+            },
+        ] {
+            assert!(
+                validate_range(&range).is_ok(),
+                "proper range is valid: {range:?}"
+            );
+        }
     }
 
     // -- add_shot -------------------------------------------------------------

@@ -384,3 +384,20 @@ When:   edit::history() called
 Then:   All 5 ops listed; ops[3] marked as head; ops[4] shown as "undone"
 ```
 Verifies: REQ-048
+
+---
+
+## Platform Tests
+
+### TEST-118: Cross-platform verification lane
+
+```
+Given:  CI runners for macOS (arm64), Linux (x86-64), and Windows 10+ (x86-64)
+When:   The core test suite and a source-registration test run on each platform
+Then:   All pass on every platform; on Windows WITHOUT Developer Mode and
+        non-elevated, ar-edit add falls back to hard link (same volume) or copy
+        per ADR-012 — no symlink-privilege error; the resulting project opens
+        and renders identically on all three platforms; manifest records the
+        chosen link_mode.
+```
+Verifies: [[SPEC-001-transcript-video-editor#NFR-015]] (and the platform-default clause of [[SPEC-001-transcript-video-editor#REQ-002]] via [[ADR-012-cross-platform-source-linking]])

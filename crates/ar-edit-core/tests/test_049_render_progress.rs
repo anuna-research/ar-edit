@@ -64,6 +64,7 @@ fn make_resolved_shot(id: &str, duration_ms: u64) -> ResolvedShot {
         text_preview: None,
         scene_preview: None,
         notes: vec![],
+        author: String::new(),
     }
 }
 
