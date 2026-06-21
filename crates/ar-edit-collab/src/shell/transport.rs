@@ -9,12 +9,12 @@
 //!
 //! Built behind the `transport` feature so the pure core stays iroh-free.
 
+use super::discovery::Discovery;
 use crate::crdt::CollabDoc;
 use crate::ids::ActorId;
 use crate::pairing::{self, ChannelGuard, PairingError, SessionKey};
 use crate::recognise::phrase::Phrase;
 use crate::recognise::wire::{self, SyncEnvelope, PROTOCOL_VERSION, TAG_CONFIRM, TAG_PAKE};
-use super::discovery::Discovery;
 use iroh::endpoint::{Builder, Connection, RecvStream, SendStream};
 use iroh::{Endpoint, EndpointAddr, RelayMode};
 use std::net::SocketAddr;
@@ -184,11 +184,7 @@ impl Transport {
 
     /// Send `doc`'s full state (or a delta blob) to a peer as a CON-015 DELTA
     /// envelope over a fresh bi-stream.
-    pub async fn send_delta(
-        &self,
-        to: EndpointAddr,
-        delta: &[u8],
-    ) -> Result<(), TransportError> {
+    pub async fn send_delta(&self, to: EndpointAddr, delta: &[u8]) -> Result<(), TransportError> {
         let conn = self
             .endpoint
             .connect(to, COLLAB_ALPN)
@@ -215,13 +211,17 @@ impl Transport {
         let conn = incoming.await.map_err(iroh_err)?;
         let (_send, mut recv) = conn.accept_bi().await.map_err(iroh_err)?;
         let bytes = recv.read_to_end(64 * 1024 * 1024).await.map_err(iroh_err)?;
-        match wire::parse_sync_envelope(&bytes).map_err(|e| TransportError::Envelope(e.to_string()))? {
+        match wire::parse_sync_envelope(&bytes)
+            .map_err(|e| TransportError::Envelope(e.to_string()))?
+        {
             SyncEnvelope::Delta(payload) => {
                 doc.import(payload)
                     .map_err(|e| TransportError::Import(e.to_string()))?;
                 Ok(())
             }
-            other => Err(TransportError::Envelope(format!("expected DELTA, got {other:?}"))),
+            other => Err(TransportError::Envelope(format!(
+                "expected DELTA, got {other:?}"
+            ))),
         }
     }
 
@@ -229,7 +229,11 @@ impl Transport {
     /// REQ-075). The blob is identified out-of-band by its BLAKE3 hash; the
     /// receiver verifies it on receipt via [`Self::fetch_blob`].
     pub async fn send_blob(&self, to: EndpointAddr, blob: &[u8]) -> Result<(), TransportError> {
-        let conn = self.endpoint.connect(to, COLLAB_ALPN).await.map_err(iroh_err)?;
+        let conn = self
+            .endpoint
+            .connect(to, COLLAB_ALPN)
+            .await
+            .map_err(iroh_err)?;
         let (mut send, _recv) = conn.open_bi().await.map_err(iroh_err)?;
         send.write_all(blob).await.map_err(iroh_err)?;
         send.finish().map_err(iroh_err)?;
@@ -291,7 +295,11 @@ impl Transport {
         to: EndpointAddr,
         phrase: &Phrase,
     ) -> Result<(Connection, SessionKey), TransportError> {
-        let conn = self.endpoint.connect(to, COLLAB_ALPN).await.map_err(iroh_err)?;
+        let conn = self
+            .endpoint
+            .connect(to, COLLAB_ALPN)
+            .await
+            .map_err(iroh_err)?;
 
         // PAKE message exchange on one bi-stream.
         let (pending, msg_a) = pairing::start(phrase);
@@ -350,7 +358,11 @@ impl Transport {
         // result. A failure here both fails this attempt closed and advances the
         // limiter for the next one.
         let verify = key.verify_peer(&peer_tag);
-        self.pairing_guard.lock().unwrap().record(verify.is_ok()).ok();
+        self.pairing_guard
+            .lock()
+            .unwrap()
+            .record(verify.is_ok())
+            .ok();
         verify.map_err(|e| TransportError::Pairing(e.to_string()))?;
         Ok((conn, key))
     }
@@ -418,16 +430,17 @@ async fn write_tagged(s: &mut SendStream, tag: u8, payload: &[u8]) -> Result<(),
 /// Read a CON-014 `[u32 len][tag][payload]` message, enforcing the length cap
 /// and checking the expected tag.
 async fn read_tagged(r: &mut RecvStream, expect: u8) -> Result<Vec<u8>, TransportError> {
-    let bytes = r
-        .read_to_end(4 + wire::MAX_FRAME)
-        .await
-        .map_err(iroh_err)?;
+    let bytes = r.read_to_end(4 + wire::MAX_FRAME).await.map_err(iroh_err)?;
     if bytes.len() < 4 {
-        return Err(TransportError::Pairing("handshake frame missing length prefix".into()));
+        return Err(TransportError::Pairing(
+            "handshake frame missing length prefix".into(),
+        ));
     }
     let len = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
     if len > wire::MAX_FRAME {
-        return Err(TransportError::Pairing("handshake frame exceeds MAX_FRAME".into()));
+        return Err(TransportError::Pairing(
+            "handshake frame exceeds MAX_FRAME".into(),
+        ));
     }
     let body = &bytes[4..];
     if body.len() != len {
@@ -484,7 +497,9 @@ impl Session {
             SyncEnvelope::Delta(payload) => doc
                 .import(payload)
                 .map_err(|e| TransportError::Import(e.to_string())),
-            other => Err(TransportError::Envelope(format!("expected DELTA, got {other:?}"))),
+            other => Err(TransportError::Envelope(format!(
+                "expected DELTA, got {other:?}"
+            ))),
         }
     }
 }

@@ -50,9 +50,16 @@ pub fn derive_keypair(phrase: &Phrase) -> Keypair {
 }
 
 /// Build the signed CON-017 discovery record advertising `addr`.
-pub fn build_record(keypair: &Keypair, addr: &EndpointAddr) -> Result<SignedPacket, DiscoveryError> {
+pub fn build_record(
+    keypair: &Keypair,
+    addr: &EndpointAddr,
+) -> Result<SignedPacket, DiscoveryError> {
     let nid_string = format!("nid={}", addr.id);
-    let addrs: Vec<String> = addr.ip_addrs().take(MAX_ADDRS).map(|a| a.to_string()).collect();
+    let addrs: Vec<String> = addr
+        .ip_addrs()
+        .take(MAX_ADDRS)
+        .map(|a| a.to_string())
+        .collect();
     let addrs_string = (!addrs.is_empty()).then(|| format!("addrs={}", addrs.join(",")));
     let relay_string = addr.relay_urls().next().map(|u| format!("relay={u}"));
 
@@ -83,13 +90,19 @@ pub fn build_record(keypair: &Keypair, addr: &EndpointAddr) -> Result<SignedPack
 /// failed iroh handshake (which authenticates the NodeId).
 pub fn parse_record(packet: &SignedPacket) -> Option<EndpointAddr> {
     for rr in packet.resource_records(RECORD_NAME) {
-        let RData::TXT(ref txt) = rr.rdata else { continue };
+        let RData::TXT(ref txt) = rr.rdata else {
+            continue;
+        };
         let attrs = txt.attributes();
         if attrs.get("v").and_then(|v| v.as_deref()) != Some("1") {
             continue;
         }
-        let Some(Some(nid)) = attrs.get("nid") else { continue };
-        let Ok(id) = nid.parse::<EndpointId>() else { continue };
+        let Some(Some(nid)) = attrs.get("nid") else {
+            continue;
+        };
+        let Ok(id) = nid.parse::<EndpointId>() else {
+            continue;
+        };
         let mut ea = EndpointAddr::new(id);
         if let Some(Some(list)) = attrs.get("addrs") {
             for s in list.split(',') {
@@ -137,7 +150,11 @@ impl Discovery {
     }
 
     /// Publish this host's `addr` under the phrase-derived key (REQ-068).
-    pub async fn publish(&self, phrase: &Phrase, addr: &EndpointAddr) -> Result<(), DiscoveryError> {
+    pub async fn publish(
+        &self,
+        phrase: &Phrase,
+        addr: &EndpointAddr,
+    ) -> Result<(), DiscoveryError> {
         let keypair = derive_keypair(phrase);
         let packet = build_record(&keypair, addr)?;
         match self {
@@ -163,7 +180,9 @@ impl Discovery {
         let keypair = derive_keypair(phrase);
         let public_key = keypair.public_key();
         let packet = match self {
-            Discovery::InProcess(store) => store.lock().unwrap().get(&public_key.to_bytes()).cloned(),
+            Discovery::InProcess(store) => {
+                store.lock().unwrap().get(&public_key.to_bytes()).cloned()
+            }
             Discovery::Http(client) => client
                 .resolve(&public_key)
                 .await

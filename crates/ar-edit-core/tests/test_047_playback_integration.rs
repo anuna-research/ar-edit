@@ -154,6 +154,7 @@ fn play_request_from_time_shot() {
         text_preview: None,
         scene_preview: None,
         notes: vec![],
+        author: String::new(),
     };
 
     // Simulate what do_play does in the TUI:
@@ -181,6 +182,7 @@ fn play_request_zero_duration_no_end() {
         text_preview: None,
         scene_preview: None,
         notes: vec![],
+        author: String::new(),
     };
 
     let end_ms = if shot.duration_ms > 0 {

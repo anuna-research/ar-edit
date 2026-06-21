@@ -8,6 +8,7 @@ use ar_edit_core::models::{Shot, ShotRange};
 
 fn shot(id: &str) -> Shot {
     Shot {
+        author: String::new(),
         id: id.into(),
         source: "src-001".into(),
         range: ShotRange::Words { from: 0, to: 10 },
@@ -38,10 +39,16 @@ fn guarded_undo_aligned_past_retention_bound() {
     }
 
     // The oldest op was evicted, so it is not on top and must not undo.
-    assert!(!undo.undo_if("op-0"), "evicted op id must not match the top");
+    assert!(
+        !undo.undo_if("op-0"),
+        "evicted op id must not match the top"
+    );
     // The newest op is still on top and undoable — the push at the bound was
     // detected despite the constant undo_count.
-    assert!(undo.undo_if(&format!("op-{}", N - 1)), "newest op stays undoable");
+    assert!(
+        undo.undo_if(&format!("op-{}", N - 1)),
+        "newest op stays undoable"
+    );
     assert!(
         !ids(&doc).contains(&"u-1000".to_string()),
         "undo of the newest op removed its shot"

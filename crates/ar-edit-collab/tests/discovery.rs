@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 
 fn shot(id: &str) -> Shot {
     Shot {
+        author: String::new(),
         id: id.into(),
         source: "src-001".into(),
         range: ShotRange::Words { from: 0, to: 10 },
@@ -23,7 +24,13 @@ fn shot(id: &str) -> Shot {
 }
 
 fn variant(p: &phrase::Phrase) -> phrase::Phrase {
-    phrase::parse(&format!("{}-{}-{}", (p.channel + 1) % 1000, p.words[0], p.words[1])).unwrap()
+    phrase::parse(&format!(
+        "{}-{}-{}",
+        (p.channel + 1) % 1000,
+        p.words[0],
+        p.words[1]
+    ))
+    .unwrap()
 }
 
 /// ADR-013: the discovery keypair is a deterministic function of the phrase —
@@ -34,7 +41,9 @@ fn keypair_derivation_is_deterministic() {
     let k1 = discovery::derive_keypair(&p).public_key().to_bytes();
     let k2 = discovery::derive_keypair(&p).public_key().to_bytes();
     assert_eq!(k1, k2, "same phrase must derive the same discovery key");
-    let kx = discovery::derive_keypair(&variant(&p)).public_key().to_bytes();
+    let kx = discovery::derive_keypair(&variant(&p))
+        .public_key()
+        .to_bytes();
     assert_ne!(kx, k1, "different phrase must derive a different key");
 }
 
@@ -90,7 +99,10 @@ async fn discover_then_propagate_delta() {
 
     let host_doc = recv.await.unwrap();
     assert!(
-        materialise(&host_doc).shots.iter().any(|s| s.id == "shot-001"),
+        materialise(&host_doc)
+            .shots
+            .iter()
+            .any(|s| s.id == "shot-001"),
         "delta must propagate after pkarr-based discovery"
     );
     joiner.close().await;

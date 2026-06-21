@@ -456,18 +456,21 @@ mod tests {
 
         let doc = make_edit_doc(vec![
             Shot {
+                author: String::new(),
                 id: "shot-001".into(),
                 source: "src-001".into(),
                 range: ShotRange::Words { from: 0, to: 52 },
                 notes: vec![],
             },
             Shot {
+                author: String::new(),
                 id: "shot-002".into(),
                 source: "src-001".into(),
                 range: ShotRange::Scenes { from: 0, to: 2 },
                 notes: vec![],
             },
             Shot {
+                author: String::new(),
                 id: "shot-003".into(),
                 source: "src-001".into(),
                 range: ShotRange::Time {
@@ -501,6 +504,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let manifest = make_manifest(vec![]);
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-999".into(),
             range: ShotRange::Words { from: 0, to: 10 },
@@ -524,6 +528,7 @@ mod tests {
         let src = make_source("src-001", 124500, false, false);
         let manifest = make_manifest(vec![src]);
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Words { from: 0, to: 52 },
@@ -544,6 +549,7 @@ mod tests {
         let src = make_source("src-001", 124500, false, false);
         let manifest = make_manifest(vec![src]);
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Scenes { from: 0, to: 2 },
@@ -567,6 +573,7 @@ mod tests {
         write_transcript(tmp.path(), &transcript);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Words { from: 0, to: 500 },
@@ -589,6 +596,7 @@ mod tests {
 
         // Index 375 with word_count=375 → out of bounds (valid: 0-374)
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Words { from: 0, to: 375 },
@@ -610,6 +618,7 @@ mod tests {
         write_transcript(tmp.path(), &transcript);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Words { from: 200, to: 300 },
@@ -638,6 +647,7 @@ mod tests {
         write_index(tmp.path(), &index);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Scenes { from: 0, to: 10 },
@@ -659,6 +669,7 @@ mod tests {
         let manifest = make_manifest(vec![src]);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Time {
@@ -681,6 +692,7 @@ mod tests {
         let manifest = make_manifest(vec![src]);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Time {
@@ -705,6 +717,7 @@ mod tests {
         write_transcript(tmp.path(), &transcript);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Words { from: 52, to: 10 },
@@ -726,6 +739,7 @@ mod tests {
         write_index(tmp.path(), &index);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Scenes { from: 3, to: 1 },
@@ -745,6 +759,7 @@ mod tests {
         let manifest = make_manifest(vec![src]);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Time {
@@ -771,6 +786,7 @@ mod tests {
         write_transcript(tmp.path(), &transcript);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Words { from: 5, to: 5 },
@@ -792,6 +808,7 @@ mod tests {
         write_index(tmp.path(), &index);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Scenes { from: 2, to: 2 },
@@ -811,6 +828,7 @@ mod tests {
         let manifest = make_manifest(vec![src]);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Time {
@@ -838,12 +856,14 @@ mod tests {
 
         let doc = make_edit_doc(vec![
             Shot {
+                author: String::new(),
                 id: "shot-001".into(),
                 source: "src-999".into(), // source not found
                 range: ShotRange::Words { from: 0, to: 10 },
                 notes: vec![],
             },
             Shot {
+                author: String::new(),
                 id: "shot-002".into(),
                 source: "src-001".into(),
                 range: ShotRange::Words { from: 0, to: 500 }, // word out of bounds
@@ -908,18 +928,21 @@ mod tests {
 
         let doc = make_edit_doc(vec![
             Shot {
+                author: String::new(),
                 id: "shot-001".into(),
                 source: "src-001".into(),
                 range: ShotRange::Words { from: 0, to: 52 },
                 notes: vec![],
             },
             Shot {
+                author: String::new(),
                 id: "shot-002".into(),
                 source: "src-002".into(),
                 range: ShotRange::Scenes { from: 0, to: 2 },
                 notes: vec![],
             },
             Shot {
+                author: String::new(),
                 id: "shot-003".into(),
                 source: "src-002".into(),
                 range: ShotRange::Time {
@@ -941,6 +964,7 @@ mod tests {
         let manifest = make_manifest(vec![src]);
 
         let doc = make_edit_doc(vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Time {

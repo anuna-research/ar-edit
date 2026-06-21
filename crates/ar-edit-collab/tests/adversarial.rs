@@ -28,7 +28,7 @@ fn ids(e: &PersistentEdit) -> Vec<String> {
 #[test]
 fn concurrent_remove_of_the_same_shot_converges_to_gone() {
     let a = CollabDoc::new(ActorId(1));
-    let id = a.add_new_shot("src-1", &words(0, 10));
+    let id = a.add_new_shot("src-1", &words(0, 10), "");
     let b = CollabDoc::new(ActorId(2));
     b.import(&a.export_snapshot()).unwrap();
 
@@ -51,9 +51,9 @@ fn concurrent_remove_of_the_same_shot_converges_to_gone() {
 #[test]
 fn concurrent_move_of_the_same_shot_converges_without_duplication() {
     let a = CollabDoc::new(ActorId(1));
-    let id1 = a.add_new_shot("s1", &words(0, 5));
-    let _id2 = a.add_new_shot("s2", &words(0, 5));
-    let _id3 = a.add_new_shot("s3", &words(0, 5));
+    let id1 = a.add_new_shot("s1", &words(0, 5), "");
+    let _id2 = a.add_new_shot("s2", &words(0, 5), "");
+    let _id3 = a.add_new_shot("s3", &words(0, 5), "");
     let b = CollabDoc::new(ActorId(2));
     b.import(&a.export_snapshot()).unwrap();
 
@@ -77,14 +77,18 @@ fn concurrent_move_of_the_same_shot_converges_without_duplication() {
 #[test]
 fn concurrent_note_and_remove_converges() {
     let a = CollabDoc::new(ActorId(1));
-    let id = a.add_new_shot("src-1", &words(0, 10));
+    let id = a.add_new_shot("src-1", &words(0, 10), "");
     let b = CollabDoc::new(ActorId(2));
     b.import(&a.export_snapshot()).unwrap();
 
     a.remove_shot(&id);
     b.add_note(
         &id,
-        &ar_edit_core::models::ShotNote { text: "late note".into(), created: chrono::Utc::now() },
+        &ar_edit_core::models::ShotNote {
+            author: String::new(),
+            text: "late note".into(),
+            created: chrono::Utc::now(),
+        },
     );
     a.import(&b.export_snapshot()).unwrap();
     b.import(&a.export_snapshot()).unwrap();
@@ -101,12 +105,24 @@ fn concurrent_note_and_remove_converges() {
 #[test]
 fn degenerate_ranges_are_rejected_without_mutating() {
     let mut e = PersistentEdit::create("p", ActorId(1));
-    let good = e.add_shot("src-1", words(0, 10), None).unwrap();
+    let good = e.add_shot("src-1", words(0, 10), None, "").unwrap();
 
-    assert!(e.add_shot("src-2", words(5, 5), None).is_err(), "zero-width rejected");
-    assert!(e.add_shot("src-2", words(10, 3), None).is_err(), "inverted rejected");
-    assert!(e.trim_shot(&good, words(7, 7), None).is_err(), "zero-width trim rejected");
-    assert!(e.trim_shot(&good, words(9, 2), None).is_err(), "inverted trim rejected");
+    assert!(
+        e.add_shot("src-2", words(5, 5), None, "").is_err(),
+        "zero-width rejected"
+    );
+    assert!(
+        e.add_shot("src-2", words(10, 3), None, "").is_err(),
+        "inverted rejected"
+    );
+    assert!(
+        e.trim_shot(&good, words(7, 7), None).is_err(),
+        "zero-width trim rejected"
+    );
+    assert!(
+        e.trim_shot(&good, words(9, 2), None).is_err(),
+        "inverted trim rejected"
+    );
 
     assert_eq!(ids(&e), vec![good], "no degenerate range mutated the store");
 }
@@ -119,7 +135,7 @@ fn undo_redo_at_the_edges_are_safe_no_ops() {
     assert!(!e.undo(), "undo on an empty store is a no-op");
     assert!(!e.redo(), "redo with no future is a no-op");
 
-    e.add_shot("src-1", words(0, 10), None).unwrap();
+    e.add_shot("src-1", words(0, 10), None, "").unwrap();
     assert!(e.undo());
     assert!(!e.undo(), "cannot undo past the baseline");
     assert!(e.redo());
@@ -158,11 +174,15 @@ fn legacy_head_beyond_oplog_does_not_panic() {
 #[test]
 fn repeated_identical_adds_are_distinct_shots() {
     let mut e = PersistentEdit::create("p", ActorId(1));
-    let a = e.add_shot("src-1", words(0, 10), None).unwrap();
-    let b = e.add_shot("src-1", words(0, 10), None).unwrap();
-    let c = e.add_shot("src-1", words(0, 10), None).unwrap();
+    let a = e.add_shot("src-1", words(0, 10), None, "").unwrap();
+    let b = e.add_shot("src-1", words(0, 10), None, "").unwrap();
+    let c = e.add_shot("src-1", words(0, 10), None, "").unwrap();
     assert_ne!(a, b);
     assert_ne!(b, c);
     assert_ne!(a, c);
-    assert_eq!(ids(&e).len(), 3, "identical content does not collapse to one shot");
+    assert_eq!(
+        ids(&e).len(),
+        3,
+        "identical content does not collapse to one shot"
+    );
 }

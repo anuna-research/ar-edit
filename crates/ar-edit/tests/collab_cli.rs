@@ -24,7 +24,10 @@ fn share_emits_a_phrase() {
         .unwrap();
     assert!(out.status.success());
     let s = String::from_utf8_lossy(&out.stdout);
-    assert!(s.contains("\"phrase\""), "share --json must emit a phrase: {s}");
+    assert!(
+        s.contains("\"phrase\""),
+        "share --json must emit a phrase: {s}"
+    );
 }
 
 /// A well-formed phrase is accepted by the recogniser (exit 0). It will not

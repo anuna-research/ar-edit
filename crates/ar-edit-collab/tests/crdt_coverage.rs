@@ -17,7 +17,33 @@ fn words(from: u32, to: u32) -> ShotRange {
 }
 
 fn note(text: &str) -> ShotNote {
-    ShotNote { text: text.into(), created: chrono::Utc::now() }
+    ShotNote {
+        author: String::new(),
+        text: text.into(),
+        created: chrono::Utc::now(),
+    }
+}
+
+/// REQ-091: a shot's author and a note's author flow through the CRDT into the
+/// materialised view (collaborative attribution).
+#[test]
+fn shot_and_note_authors_flow_through_the_crdt() {
+    let doc = CollabDoc::new(ActorId(1));
+    let id = doc.add_new_shot("src-1", &words(0, 10), "alice");
+    doc.add_note(
+        &id,
+        &ShotNote {
+            text: "hi".into(),
+            author: "bob".into(),
+            created: chrono::Utc::now(),
+        },
+    );
+    let snap = materialise(&doc);
+    assert_eq!(snap.shots[0].author, "alice", "shot author materialised");
+    assert_eq!(
+        snap.shots[0].notes[0].author, "bob",
+        "note author materialised"
+    );
 }
 
 /// REQ-082/083: POIs are an observed-remove set that converges and whose removes
@@ -37,7 +63,10 @@ fn pois_converge_and_removes_propagate() {
 
     a.remove_poi("poi-1");
     b.import(&a.export_snapshot()).unwrap();
-    assert!(!b.poi_ids().contains(&"poi-1".to_string()), "POI remove propagated");
+    assert!(
+        !b.poi_ids().contains(&"poi-1".to_string()),
+        "POI remove propagated"
+    );
     assert_eq!(b.poi_ids().len(), 2);
 }
 
@@ -46,8 +75,8 @@ fn pois_converge_and_removes_propagate() {
 #[test]
 fn notes_attach_to_their_shot_and_survive_other_removals() {
     let doc = CollabDoc::new(ActorId(1));
-    let s1 = doc.add_new_shot("src-1", &words(0, 10));
-    let s2 = doc.add_new_shot("src-2", &words(0, 10));
+    let s1 = doc.add_new_shot("src-1", &words(0, 10), "");
+    let s2 = doc.add_new_shot("src-2", &words(0, 10), "");
     doc.add_note(&s1, &note("a"));
     doc.add_note(&s1, &note("b"));
     doc.add_note(&s2, &note("c"));
@@ -84,7 +113,10 @@ fn concurrent_readd_survives_a_remove() {
     a.import(&b.export_snapshot()).unwrap();
     b.import(&a.export_snapshot()).unwrap();
 
-    assert!(a.marker_ids().contains(&"m1".to_string()), "re-add survived the unobserved remove");
+    assert!(
+        a.marker_ids().contains(&"m1".to_string()),
+        "re-add survived the unobserved remove"
+    );
     assert_eq!(a.marker_ids(), b.marker_ids(), "and both peers converge");
 }
 
@@ -94,8 +126,12 @@ fn concurrent_readd_survives_a_remove() {
 fn version_reflects_applied_ops() {
     let empty = CollabDoc::new(ActorId(1));
     let active = CollabDoc::new(ActorId(1));
-    active.add_new_shot("src-1", &words(0, 10));
-    assert_ne!(active.version(), empty.version(), "version advances with edits");
+    active.add_new_shot("src-1", &words(0, 10), "");
+    assert_ne!(
+        active.version(),
+        empty.version(),
+        "version advances with edits"
+    );
 }
 
 /// REQ-080: after a reload (import into a fresh doc), the minted-shot counter is
@@ -104,15 +140,18 @@ fn version_reflects_applied_ops() {
 #[test]
 fn shot_counter_sync_prevents_reuse_after_reload() {
     let a = CollabDoc::new(ActorId(0xABC));
-    let id0 = a.add_new_shot("src", &words(0, 5));
-    let id1 = a.add_new_shot("src", &words(0, 5));
+    let id0 = a.add_new_shot("src", &words(0, 5), "");
+    let id1 = a.add_new_shot("src", &words(0, 5), "");
 
     let b = CollabDoc::new(ActorId(0xABC));
     b.import(&a.export_snapshot()).unwrap();
-    let id2 = b.add_new_shot("src", &words(0, 5));
+    let id2 = b.add_new_shot("src", &words(0, 5), "");
 
     assert_ne!(id2, id0);
-    assert_ne!(id2, id1, "the next mint after reload does not reuse an existing id");
+    assert_ne!(
+        id2, id1,
+        "the next mint after reload does not reuse an existing id"
+    );
 }
 
 /// REQ-080: same for the note counter — a note added after a reload gets a fresh
@@ -120,7 +159,7 @@ fn shot_counter_sync_prevents_reuse_after_reload() {
 #[test]
 fn note_counter_sync_prevents_reuse_after_reload() {
     let a = CollabDoc::new(ActorId(0xABC));
-    let s = a.add_new_shot("src", &words(0, 10));
+    let s = a.add_new_shot("src", &words(0, 10), "");
     a.add_note(&s, &note("n0"));
     a.add_note(&s, &note("n1"));
 
@@ -130,5 +169,9 @@ fn note_counter_sync_prevents_reuse_after_reload() {
 
     let snap = materialise(&b);
     let notes = &snap.shots.iter().find(|x| x.id == s).unwrap().notes;
-    assert_eq!(notes.len(), 3, "the post-reload note did not overwrite an existing one");
+    assert_eq!(
+        notes.len(),
+        3,
+        "the post-reload note did not overwrite an existing one"
+    );
 }

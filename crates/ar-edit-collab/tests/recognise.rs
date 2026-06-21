@@ -135,5 +135,8 @@ fn source_sync_and_caps() {
     assert_eq!(wire::parse_source_sync(&forged), Err(WireError::TooLong));
     // Declared length longer than the actual body -> TooShort.
     let truncated = vec![0, 0, 0, 10, 0x20, 1];
-    assert_eq!(wire::parse_source_sync(&truncated), Err(WireError::TooShort));
+    assert_eq!(
+        wire::parse_source_sync(&truncated),
+        Err(WireError::TooShort)
+    );
 }

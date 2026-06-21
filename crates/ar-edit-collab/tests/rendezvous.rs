@@ -78,7 +78,9 @@ async fn waiter_freed_on_disconnect() {
     // Peer 1 binds channel 7, then disconnects before any partner arrives.
     {
         let mut p1 = TcpStream::connect(addr).await.unwrap();
-        p1.write_all(&wire::frame(&[0x01, 0x00, 0x07])).await.unwrap();
+        p1.write_all(&wire::frame(&[0x01, 0x00, 0x07]))
+            .await
+            .unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await; // let server register it
     } // p1 dropped → disconnects
     tokio::time::sleep(Duration::from_millis(100)).await; // let server free channel 7
@@ -86,8 +88,12 @@ async fn waiter_freed_on_disconnect() {
     // Two fresh peers on channel 7 must pair with each other.
     let mut a = TcpStream::connect(addr).await.unwrap();
     let mut b = TcpStream::connect(addr).await.unwrap();
-    a.write_all(&wire::frame(&[0x01, 0x00, 0x07])).await.unwrap();
-    b.write_all(&wire::frame(&[0x01, 0x00, 0x07])).await.unwrap();
+    a.write_all(&wire::frame(&[0x01, 0x00, 0x07]))
+        .await
+        .unwrap();
+    b.write_all(&wire::frame(&[0x01, 0x00, 0x07]))
+        .await
+        .unwrap();
     a.write_all(&pake(b"hello")).await.unwrap();
 
     let got = tokio::time::timeout(Duration::from_secs(2), read_framed(&mut b))
@@ -116,7 +122,9 @@ async fn unrecognised_frame_after_bind_is_dropped() {
 
     // Well-formed length prefix, but tag 0x7f is not a recognised rendezvous
     // frame — the relay must drop it (stop forwarding), never tunnel it.
-    a.write_all(&wire::frame(&[0x7f, 0xde, 0xad])).await.unwrap();
+    a.write_all(&wire::frame(&[0x7f, 0xde, 0xad]))
+        .await
+        .unwrap();
 
     // B must receive nothing: the unrecognised frame is not relayed.
     let mut buf = [0u8; 16];
@@ -129,7 +137,10 @@ async fn unrecognised_frame_after_bind_is_dropped() {
     a.write_all(&pake(b"after-bad")).await.unwrap();
     let r2 = tokio::time::timeout(Duration::from_millis(300), b.read(&mut buf)).await;
     let relayed2 = matches!(r2, Ok(Ok(n)) if n > 0);
-    assert!(!relayed2, "relay must stop forwarding after a malformed frame");
+    assert!(
+        !relayed2,
+        "relay must stop forwarding after a malformed frame"
+    );
 }
 
 /// Peers on different channels are not paired (no cross-talk).
@@ -141,8 +152,12 @@ async fn different_channels_are_isolated() {
 
     let mut a = TcpStream::connect(addr).await.unwrap();
     let mut b = TcpStream::connect(addr).await.unwrap();
-    a.write_all(&wire::frame(&[0x01, 0x00, 0x07])).await.unwrap(); // channel 7
-    b.write_all(&wire::frame(&[0x01, 0x00, 0x09])).await.unwrap(); // channel 9
+    a.write_all(&wire::frame(&[0x01, 0x00, 0x07]))
+        .await
+        .unwrap(); // channel 7
+    b.write_all(&wire::frame(&[0x01, 0x00, 0x09]))
+        .await
+        .unwrap(); // channel 9
     a.write_all(&pake(b"hello")).await.unwrap();
 
     // B should receive nothing within a short window.

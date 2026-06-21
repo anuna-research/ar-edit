@@ -52,8 +52,8 @@ fn one_shot_commands_route_through_a_live_host() {
 
     // Seed an edit with two shots.
     let mut store = PersistentEdit::create("rc", ActorId(1));
-    store.add_shot("src-001", words(), None).unwrap();
-    let drop_id = store.add_shot("src-002", words(), None).unwrap();
+    store.add_shot("src-001", words(), None, "").unwrap();
+    let drop_id = store.add_shot("src-002", words(), None, "").unwrap();
     fs::write(&edit_path, store.to_bytes()).unwrap();
     let original = shot_ids(&edit_path);
     assert_eq!(original.len(), 2);
@@ -115,7 +115,7 @@ fn one_shot_mutation_fails_closed_on_dead_socket() {
     let edit_path = tmp.path().join("edits/rc.edit.json");
 
     let mut store = PersistentEdit::create("rc", ActorId(1));
-    let drop_id = store.add_shot("src-001", words(), None).unwrap();
+    let drop_id = store.add_shot("src-001", words(), None, "").unwrap();
     fs::write(&edit_path, store.to_bytes()).unwrap();
     let before = shot_ids(&edit_path);
 
@@ -131,7 +131,11 @@ fn one_shot_mutation_fails_closed_on_dead_socket() {
         .args(["edit", "remove-segment", "rc", "--shot", &drop_id])
         .assert()
         .failure();
-    assert_eq!(shot_ids(&edit_path), before, "file untouched after fail-closed mutation");
+    assert_eq!(
+        shot_ids(&edit_path),
+        before,
+        "file untouched after fail-closed mutation"
+    );
 
     // ...and undo too.
     Command::cargo_bin("ar-edit")
@@ -152,7 +156,7 @@ fn one_shot_mutation_fails_closed_on_unresponsive_daemon() {
     fs::create_dir(tmp.path().join("edits")).unwrap();
     let edit_path = tmp.path().join("edits/rc.edit.json");
     let mut store = PersistentEdit::create("rc", ActorId(1));
-    let drop_id = store.add_shot("src-001", words(), None).unwrap();
+    let drop_id = store.add_shot("src-001", words(), None, "").unwrap();
     fs::write(&edit_path, store.to_bytes()).unwrap();
     let before = shot_ids(&edit_path);
 
@@ -176,5 +180,9 @@ fn one_shot_mutation_fails_closed_on_unresponsive_daemon() {
         .args(["edit", "remove-segment", "rc", "--shot", &drop_id])
         .assert()
         .failure();
-    assert_eq!(shot_ids(&edit_path), before, "file untouched when the host stalled");
+    assert_eq!(
+        shot_ids(&edit_path),
+        before,
+        "file untouched when the host stalled"
+    );
 }

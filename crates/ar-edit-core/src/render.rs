@@ -754,12 +754,28 @@ fn extract_segment(
         .args(["-y", "-ss", &format!("{start_secs:.3}"), "-i"])
         .arg(source)
         .args([
-            "-t", &format!("{duration_secs:.3}"),
-            "-map", "0:v:0", "-map", "0:a:0",
-            "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-            "-pix_fmt", "yuv420p",
-            "-r", "30",
-            "-c:a", "aac", "-ar", "48000", "-ac", "2",
+            "-t",
+            &format!("{duration_secs:.3}"),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0",
+            "-c:v",
+            "libx264",
+            "-crf",
+            "18",
+            "-preset",
+            "fast",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            "30",
+            "-c:a",
+            "aac",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
         ])
         .arg(output)
         .output()
@@ -795,8 +811,12 @@ fn extract_segment_encoded(
     cmd.args(["-y", "-ss", &format!("{start_secs:.3}"), "-i"])
         .arg(source)
         .args([
-            "-t", &format!("{duration_secs:.3}"),
-            "-map", "0:v:0", "-map", "0:a:0",
+            "-t",
+            &format!("{duration_secs:.3}"),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0",
         ]);
 
     if let Some(vf) = video_filter {
@@ -868,7 +888,14 @@ where
         "-i",
     ])
     .arg(source)
-    .args(["-t", &format!("{duration_secs:.3}"), "-map", "0:v:0", "-map", "0:a:0"]);
+    .args([
+        "-t",
+        &format!("{duration_secs:.3}"),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0",
+    ]);
 
     if let Some(vf) = video_filter {
         cmd.args(["-vf", vf]);
@@ -878,7 +905,9 @@ where
         cmd.args(["-c:v", encoder, "-pix_fmt", "yuv420p", "-r", "30"]);
         cmd.args(["-c:a", "aac", "-ar", "48000", "-ac", "2"]);
     } else {
-        cmd.args(["-c:v", "libx264", "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p", "-r", "30"]);
+        cmd.args([
+            "-c:v", "libx264", "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p", "-r", "30",
+        ]);
         cmd.args(["-c:a", "aac", "-ar", "48000", "-ac", "2"]);
     }
 
@@ -1299,6 +1328,7 @@ mod tests {
             text_preview: None,
             scene_preview: None,
             notes: vec![],
+            author: String::new(),
         }
     }
 }

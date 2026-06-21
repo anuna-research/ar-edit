@@ -46,7 +46,10 @@ pub struct AnnotationStore {
 impl AnnotationStore {
     /// A new, empty store owned by `actor`.
     pub fn create(source_id: impl Into<String>, actor: ActorId) -> Self {
-        Self { source_id: source_id.into(), doc: CollabDoc::new(actor) }
+        Self {
+            source_id: source_id.into(),
+            doc: CollabDoc::new(actor),
+        }
     }
 
     /// Seed a store from legacy plain-JSON annotations. The seeding ops are
@@ -67,7 +70,10 @@ impl AnnotationStore {
             doc.put_poi(&p.id, &serde_json::to_string(p).expect("poi json"));
         }
         let _ = doc.rekey_actor(actor);
-        Self { source_id: source_id.into(), doc }
+        Self {
+            source_id: source_id.into(),
+            doc,
+        }
     }
 
     /// Parse a canonical CRDT annotation store.
@@ -80,7 +86,10 @@ impl AnnotationStore {
             .map_err(|e| AnnotationError::Corrupt(format!("crdt base64: {e}")))?;
         doc.import(&crdt)
             .map_err(|e| AnnotationError::Corrupt(format!("crdt import: {e}")))?;
-        Ok(Self { source_id: on_disk.source_id, doc })
+        Ok(Self {
+            source_id: on_disk.source_id,
+            doc,
+        })
     }
 
     /// Serialise the canonical store.
@@ -101,7 +110,10 @@ impl AnnotationStore {
 
     /// Add or replace a marker (REQ-082 observed-replace by id).
     pub fn add_marker(&self, marker: &Marker) {
-        self.doc.put_marker(&marker.id, &serde_json::to_string(marker).expect("marker json"));
+        self.doc.put_marker(
+            &marker.id,
+            &serde_json::to_string(marker).expect("marker json"),
+        );
     }
 
     /// Build and add a marker (timestamped now, attributed to `author`); returns
@@ -142,7 +154,8 @@ impl AnnotationStore {
 
     /// Add or replace a POI (REQ-082 observed-replace by id).
     pub fn add_poi(&self, poi: &Poi) {
-        self.doc.put_poi(&poi.id, &serde_json::to_string(poi).expect("poi json"));
+        self.doc
+            .put_poi(&poi.id, &serde_json::to_string(poi).expect("poi json"));
     }
 
     /// Build and add a POI (timestamped now); returns it. Keeps `chrono` out of

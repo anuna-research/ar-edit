@@ -45,7 +45,10 @@ fn ops(max: usize) -> impl Strategy<Value = Vec<Op>> {
 }
 
 fn words(from: u16, len: u16) -> ShotRange {
-    ShotRange::Words { from: from as u32, to: (from + len) as u32 }
+    ShotRange::Words {
+        from: from as u32,
+        to: (from + len) as u32,
+    }
 }
 
 fn ids(e: &PersistentEdit) -> Vec<String> {
@@ -57,7 +60,7 @@ fn apply(e: &mut PersistentEdit, op: &Op, minted: &mut Vec<String>) {
     let live = ids(e);
     match op {
         Op::Add { src, from, len } => {
-            if let Ok(id) = e.add_shot(&format!("src-{src}"), words(*from, *len), None) {
+            if let Ok(id) = e.add_shot(&format!("src-{src}"), words(*from, *len), None, "") {
                 minted.push(id);
             }
         }
@@ -81,7 +84,9 @@ fn apply(e: &mut PersistentEdit, op: &Op, minted: &mut Vec<String>) {
 /// Apply an op to a bare CRDT doc (no undo cursor), tracking live ids locally.
 fn apply_crdt(doc: &CollabDoc, op: &Op, live: &mut Vec<String>) {
     match op {
-        Op::Add { src, from, len } => live.push(doc.add_new_shot(&format!("src-{src}"), &words(*from, *len))),
+        Op::Add { src, from, len } => {
+            live.push(doc.add_new_shot(&format!("src-{src}"), &words(*from, *len), ""))
+        }
         Op::Remove(n) if !live.is_empty() => {
             let id = live.remove(*n % live.len());
             doc.remove_shot(&id);

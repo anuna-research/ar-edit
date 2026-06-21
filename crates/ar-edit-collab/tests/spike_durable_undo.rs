@@ -32,14 +32,18 @@ impl Session {
     fn new(actor: ActorId) -> Self {
         let doc = CollabDoc::new(actor);
         let history = vec![doc.checkpoint()]; // empty baseline
-        Self { doc, history, head: 0 }
+        Self {
+            doc,
+            history,
+            head: 0,
+        }
     }
 
     /// Append a shot and record a checkpoint, truncating any redo branch.
     fn add(&mut self, source: &str) -> String {
         let id = self
             .doc
-            .add_new_shot(source, &ShotRange::Words { from: 0, to: 10 });
+            .add_new_shot(source, &ShotRange::Words { from: 0, to: 10 }, "");
         self.history.truncate(self.head + 1);
         self.history.push(self.doc.checkpoint());
         self.head += 1;
@@ -65,7 +69,11 @@ impl Session {
     }
 
     fn ids(&self) -> Vec<String> {
-        materialise(&self.doc).shots.into_iter().map(|s| s.id).collect()
+        materialise(&self.doc)
+            .shots
+            .into_iter()
+            .map(|s| s.id)
+            .collect()
     }
 
     /// Serialise everything an on-disk edit file would hold.
@@ -92,7 +100,10 @@ fn durable_undo_redo_survives_persistence() {
     let b = s.add("src-002");
     let _c = s.add("src-003");
     assert_eq!(s.ids().len(), 3);
-    assert!(s.doc.is_attached(), "revert-based undo keeps the doc attached/editable");
+    assert!(
+        s.doc.is_attached(),
+        "revert-based undo keeps the doc attached/editable"
+    );
 
     // Undo twice (→ 1 shot), then persist and "restart" the process.
     assert!(s.undo());
@@ -112,7 +123,10 @@ fn durable_undo_redo_survives_persistence() {
     assert!(s.redo());
     let ids = s.ids();
     assert_eq!(ids.len(), 3);
-    assert!(ids.contains(&b), "redo restores the exact same shot id: {ids:?}");
+    assert!(
+        ids.contains(&b),
+        "redo restores the exact same shot id: {ids:?}"
+    );
 
     // Undo then a NEW edit truncates the redo branch (event-sourced parity with
     // SPEC-001 fork behaviour).
@@ -121,7 +135,10 @@ fn durable_undo_redo_survives_persistence() {
     s.add("src-004");
     assert_eq!(s.ids().len(), 3);
     assert!(!s.redo(), "a new edit after undo truncates redo");
-    assert!(s.doc.is_attached(), "still attached after the whole sequence");
+    assert!(
+        s.doc.is_attached(),
+        "still attached after the whole sequence"
+    );
 }
 
 /// A second persistence cycle: undo must remain durable across MULTIPLE
@@ -148,6 +165,9 @@ fn undo_cursor_stable_across_multiple_restarts() {
     // Process 3: load, redo one (a checkpoint from process 1, reverted to in 3).
     let mut s = Session::restore(actor, &snap, hist, head);
     assert_eq!(s.ids().len(), 1, "undo from process 2 persisted");
-    assert!(s.redo(), "a checkpoint from an earlier process is a valid revert target");
+    assert!(
+        s.redo(),
+        "a checkpoint from an earlier process is a valid revert target"
+    );
     assert_eq!(s.ids().len(), 2);
 }

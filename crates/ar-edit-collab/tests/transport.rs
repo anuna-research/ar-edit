@@ -10,6 +10,7 @@ use ar_edit_core::models::{Shot, ShotRange};
 
 fn shot(id: &str) -> Shot {
     Shot {
+        author: String::new(),
         id: id.into(),
         source: "src-001".into(),
         range: ShotRange::Words { from: 0, to: 10 },
@@ -88,7 +89,11 @@ async fn spake2_over_iroh_agrees_on_matching_phrase() {
 #[tokio::test]
 async fn pairing_default_threshold_is_three() {
     let t = Transport::bind_loopback().await.unwrap();
-    assert_eq!(t.pairing_max(), 3, "NFR-014 sets the default to three failed confirmations");
+    assert_eq!(
+        t.pairing_max(),
+        3,
+        "NFR-014 sets the default to three failed confirmations"
+    );
 }
 
 /// Regression (P1, NFR-014): the failed-pairing lockout is enforced on the
@@ -97,7 +102,10 @@ async fn pairing_default_threshold_is_three() {
 #[tokio::test]
 async fn pairing_lockout_persists_across_responder_attempts() {
     // max=1: a single wrong guess locks the channel.
-    let responder = Transport::bind_loopback().await.unwrap().with_pairing_max(1);
+    let responder = Transport::bind_loopback()
+        .await
+        .unwrap()
+        .with_pairing_max(1);
     let initiator = Transport::bind_loopback().await.unwrap();
     let addr = responder.dial_addr().unwrap();
     let good = phrase::generate_secure();
@@ -116,13 +124,22 @@ async fn pairing_lockout_persists_across_responder_attempts() {
     });
     let attempt = initiator.pair_as_initiator(addr, &good).await;
     let (responder, res_r) = h.await.unwrap();
-    assert!(attempt.is_err() && res_r.is_err(), "wrong phrase must fail closed");
-    assert!(responder.pairing_is_locked(), "the channel must lock after the limit");
+    assert!(
+        attempt.is_err() && res_r.is_err(),
+        "wrong phrase must fail closed"
+    );
+    assert!(
+        responder.pairing_is_locked(),
+        "the channel must lock after the limit"
+    );
 
     // A retry is refused before any connection is accepted — the tested lockout
     // is no longer dead code.
     let again = responder.pair_as_responder(&good).await;
-    assert!(again.is_err(), "a locked responder must refuse further attempts");
+    assert!(
+        again.is_err(),
+        "a locked responder must refuse further attempts"
+    );
     initiator.close().await;
 }
 
@@ -132,12 +149,21 @@ async fn spake2_over_iroh_wrong_phrase_fails_closed() {
     let initiator = Transport::bind_loopback().await.unwrap();
     let addr = responder.dial_addr().unwrap();
     let good = phrase::generate_secure();
-    let wrong = phrase::parse(&format!("{}-{}-{}", (good.channel + 1) % 1000, good.words[0], good.words[1])).unwrap();
+    let wrong = phrase::parse(&format!(
+        "{}-{}-{}",
+        (good.channel + 1) % 1000,
+        good.words[0],
+        good.words[1]
+    ))
+    .unwrap();
 
     let h = tokio::spawn(async move { responder.pair_as_responder(&wrong).await });
     let result = initiator.pair_as_initiator(addr, &good).await;
     let _ = h.await;
-    assert!(result.is_err(), "mismatched phrase must fail key confirmation");
+    assert!(
+        result.is_err(),
+        "mismatched phrase must fail key confirmation"
+    );
     initiator.close().await;
 }
 

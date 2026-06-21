@@ -14,6 +14,7 @@ fn ts(secs: i64) -> chrono::DateTime<Utc> {
 
 fn shot(id: &str, source: &str, range: ShotRange, notes: Vec<ShotNote>) -> Shot {
     Shot {
+        author: String::new(),
         id: id.into(),
         source: source.into(),
         range,
@@ -45,10 +46,12 @@ fn migration_snapshot_identity() {
                 words(0, 52),
                 vec![
                     ShotNote {
+                        author: String::new(),
                         text: "too long".into(),
                         created: ts(100),
                     },
                     ShotNote {
+                        author: String::new(),
                         text: "great energy".into(),
                         created: ts(200),
                     },
@@ -63,7 +66,12 @@ fn migration_snapshot_identity() {
                 },
                 vec![],
             ),
-            shot("shot-003", "src-002", ShotRange::Scenes { from: 0, to: 2 }, vec![]),
+            shot(
+                "shot-003",
+                "src-002",
+                ShotRange::Scenes { from: 0, to: 2 },
+                vec![],
+            ),
         ],
     };
     let ed = EditDocument {
@@ -107,7 +115,11 @@ fn concurrent_move_same_shot_converges() {
     let oa = order_ids(&materialise::materialise(&a));
     let ob = order_ids(&materialise::materialise(&b));
     assert_eq!(oa, ob, "replicas diverged on concurrent move");
-    assert_eq!(oa.iter().filter(|x| *x == "shot-003").count(), 1, "s3 dup/lost");
+    assert_eq!(
+        oa.iter().filter(|x| *x == "shot-003").count(),
+        1,
+        "s3 dup/lost"
+    );
     assert_eq!(oa.len(), 3, "shot count changed: {oa:?}");
 }
 
@@ -154,7 +166,11 @@ fn strong_eventual_consistency() {
     p2.move_shot("shot-001", 2);
     p3.trim_shot("shot-003", &ShotRange::Scenes { from: 5, to: 9 });
 
-    let (u1, u2, u3) = (p1.export_snapshot(), p2.export_snapshot(), p3.export_snapshot());
+    let (u1, u2, u3) = (
+        p1.export_snapshot(),
+        p2.export_snapshot(),
+        p3.export_snapshot(),
+    );
 
     let x = CollabDoc::new(ActorId(40));
     x.import(&base).unwrap();
@@ -215,7 +231,10 @@ fn marker_orset_converges() {
 
     a.remove_marker("mark-002");
     b.import(&a.export_snapshot()).unwrap();
-    assert!(!b.marker_ids().contains(&"mark-002".to_string()), "remove propagated");
+    assert!(
+        !b.marker_ids().contains(&"mark-002".to_string()),
+        "remove propagated"
+    );
 }
 
 /// Regression (P2, observed-remove): a concurrent re-add must survive a remove
@@ -254,7 +273,7 @@ fn marker_readd_survives_concurrent_remove() {
 #[test]
 fn generated_shot_id_not_reused_after_delete_and_reload() {
     let a = CollabDoc::new(ActorId(7));
-    let id1 = a.add_new_shot("src-A", &words(0, 1));
+    let id1 = a.add_new_shot("src-A", &words(0, 1), "");
     a.remove_shot(&id1);
 
     // Reload: a fresh document for the SAME actor imports the snapshot in which
@@ -263,7 +282,7 @@ fn generated_shot_id_not_reused_after_delete_and_reload() {
     let b = CollabDoc::new(ActorId(7));
     b.import(&snapshot).unwrap();
 
-    let id2 = b.add_new_shot("src-B", &words(2, 3));
+    let id2 = b.add_new_shot("src-B", &words(2, 3), "");
     assert_ne!(
         id1, id2,
         "a reloaded doc must not re-mint a tombstoned shot id (persisted counter)"
@@ -279,7 +298,7 @@ fn undone_insert_does_not_reuse_id_after_reload() {
     let a = CollabDoc::new(ActorId(9));
     let mut undo = LocalUndo::new(&a);
 
-    let id1 = a.add_new_shot("src-A", &words(0, 1));
+    let id1 = a.add_new_shot("src-A", &words(0, 1), "");
     assert!(undo.undo(), "the insert is undoable");
     assert!(
         !materialise::materialise(&a)
@@ -294,7 +313,7 @@ fn undone_insert_does_not_reuse_id_after_reload() {
     let b = CollabDoc::new(ActorId(9));
     b.import(&snapshot).unwrap();
 
-    let id2 = b.add_new_shot("src-B", &words(2, 3));
+    let id2 = b.add_new_shot("src-B", &words(2, 3), "");
     assert_ne!(
         id1, id2,
         "undo must not roll back the id high-water mark (no reuse)"
@@ -380,17 +399,28 @@ fn generated_shot_ids_avoid_collision_across_replicas() {
     let b = CollabDoc::new(ActorId(20));
     b.import(&base).unwrap();
 
-    let id_a = a.add_new_shot("src-A", &words(1, 2));
-    let id_b = b.add_new_shot("src-B", &words(3, 4));
+    let id_a = a.add_new_shot("src-A", &words(1, 2), "");
+    let id_b = b.add_new_shot("src-B", &words(3, 4), "");
     assert_ne!(id_a, id_b, "generated ids must differ across actors");
 
     a.import(&b.export_snapshot()).unwrap();
     b.import(&a.export_snapshot()).unwrap();
 
     let ma = materialise::materialise(&a);
-    assert_eq!(ma.shots.len(), 5, "both inserts survive: {:?}", order_ids(&ma));
-    assert_eq!(ma.shots.iter().find(|s| s.id == id_a).unwrap().source, "src-A");
-    assert_eq!(ma.shots.iter().find(|s| s.id == id_b).unwrap().source, "src-B");
+    assert_eq!(
+        ma.shots.len(),
+        5,
+        "both inserts survive: {:?}",
+        order_ids(&ma)
+    );
+    assert_eq!(
+        ma.shots.iter().find(|s| s.id == id_a).unwrap().source,
+        "src-A"
+    );
+    assert_eq!(
+        ma.shots.iter().find(|s| s.id == id_b).unwrap().source,
+        "src-B"
+    );
     assert_eq!(json(&ma), json(&materialise::materialise(&b)));
 }
 
@@ -402,7 +432,12 @@ fn add_shot_disambiguates_local_duplicate_id() {
     d.add_shot(&shot("shot-001", "src-A", words(0, 1), vec![]));
     d.add_shot(&shot("shot-001", "src-B", words(2, 3), vec![])); // same id locally
     let m = materialise::materialise(&d);
-    assert_eq!(m.shots.len(), 2, "duplicate id must not overwrite: {:?}", order_ids(&m));
+    assert_eq!(
+        m.shots.len(),
+        2,
+        "duplicate id must not overwrite: {:?}",
+        order_ids(&m)
+    );
     let srcs: Vec<&str> = m.shots.iter().map(|s| s.source.as_str()).collect();
     assert!(
         srcs.contains(&"src-A") && srcs.contains(&"src-B"),
@@ -433,16 +468,24 @@ fn independent_migrations_converge_without_duplication() {
 
     let a = migrate::from_event_sourced(&ed, ActorId(10));
     let b = migrate::from_event_sourced(&ed, ActorId(20));
-    a.add_new_shot("src-A", &words(1, 2));
-    b.add_new_shot("src-B", &words(3, 4));
+    a.add_new_shot("src-A", &words(1, 2), "");
+    b.add_new_shot("src-B", &words(3, 4), "");
 
     a.import(&b.export_snapshot()).unwrap();
     b.import(&a.export_snapshot()).unwrap();
 
     let ma = materialise::materialise(&a);
     let order = order_ids(&ma);
-    assert_eq!(order.iter().filter(|x| *x == "shot-001").count(), 1, "no dup: {order:?}");
-    assert_eq!(order.iter().filter(|x| *x == "shot-002").count(), 1, "no dup: {order:?}");
+    assert_eq!(
+        order.iter().filter(|x| *x == "shot-001").count(),
+        1,
+        "no dup: {order:?}"
+    );
+    assert_eq!(
+        order.iter().filter(|x| *x == "shot-002").count(),
+        1,
+        "no dup: {order:?}"
+    );
     assert_eq!(ma.shots.len(), 4, "2 migrated + 2 live inserts: {order:?}");
     assert_eq!(json(&ma), json(&materialise::materialise(&b)));
 }
@@ -473,6 +516,7 @@ fn notes_survive_reload_same_actor() {
 
 fn note(text: &str, secs: i64) -> ShotNote {
     ShotNote {
+        author: String::new(),
         text: text.into(),
         created: ts(secs),
     }
@@ -482,6 +526,11 @@ fn base_three_shots() -> Vec<u8> {
     let d = CollabDoc::new(ActorId(1));
     d.add_shot(&shot("shot-001", "src-001", words(0, 52), vec![]));
     d.add_shot(&shot("shot-002", "src-003", words(200, 280), vec![]));
-    d.add_shot(&shot("shot-003", "src-002", ShotRange::Scenes { from: 0, to: 2 }, vec![]));
+    d.add_shot(&shot(
+        "shot-003",
+        "src-002",
+        ShotRange::Scenes { from: 0, to: 2 },
+        vec![],
+    ));
     d.export_snapshot()
 }

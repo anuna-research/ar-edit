@@ -46,12 +46,28 @@ pub enum DaemonError {
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Request {
     /// Attach to the session (informational; the daemon owns one edit).
-    Attach { edit: String },
-    AddShot { shot: Shot },
-    MoveShot { shot_id: String, to: usize },
-    TrimShot { shot_id: String, range: ShotRange },
-    AddNote { shot_id: String, text: String },
-    RemoveShot { shot_id: String },
+    Attach {
+        edit: String,
+    },
+    AddShot {
+        shot: Shot,
+    },
+    MoveShot {
+        shot_id: String,
+        to: usize,
+    },
+    TrimShot {
+        shot_id: String,
+        range: ShotRange,
+    },
+    AddNote {
+        shot_id: String,
+        text: String,
+        author: String,
+    },
+    RemoveShot {
+        shot_id: String,
+    },
     /// Undo the most recent change via the store's durable cursor (REQ-086).
     Undo,
     /// Redo the most recently undone change.
@@ -68,12 +84,23 @@ pub enum Request {
 pub enum Response {
     Ok,
     /// A live insert succeeded; carries the minted, actor-scoped shot id.
-    Added { shot_id: String },
+    Added {
+        shot_id: String,
+    },
     /// Whether an undo/redo actually reverted (nothing to revert → `false`).
-    Reverted { reverted: bool },
-    Snapshot { shots: Vec<Shot> },
-    Status { shot_count: usize, edit: String },
-    Error { message: String },
+    Reverted {
+        reverted: bool,
+    },
+    Snapshot {
+        shots: Vec<Shot>,
+    },
+    Status {
+        shot_count: usize,
+        edit: String,
+    },
+    Error {
+        message: String,
+    },
 }
 
 /// Recognise a framed JSON request body into a typed [`Request`] (CON-018,
@@ -86,38 +113,52 @@ pub fn parse_request(body: &[u8]) -> Result<Request, DaemonError> {
 fn apply(store: &mut PersistentEdit, req: Request) -> Response {
     match req {
         Request::Attach { .. } => Response::Ok,
-        Request::AddShot { shot } => match store.add_shot(&shot.source, shot.range.clone(), None) {
-            Ok(shot_id) => {
-                for note in &shot.notes {
-                    store.add_note(&shot_id, note, None);
+        Request::AddShot { shot } => {
+            match store.add_shot(&shot.source, shot.range.clone(), None, &shot.author) {
+                Ok(shot_id) => {
+                    for note in &shot.notes {
+                        store.add_note(&shot_id, note, None);
+                    }
+                    Response::Added { shot_id }
                 }
-                Response::Added { shot_id }
+                Err(e) => Response::Error {
+                    message: e.to_string(),
+                },
             }
-            Err(e) => Response::Error { message: e.to_string() },
-        },
+        }
         Request::MoveShot { shot_id, to } => {
             store.move_shot(&shot_id, to, None);
             Response::Ok
         }
         Request::TrimShot { shot_id, range } => match store.trim_shot(&shot_id, range, None) {
             Ok(()) => Response::Ok,
-            Err(e) => Response::Error { message: e.to_string() },
+            Err(e) => Response::Error {
+                message: e.to_string(),
+            },
         },
-        Request::AddNote { shot_id, text } => {
+        Request::AddNote {
+            shot_id,
+            text,
+            author,
+        } => {
             if !store.has_shot(&shot_id) {
                 return Response::Error {
                     message: format!("shot '{shot_id}' not found"),
                 };
             }
-            store.add_note_text(&shot_id, &text, None);
+            store.add_note_text(&shot_id, &text, None, &author);
             Response::Ok
         }
         Request::RemoveShot { shot_id } => {
             store.remove_shot(&shot_id, None);
             Response::Ok
         }
-        Request::Undo => Response::Reverted { reverted: store.undo() },
-        Request::Redo => Response::Reverted { reverted: store.redo() },
+        Request::Undo => Response::Reverted {
+            reverted: store.undo(),
+        },
+        Request::Redo => Response::Reverted {
+            reverted: store.redo(),
+        },
         Request::Snapshot => Response::Snapshot {
             shots: store.snapshot().shots,
         },

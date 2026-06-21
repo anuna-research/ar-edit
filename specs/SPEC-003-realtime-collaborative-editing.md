@@ -531,15 +531,15 @@ Trace:
 
 **REQ-091: Author Attribution for Annotations**
 
-The system SHALL record a **human-readable author** with every marker and point
-of interest at creation, stored as CRDT state
-([[SPEC-003-realtime-collaborative-editing#ADR-015]]) so attribution converges
-and is visible across peers, AND surface it in `markers` / `poi list` output
-(text and `--json`) WITH the author **auto-populated** from the environment — in
-priority order: `AR_EDIT_AUTHOR`, a cached project identity (`.ar-edit/author`),
-git `user.name`, then the OS username — so no manual entry is required.
-Pre-attribution / legacy annotations carry an empty author. (Attribution for
-edit shots/notes is the natural extension, deferred.)
+The system SHALL record a **human-readable author** with every marker, point of
+interest, **edit shot, and shot note** at creation, stored as CRDT state
+([[SPEC-003-realtime-collaborative-editing#ADR-015]] for annotations; the edit
+CRDT `shot_author` map and note record for shots/notes) so attribution converges
+and is visible across peers, AND surface it in `markers` / `poi list` /
+`edit show` output (text and `--json`) WITH the author **auto-populated** from
+the environment — in priority order: `AR_EDIT_AUTHOR`, a cached project identity
+(`.ar-edit/author`), git `user.name`, then the OS username — so no manual entry
+is required. Pre-attribution / legacy data carries an empty author.
 
 Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-121]]

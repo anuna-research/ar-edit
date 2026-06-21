@@ -97,6 +97,7 @@ impl EditDocument {
             source: source.into(),
             range,
             notes: vec![],
+            author: String::new(),
         };
 
         self.push_op(EditOpKind::AddShot { shot: shot.clone() });
@@ -121,6 +122,7 @@ impl EditDocument {
             source: source.into(),
             range,
             notes: vec![],
+            author: String::new(),
         };
 
         self.push_op(EditOpKind::AddShot { shot: shot.clone() });
@@ -196,6 +198,7 @@ impl EditDocument {
 
         let note = ShotNote {
             text: text.into(),
+            author: String::new(),
             created: Utc::now(),
         };
 
@@ -361,10 +364,16 @@ mod tests {
         for range in [
             ShotRange::Words { from: 10, to: 3 },
             ShotRange::Scenes { from: 5, to: 2 },
-            ShotRange::Time { from_ms: 9000, to_ms: 1000 },
+            ShotRange::Time {
+                from_ms: 9000,
+                to_ms: 1000,
+            },
         ] {
             let err = validate_range(&range).unwrap_err().to_string();
-            assert!(err.contains("must be <= to"), "inverted range message: {err}");
+            assert!(
+                err.contains("must be <= to"),
+                "inverted range message: {err}"
+            );
         }
     }
 
@@ -375,10 +384,16 @@ mod tests {
         for range in [
             ShotRange::Words { from: 7, to: 7 },
             ShotRange::Scenes { from: 0, to: 0 },
-            ShotRange::Time { from_ms: 500, to_ms: 500 },
+            ShotRange::Time {
+                from_ms: 500,
+                to_ms: 500,
+            },
         ] {
             let err = validate_range(&range).unwrap_err().to_string();
-            assert!(err.contains("zero duration"), "zero-width range message: {err}");
+            assert!(
+                err.contains("zero duration"),
+                "zero-width range message: {err}"
+            );
         }
     }
 
@@ -387,9 +402,15 @@ mod tests {
         for range in [
             ShotRange::Words { from: 0, to: 1 },
             ShotRange::Scenes { from: 0, to: 3 },
-            ShotRange::Time { from_ms: 0, to_ms: 1 },
+            ShotRange::Time {
+                from_ms: 0,
+                to_ms: 1,
+            },
         ] {
-            assert!(validate_range(&range).is_ok(), "proper range is valid: {range:?}");
+            assert!(
+                validate_range(&range).is_ok(),
+                "proper range is valid: {range:?}"
+            );
         }
     }
 

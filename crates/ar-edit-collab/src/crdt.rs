@@ -33,6 +33,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) const ORDER: &str = "order";
 pub(crate) const SHOT_SOURCE: &str = "shot_source";
 pub(crate) const SHOT_RANGE: &str = "shot_range";
+pub(crate) const SHOT_AUTHOR: &str = "shot_author";
 pub(crate) const NOTES: &str = "notes";
 pub(crate) const MARKERS: &str = "markers";
 pub(crate) const POIS: &str = "pois";
@@ -56,6 +57,8 @@ const TAG_SEP: char = '\u{1f}';
 pub(crate) struct NoteRec {
     pub shot_id: String,
     pub text: String,
+    #[serde(default)]
+    pub author: String,
     pub created: chrono::DateTime<chrono::Utc>,
 }
 
@@ -187,7 +190,16 @@ impl CollabDoc {
         }
     }
 
-    fn insert_shot(&self, pos: usize, id: &str, source: &str, range: &ShotRange, notes: &[ShotNote]) {
+    #[allow(clippy::too_many_arguments)]
+    fn insert_shot(
+        &self,
+        pos: usize,
+        id: &str,
+        source: &str,
+        range: &ShotRange,
+        author: &str,
+        notes: &[ShotNote],
+    ) {
         let order = self.doc.get_movable_list(ORDER);
         order.insert(pos.min(order.len()), id).expect("insert id");
         self.doc
@@ -198,6 +210,10 @@ impl CollabDoc {
             .get_map(SHOT_RANGE)
             .insert(id, range_to_json(range).as_str())
             .expect("set range");
+        self.doc
+            .get_map(SHOT_AUTHOR)
+            .insert(id, author)
+            .expect("set author");
         for note in notes {
             self.add_note(id, note);
         }
@@ -226,17 +242,24 @@ impl CollabDoc {
     /// [`Self::add_shot`].
     pub fn add_shot_at(&self, pos: usize, shot: &Shot) {
         let id = self.unique_id_for(&shot.id);
-        self.insert_shot(pos, &id, &shot.source, &shot.range, &shot.notes);
+        self.insert_shot(
+            pos,
+            &id,
+            &shot.source,
+            &shot.range,
+            &shot.author,
+            &shot.notes,
+        );
     }
 
     /// Append a brand-new shot with a freshly-minted, globally-unique id and
     /// return that id. This is the correct entry point for live collaborative
     /// inserts (CLI/agent/daemon): the id is actor-scoped, so two replicas
     /// inserting concurrently never produce a colliding id (REQ-080).
-    pub fn add_new_shot(&self, source: &str, range: &ShotRange) -> String {
+    pub fn add_new_shot(&self, source: &str, range: &ShotRange, author: &str) -> String {
         let id = self.mint_shot_id();
         let pos = self.doc.get_movable_list(ORDER).len();
-        self.insert_shot(pos, &id, source, range, &[]);
+        self.insert_shot(pos, &id, source, range, author, &[]);
         id
     }
 
@@ -253,6 +276,7 @@ impl CollabDoc {
             .expect("delete from order");
         let _ = self.doc.get_map(SHOT_SOURCE).delete(shot_id);
         let _ = self.doc.get_map(SHOT_RANGE).delete(shot_id);
+        let _ = self.doc.get_map(SHOT_AUTHOR).delete(shot_id);
         // Drop this shot's notes (orphans would be ignored by materialise, but
         // keep the doc tidy).
         for note_id in self.note_ids_for(shot_id) {
@@ -297,6 +321,7 @@ impl CollabDoc {
         let rec = NoteRec {
             shot_id: shot_id.to_string(),
             text: note.text.clone(),
+            author: note.author.clone(),
             created: note.created,
         };
         let json = serde_json::to_string(&rec).expect("note json");
@@ -376,7 +401,8 @@ impl CollabDoc {
     /// (ordered by id). When concurrent instances of one id exist, a single
     /// deterministic value is returned (last by map-iteration order).
     fn orset_values(&self, name: &str) -> Vec<String> {
-        let mut by_id: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+        let mut by_id: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
         if let LoroValue::Map(m) = self.doc.get_map(name).get_value() {
             for (k, v) in m.iter() {
                 if let LoroValue::String(s) = v {
@@ -557,9 +583,7 @@ impl CollabDoc {
         if let Some(h) = highest {
             let next = h + 1;
             // Only ever move the counter forward.
-            let _ = self
-                .note_counter
-                .fetch_max(next, Ordering::Relaxed);
+            let _ = self.note_counter.fetch_max(next, Ordering::Relaxed);
         }
         if let Some(floor) = self.counter_floor("note") {
             let _ = self.note_counter.fetch_max(floor, Ordering::Relaxed);

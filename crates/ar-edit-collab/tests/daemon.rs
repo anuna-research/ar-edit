@@ -7,13 +7,14 @@
 #![cfg(all(feature = "daemon", unix))]
 
 use ar_edit_collab::ids::ActorId;
-use ar_edit_collab::store::PersistentEdit;
 use ar_edit_collab::shell::daemon::{Daemon, DaemonClient, DaemonError, Request, Response};
+use ar_edit_collab::store::PersistentEdit;
 use ar_edit_core::models::{Shot, ShotRange};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn shot() -> Shot {
     Shot {
+        author: String::new(),
         id: String::new(),
         source: "src-001".into(),
         range: ShotRange::Words { from: 0, to: 10 },
@@ -143,9 +144,12 @@ async fn daemon_rejects_invalid_range() {
 
     let id = add(&mut c).await;
     assert!(matches!(
-        c.request(&Request::TrimShot { shot_id: id, range: ShotRange::Words { from: 10, to: 3 } })
-            .await
-            .unwrap(),
+        c.request(&Request::TrimShot {
+            shot_id: id,
+            range: ShotRange::Words { from: 10, to: 3 }
+        })
+        .await
+        .unwrap(),
         Response::Error { .. }
     ));
     assert_eq!(snapshot_ids(&mut c).await.len(), 1);
@@ -178,7 +182,11 @@ async fn daemon_restart_reloads_store_and_cursor() {
     tokio::spawn(daemon.run());
     let mut c = DaemonClient::connect(&sock2).await.unwrap();
 
-    assert_eq!(snapshot_ids(&mut c).await.len(), 2, "state survived restart");
+    assert_eq!(
+        snapshot_ids(&mut c).await.len(),
+        2,
+        "state survived restart"
+    );
     // The durable cursor survived too: undo still works.
     assert!(matches!(
         c.request(&Request::Undo).await.unwrap(),
@@ -217,7 +225,9 @@ async fn daemon_rejects_malformed_request() {
 
     let mut raw = tokio::net::UnixStream::connect(&sock).await.unwrap();
     let bad = b"{not valid json";
-    raw.write_all(&(bad.len() as u32).to_be_bytes()).await.unwrap();
+    raw.write_all(&(bad.len() as u32).to_be_bytes())
+        .await
+        .unwrap();
     raw.write_all(bad).await.unwrap();
     let mut len = [0u8; 4];
     raw.read_exact(&mut len).await.unwrap();
@@ -228,5 +238,9 @@ async fn daemon_rejects_malformed_request() {
     assert!(matches!(resp, Response::Error { .. }));
 
     let mut c = DaemonClient::connect(&sock).await.unwrap();
-    assert_eq!(snapshot_ids(&mut c).await.len(), 0, "no mutation on bad input");
+    assert_eq!(
+        snapshot_ids(&mut c).await.len(),
+        0,
+        "no mutation on bad input"
+    );
 }

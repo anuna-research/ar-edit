@@ -167,9 +167,10 @@ impl PersistentEdit {
         source: &str,
         range: ShotRange,
         op_id: Option<String>,
+        author: &str,
     ) -> Result<String, StoreError> {
         validate_range(&range)?;
-        let id = self.doc.add_new_shot(source, &range);
+        let id = self.doc.add_new_shot(source, &range, author);
         self.checkpoint(op_id);
         Ok(id)
     }
@@ -212,9 +213,16 @@ impl PersistentEdit {
 
     /// Append a note from `text` (timestamped now); returns it. Keeps `chrono`
     /// out of one-shot callers.
-    pub fn add_note_text(&mut self, shot_id: &str, text: &str, op_id: Option<String>) -> ShotNote {
+    pub fn add_note_text(
+        &mut self,
+        shot_id: &str,
+        text: &str,
+        op_id: Option<String>,
+        author: &str,
+    ) -> ShotNote {
         let note = ShotNote {
             text: text.to_string(),
+            author: author.to_string(),
             created: Utc::now(),
         };
         self.doc.add_note(shot_id, &note);
@@ -230,7 +238,11 @@ impl PersistentEdit {
         }
         // A checkpoint frontier that is not in this doc (corrupt/hand-edited
         // file) makes revert fail — return false rather than panic the CLI.
-        if self.doc.revert_to(&self.history[self.head - 1].frontier).is_err() {
+        if self
+            .doc
+            .revert_to(&self.history[self.head - 1].frontier)
+            .is_err()
+        {
             return false;
         }
         self.head -= 1;
@@ -242,7 +254,11 @@ impl PersistentEdit {
         if !self.can_redo() {
             return false;
         }
-        if self.doc.revert_to(&self.history[self.head + 1].frontier).is_err() {
+        if self
+            .doc
+            .revert_to(&self.history[self.head + 1].frontier)
+            .is_err()
+        {
             return false;
         }
         self.head += 1;
@@ -355,7 +371,10 @@ impl PersistentEdit {
                 replay(&doc, &op.op);
                 let frontier = doc.checkpoint();
                 if frontier != history.last().expect("baseline present").frontier {
-                    history.push(Checkpoint { frontier, op_id: None });
+                    history.push(Checkpoint {
+                        frontier,
+                        op_id: None,
+                    });
                 }
             }
         } else if !legacy.snapshot.shots.is_empty() {
@@ -388,13 +407,17 @@ fn replay(doc: &CollabDoc, op: &EditOpKind) {
     match op {
         EditOpKind::AddShot { shot } => doc.add_shot(shot),
         EditOpKind::RemoveShot { shot_id, .. } => doc.remove_shot(shot_id),
-        EditOpKind::MoveShot { shot_id, to_position, .. } => {
-            doc.move_shot(shot_id, *to_position as usize)
+        EditOpKind::MoveShot {
+            shot_id,
+            to_position,
+            ..
+        } => doc.move_shot(shot_id, *to_position as usize),
+        EditOpKind::TrimShot {
+            shot_id, new_range, ..
         }
-        EditOpKind::TrimShot { shot_id, new_range, .. }
-        | EditOpKind::ReplaceRangeType { shot_id, new_range, .. } => {
-            doc.trim_shot(shot_id, new_range)
-        }
+        | EditOpKind::ReplaceRangeType {
+            shot_id, new_range, ..
+        } => doc.trim_shot(shot_id, new_range),
         EditOpKind::AddNote { shot_id, note } => doc.add_note(shot_id, note),
     }
 }
@@ -420,19 +443,23 @@ mod tests {
     #[test]
     fn move_reorders_the_shot_list() {
         let mut e = PersistentEdit::create("p", ActorId(1));
-        let a = e.add_shot("s1", words(0, 5), None).unwrap();
-        let b = e.add_shot("s2", words(0, 5), None).unwrap();
-        let c = e.add_shot("s3", words(0, 5), None).unwrap();
+        let a = e.add_shot("s1", words(0, 5), None, "").unwrap();
+        let b = e.add_shot("s2", words(0, 5), None, "").unwrap();
+        let c = e.add_shot("s3", words(0, 5), None, "").unwrap();
         assert_eq!(ids(&e), vec![a.clone(), b.clone(), c.clone()]);
         e.move_shot(&a, 2, None);
-        assert_eq!(ids(&e), vec![b, c, a], "move reorders, not just preserves the set");
+        assert_eq!(
+            ids(&e),
+            vec![b, c, a],
+            "move reorders, not just preserves the set"
+        );
     }
 
     #[test]
     fn remove_deletes_exactly_the_target() {
         let mut e = PersistentEdit::create("p", ActorId(1));
-        let a = e.add_shot("s1", words(0, 5), None).unwrap();
-        let b = e.add_shot("s2", words(0, 5), None).unwrap();
+        let a = e.add_shot("s1", words(0, 5), None, "").unwrap();
+        let b = e.add_shot("s2", words(0, 5), None, "").unwrap();
         e.remove_shot(&a, None);
         assert_eq!(ids(&e), vec![b], "remove deletes the target shot");
     }
@@ -440,8 +467,12 @@ mod tests {
     #[test]
     fn add_note_appears_on_the_shot() {
         let mut e = PersistentEdit::create("p", ActorId(1));
-        let a = e.add_shot("s1", words(0, 5), None).unwrap();
-        let note = ShotNote { text: "hello".into(), created: Utc::now() };
+        let a = e.add_shot("s1", words(0, 5), None, "").unwrap();
+        let note = ShotNote {
+            author: String::new(),
+            text: "hello".into(),
+            created: Utc::now(),
+        };
         e.add_note(&a, &note, None);
         let shot = e.snapshot().shots.into_iter().find(|s| s.id == a).unwrap();
         assert_eq!(shot.notes.len(), 1);
@@ -451,7 +482,7 @@ mod tests {
     #[test]
     fn has_shot_distinguishes_present_from_absent() {
         let mut e = PersistentEdit::create("p", ActorId(1));
-        let a = e.add_shot("s1", words(0, 5), None).unwrap();
+        let a = e.add_shot("s1", words(0, 5), None, "").unwrap();
         assert!(e.has_shot(&a), "present shot");
         assert!(!e.has_shot("shot-nope"), "absent shot");
     }
@@ -459,13 +490,17 @@ mod tests {
     #[test]
     fn redo_restores_the_exact_prior_state() {
         let mut e = PersistentEdit::create("p", ActorId(1));
-        e.add_shot("s1", words(0, 5), None).unwrap();
-        let two = e.add_shot("s2", words(0, 5), None).unwrap();
+        e.add_shot("s1", words(0, 5), None, "").unwrap();
+        let two = e.add_shot("s2", words(0, 5), None, "").unwrap();
         let full = ids(&e);
         assert!(e.undo());
         assert_eq!(ids(&e).len(), 1, "undo dropped the second shot");
         assert!(e.redo());
-        assert_eq!(ids(&e), full, "redo restored the exact prior list (not the current state)");
+        assert_eq!(
+            ids(&e),
+            full,
+            "redo restored the exact prior list (not the current state)"
+        );
         assert!(e.has_shot(&two));
     }
 
@@ -476,6 +511,7 @@ mod tests {
         // — guards migrate_legacy's `head >= 0 && !ops.is_empty()` condition.
         use ar_edit_core::models::Shot;
         let mk = |id: &str, src: &str| Shot {
+            author: String::new(),
             id: id.into(),
             source: src.into(),
             range: words(0, 10),
@@ -483,11 +519,17 @@ mod tests {
         };
         let mut legacy = EditDocument::create("e");
         legacy.head = 0; // >= 0, so the && short-circuits on empty ops
-        legacy.snapshot = EditSnapshot { shots: vec![mk("shot-001", "s1"), mk("shot-002", "s2")] };
+        legacy.snapshot = EditSnapshot {
+            shots: vec![mk("shot-001", "s1"), mk("shot-002", "s2")],
+        };
 
         let e =
             PersistentEdit::from_bytes(&serde_json::to_vec(&legacy).unwrap(), ActorId(1)).unwrap();
-        assert_eq!(ids(&e).len(), 2, "snapshot-only migration seeded both shots");
+        assert_eq!(
+            ids(&e).len(),
+            2,
+            "snapshot-only migration seeded both shots"
+        );
     }
 
     #[test]
@@ -495,21 +537,25 @@ mod tests {
         // Poison a valid store's undo_head; from_on_disk must clamp it to the
         // last valid index (history.len() - 1), not overrun the history.
         let mut e = PersistentEdit::create("p", ActorId(1));
-        e.add_shot("s1", words(0, 5), None).unwrap();
+        e.add_shot("s1", words(0, 5), None, "").unwrap();
         let mut v: serde_json::Value = serde_json::from_slice(&e.to_bytes()).unwrap();
         v["undo_head"] = serde_json::json!(9999);
         let mut e2 =
             PersistentEdit::from_bytes(&serde_json::to_vec(&v).unwrap(), ActorId(1)).unwrap();
         assert!(!e2.can_redo(), "clamped to the tip — nothing to redo");
         assert!(e2.undo(), "head is a valid index, so undo works");
-        assert_eq!(ids(&e2).len(), 0, "undo from the clamped tip reaches the empty baseline");
+        assert_eq!(
+            ids(&e2).len(),
+            0,
+            "undo from the clamped tip reaches the empty baseline"
+        );
     }
 
     #[test]
     fn frontier_tracks_real_changes_only() {
         let mut e = PersistentEdit::create("p", ActorId(1));
         let f0 = e.frontier();
-        e.add_shot("s1", words(0, 5), None).unwrap();
+        e.add_shot("s1", words(0, 5), None, "").unwrap();
         let f1 = e.frontier();
         assert_ne!(f0, f1, "a real add advances the frontier");
         e.remove_shot("shot-absent", None); // no-op
@@ -522,11 +568,14 @@ mod tests {
     #[test]
     fn no_id_reuse_after_undo_and_reload() {
         let mut e = PersistentEdit::create("p", ActorId(0x42));
-        let id1 = e.add_shot("src-001", words(0, 10), None).unwrap();
+        let id1 = e.add_shot("src-001", words(0, 10), None, "").unwrap();
         assert!(e.undo());
         let mut e = PersistentEdit::from_bytes(&e.to_bytes(), ActorId(0x42)).unwrap();
-        let id2 = e.add_shot("src-002", words(0, 10), None).unwrap();
-        assert_ne!(id1, id2, "a tombstoned id must never be re-minted after undo + reload");
+        let id2 = e.add_shot("src-002", words(0, 10), None, "").unwrap();
+        assert_ne!(
+            id1, id2,
+            "a tombstoned id must never be re-minted after undo + reload"
+        );
     }
 
     /// Regression (REQ-088): two peers migrating the SAME legacy edit
@@ -556,20 +605,24 @@ mod tests {
     #[test]
     fn no_op_mutation_records_no_undo_step() {
         let mut e = PersistentEdit::create("p", ActorId(7));
-        e.add_shot("src-001", words(0, 10), None).unwrap();
+        e.add_shot("src-001", words(0, 10), None, "").unwrap();
         e.remove_shot("does-not-exist", None);
         e.move_shot("does-not-exist", 0, None);
         assert!(e.undo(), "one undo available");
-        assert_eq!(ids(&e).len(), 0, "a single undo reverts the real add (no phantom steps)");
+        assert_eq!(
+            ids(&e).len(),
+            0,
+            "a single undo reverts the real add (no phantom steps)"
+        );
         assert!(!e.undo(), "nothing more to undo");
     }
 
     #[test]
     fn durable_undo_redo_round_trips_through_persistence() {
         let mut e = PersistentEdit::create("rough-cut", ActorId(3));
-        e.add_shot("src-001", words(0, 10), None).unwrap();
-        let b = e.add_shot("src-002", words(0, 10), None).unwrap();
-        e.add_shot("src-003", words(0, 10), None).unwrap();
+        e.add_shot("src-001", words(0, 10), None, "").unwrap();
+        let b = e.add_shot("src-002", words(0, 10), None, "").unwrap();
+        e.add_shot("src-003", words(0, 10), None, "").unwrap();
         assert_eq!(ids(&e).len(), 3);
 
         assert!(e.undo());
@@ -587,15 +640,18 @@ mod tests {
 
         // Edit after undo truncates redo.
         assert!(e.undo());
-        e.add_shot("src-004", words(0, 10), None).unwrap();
+        e.add_shot("src-004", words(0, 10), None, "").unwrap();
         assert!(!e.redo(), "a new edit after undo truncates redo");
     }
 
     #[test]
     fn op_ids_recorded_on_cursor_survive_persistence() {
         let mut e = PersistentEdit::create("rc", ActorId(4));
-        e.add_shot("src-001", words(0, 10), Some("op-1".into())).unwrap();
-        let id = e.add_shot("src-002", words(0, 10), Some("op-2".into())).unwrap();
+        e.add_shot("src-001", words(0, 10), Some("op-1".into()), "")
+            .unwrap();
+        let id = e
+            .add_shot("src-002", words(0, 10), Some("op-2".into()), "")
+            .unwrap();
         // The op an undo would revert reports its daemon tag for forwarding.
         assert_eq!(e.current_op_id(), Some("op-2"));
 
@@ -608,11 +664,11 @@ mod tests {
     fn rejects_invalid_range() {
         let mut e = PersistentEdit::create("rc", ActorId(1));
         assert!(matches!(
-            e.add_shot("src-001", words(5, 5), None),
+            e.add_shot("src-001", words(5, 5), None, ""),
             Err(StoreError::Edit(_))
         ));
         assert_eq!(ids(&e).len(), 0, "no shot added on invalid range");
-        let id = e.add_shot("src-001", words(0, 10), None).unwrap();
+        let id = e.add_shot("src-001", words(0, 10), None, "").unwrap();
         assert!(matches!(
             e.trim_shot(&id, words(10, 3), None),
             Err(StoreError::Edit(_))
@@ -630,7 +686,11 @@ mod tests {
 
         let mut e = PersistentEdit::from_bytes(&bytes, ActorId(9)).unwrap();
         assert_eq!(e.name(), "legacy");
-        assert_eq!(e.snapshot().shots.len(), 3, "migration is snapshot-identical");
+        assert_eq!(
+            e.snapshot().shots.len(),
+            3,
+            "migration is snapshot-identical"
+        );
         // Undo history was reconstructed from the legacy op log.
         assert!(e.can_undo(), "migrated doc can undo its replayed ops");
         assert!(e.undo());

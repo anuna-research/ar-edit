@@ -89,11 +89,7 @@ pub fn list_all_pois(project_dir: &Path) -> Result<Vec<SourcePois>, PoiError> {
 /// Remove a single POI by ID. Returns the removed POI's ID.
 ///
 /// The ID is not reused; `next_poi_id` is still based on the max existing ID.
-pub fn remove_poi(
-    project_dir: &Path,
-    source_id: &str,
-    poi_id: &str,
-) -> Result<String, PoiError> {
+pub fn remove_poi(project_dir: &Path, source_id: &str, poi_id: &str) -> Result<String, PoiError> {
     let path = pois_path(project_dir, source_id);
     let mut doc = load_or_create(source_id, &path)?;
 
@@ -339,10 +335,7 @@ mod tests {
         assert_eq!(json["pois"].as_array().unwrap().len(), 2);
         assert_eq!(json["pois"][0]["id"], "poi-001");
         assert_eq!(json["pois"][0]["category"], "highlight");
-        assert_eq!(
-            json["pois"][0]["point"],
-            serde_json::json!({ "word": 45 })
-        );
+        assert_eq!(json["pois"][0]["point"], serde_json::json!({ "word": 45 }));
         assert_eq!(json["pois"][1]["id"], "poi-002");
         assert_eq!(json["pois"][1]["category"], "issue");
         assert!(json["pois"][1]["note"].is_null());

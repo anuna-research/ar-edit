@@ -40,9 +40,12 @@ fn setup_project(name: &str) -> (TempDir, std::path::PathBuf) {
 /// cursor from its op log so `undo` keeps working (REQ-088).
 fn doc_with_three_shots() -> EditDocument {
     let mut doc = EditDocument::create("rough-cut");
-    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 }).unwrap();
-    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 }).unwrap();
-    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 }).unwrap();
+    doc.add_shot("src-001", ShotRange::Words { from: 0, to: 52 })
+        .unwrap();
+    doc.add_shot("src-002", ShotRange::Scenes { from: 0, to: 2 })
+        .unwrap();
+    doc.add_shot("src-003", ShotRange::Words { from: 100, to: 200 })
+        .unwrap();
     doc
 }
 
@@ -185,7 +188,11 @@ fn redo_after_undo_text() {
     let (tmp, edit_path) = setup_project("rough-cut");
     doc_with_three_shots().save(&edit_path).unwrap();
 
-    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
+    ar_edit()
+        .current_dir(tmp.path())
+        .args(["undo", "rough-cut"])
+        .assert()
+        .success();
     let output = ar_edit()
         .current_dir(tmp.path())
         .args(["redo", "rough-cut"])
@@ -204,7 +211,11 @@ fn redo_after_undo_json() {
     let (tmp, edit_path) = setup_project("rough-cut");
     doc_with_three_shots().save(&edit_path).unwrap();
 
-    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
+    ar_edit()
+        .current_dir(tmp.path())
+        .args(["undo", "rough-cut"])
+        .assert()
+        .success();
     let output = ar_edit()
         .current_dir(tmp.path())
         .args(["--json", "redo", "rough-cut"])
@@ -239,10 +250,18 @@ fn undo_redo_roundtrip_preserves_shots() {
     let original = shot_ids(&edit_path);
 
     for _ in 0..3 {
-        ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
+        ar_edit()
+            .current_dir(tmp.path())
+            .args(["undo", "rough-cut"])
+            .assert()
+            .success();
     }
     for _ in 0..3 {
-        ar_edit().current_dir(tmp.path()).args(["redo", "rough-cut"]).assert().success();
+        ar_edit()
+            .current_dir(tmp.path())
+            .args(["redo", "rough-cut"])
+            .assert()
+            .success();
     }
     assert_eq!(shot_ids(&edit_path), original);
 }
@@ -258,14 +277,28 @@ fn new_edit_after_undo_truncates_redo() {
 
     // Undo twice (→ 1 shot), then make a NEW edit (remove the remaining shot —
     // no project manifest needed), forking the history.
-    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
-    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
+    ar_edit()
+        .current_dir(tmp.path())
+        .args(["undo", "rough-cut"])
+        .assert()
+        .success();
+    ar_edit()
+        .current_dir(tmp.path())
+        .args(["undo", "rough-cut"])
+        .assert()
+        .success();
     let remaining = shot_ids(&edit_path);
     assert_eq!(remaining.len(), 1);
 
     ar_edit()
         .current_dir(tmp.path())
-        .args(["edit", "remove-segment", "rough-cut", "--shot", &remaining[0]])
+        .args([
+            "edit",
+            "remove-segment",
+            "rough-cut",
+            "--shot",
+            &remaining[0],
+        ])
         .assert()
         .success();
     assert!(shot_ids(&edit_path).is_empty());
@@ -287,7 +320,11 @@ fn history_text_shows_timeline_and_undo_state() {
     let (tmp, edit_path) = setup_project("rough-cut");
     doc_with_three_shots().save(&edit_path).unwrap();
     // Undo once so an undo is available and a redo is too.
-    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
+    ar_edit()
+        .current_dir(tmp.path())
+        .args(["undo", "rough-cut"])
+        .assert()
+        .success();
 
     let output = ar_edit()
         .current_dir(tmp.path())
@@ -308,7 +345,11 @@ fn history_text_shows_timeline_and_undo_state() {
 fn history_json_output() {
     let (tmp, edit_path) = setup_project("rough-cut");
     doc_with_three_shots().save(&edit_path).unwrap();
-    ar_edit().current_dir(tmp.path()).args(["undo", "rough-cut"]).assert().success();
+    ar_edit()
+        .current_dir(tmp.path())
+        .args(["undo", "rough-cut"])
+        .assert()
+        .success();
 
     let output = ar_edit()
         .current_dir(tmp.path())

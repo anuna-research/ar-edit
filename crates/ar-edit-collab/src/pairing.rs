@@ -67,15 +67,20 @@ pub struct SessionKey {
 /// pending state and the single outbound message to send to the peer.
 pub fn start(phrase: &Phrase) -> (PendingPairing, Vec<u8>) {
     let pw = phrase.render();
-    let (state, outbound) =
-        Spake2::<Ed25519Group>::start_symmetric(&Password::new(pw.as_bytes()), &Identity::new(APP_ID));
+    let (state, outbound) = Spake2::<Ed25519Group>::start_symmetric(
+        &Password::new(pw.as_bytes()),
+        &Identity::new(APP_ID),
+    );
     (PendingPairing { state }, outbound)
 }
 
 impl PendingPairing {
     /// Complete the handshake with the peer's message, deriving the shared key.
     pub fn finish(self, peer_msg: &[u8]) -> Result<SessionKey, PairingError> {
-        let raw = self.state.finish(peer_msg).map_err(|_| PairingError::Finish)?;
+        let raw = self
+            .state
+            .finish(peer_msg)
+            .map_err(|_| PairingError::Finish)?;
         Ok(SessionKey { raw })
     }
 }

@@ -87,19 +87,42 @@ fn markers_and_pois_record_the_author() {
     };
 
     let out = ar()
-        .args(["mark", "src-001", "--label", "select", "--from-ms", "1000", "--to-ms", "2000"])
+        .args([
+            "mark",
+            "src-001",
+            "--label",
+            "select",
+            "--from-ms",
+            "1000",
+            "--to-ms",
+            "2000",
+        ])
         .output()
         .unwrap();
     assert!(out.status.success());
-    assert!(String::from_utf8_lossy(&out.stdout).contains("by alice"), "marker output shows author");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("by alice"),
+        "marker output shows author"
+    );
     assert_eq!(annot_marker_authors(tmp.path(), "src-001"), vec!["alice"]);
 
     let out = ar()
-        .args(["poi", "add", "src-001", "--at-ms", "5000", "--category", "highlight"])
+        .args([
+            "poi",
+            "add",
+            "src-001",
+            "--at-ms",
+            "5000",
+            "--category",
+            "highlight",
+        ])
         .output()
         .unwrap();
     assert!(out.status.success());
-    assert!(String::from_utf8_lossy(&out.stdout).contains("by alice"), "POI output shows author");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("by alice"),
+        "POI output shows author"
+    );
     assert_eq!(annot_poi_authors(tmp.path(), "src-001"), vec!["alice"]);
 }
 
@@ -115,18 +138,31 @@ fn poi_add_list_remove_through_crdt_store() {
     };
 
     // Add a POI — lands in the CRDT annotation store, shared with markers.
-    ar().args(["poi", "add", "src-001", "--at-ms", "5000", "--category", "highlight"])
-        .assert()
-        .success();
+    ar().args([
+        "poi",
+        "add",
+        "src-001",
+        "--at-ms",
+        "5000",
+        "--category",
+        "highlight",
+    ])
+    .assert()
+    .success();
     assert_eq!(annot_poi_ids(tmp.path(), "src-001"), vec!["poi-001"]);
 
     // `poi list` reads it back.
-    let out = ar().args(["--json", "poi", "list", "src-001"]).output().unwrap();
+    let out = ar()
+        .args(["--json", "poi", "list", "src-001"])
+        .output()
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["pois"][0]["pois"].as_array().unwrap().len(), 1);
 
     // Remove it.
-    ar().args(["poi", "remove", "src-001", "--id", "poi-001"]).assert().success();
+    ar().args(["poi", "remove", "src-001", "--id", "poi-001"])
+        .assert()
+        .success();
     assert!(annot_poi_ids(tmp.path(), "src-001").is_empty());
 }
 
@@ -140,12 +176,29 @@ fn markers_and_pois_share_one_annotation_store() {
         c
     };
 
-    ar().args(["mark", "src-001", "--label", "select", "--from-ms", "1000", "--to-ms", "2000"])
-        .assert()
-        .success();
-    ar().args(["poi", "add", "src-001", "--at-ms", "5000", "--category", "issue"])
-        .assert()
-        .success();
+    ar().args([
+        "mark",
+        "src-001",
+        "--label",
+        "select",
+        "--from-ms",
+        "1000",
+        "--to-ms",
+        "2000",
+    ])
+    .assert()
+    .success();
+    ar().args([
+        "poi",
+        "add",
+        "src-001",
+        "--at-ms",
+        "5000",
+        "--category",
+        "issue",
+    ])
+    .assert()
+    .success();
 
     // One CRDT store holds both the marker and the POI for the source.
     assert_eq!(annot_labels(tmp.path(), "src-001"), vec!["select"]);
@@ -160,7 +213,16 @@ fn mark_writes_crdt_store_and_markers_lists_it() {
     Command::cargo_bin("ar-edit")
         .unwrap()
         .current_dir(tmp.path())
-        .args(["mark", "src-001", "--label", "select", "--from-ms", "1000", "--to-ms", "2000"])
+        .args([
+            "mark",
+            "src-001",
+            "--label",
+            "select",
+            "--from-ms",
+            "1000",
+            "--to-ms",
+            "2000",
+        ])
         .assert()
         .success();
 
@@ -190,7 +252,10 @@ fn mark_migrates_legacy_markers_then_adds() {
     ar_edit_core::marker::add_marker(
         tmp.path(),
         "src-002",
-        ShotRange::Time { from_ms: 500, to_ms: 600 },
+        ShotRange::Time {
+            from_ms: 500,
+            to_ms: 600,
+        },
         "legacy",
         None,
     )
@@ -201,11 +266,26 @@ fn mark_migrates_legacy_markers_then_adds() {
     Command::cargo_bin("ar-edit")
         .unwrap()
         .current_dir(tmp.path())
-        .args(["mark", "src-002", "--label", "fresh", "--from-ms", "1000", "--to-ms", "2000"])
+        .args([
+            "mark",
+            "src-002",
+            "--label",
+            "fresh",
+            "--from-ms",
+            "1000",
+            "--to-ms",
+            "2000",
+        ])
         .assert()
         .success();
 
     let labels = annot_labels(tmp.path(), "src-002");
-    assert!(labels.contains(&"legacy".to_string()), "legacy marker migrated: {labels:?}");
-    assert!(labels.contains(&"fresh".to_string()), "new marker added: {labels:?}");
+    assert!(
+        labels.contains(&"legacy".to_string()),
+        "legacy marker migrated: {labels:?}"
+    );
+    assert!(
+        labels.contains(&"fresh".to_string()),
+        "new marker added: {labels:?}"
+    );
 }

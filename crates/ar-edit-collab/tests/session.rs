@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 fn shot(id: &str) -> Shot {
     Shot {
+        author: String::new(),
         id: id.into(),
         source: "src-001".into(),
         range: ShotRange::Words { from: 0, to: 10 },
@@ -53,7 +54,10 @@ async fn host_join_and_sync_full_session() {
 
     // The edit synced over the paired connection.
     assert!(
-        materialise(&host_doc).shots.iter().any(|s| s.id == "shot-001"),
+        materialise(&host_doc)
+            .shots
+            .iter()
+            .any(|s| s.id == "shot-001"),
         "edit must sync over the paired session"
     );
     // Both peers agreed on the same SPAKE2 session key.

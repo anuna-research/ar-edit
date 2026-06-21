@@ -49,6 +49,9 @@ pub struct ResolvedShot {
     pub scene_preview: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<ShotNote>,
+    /// Human-readable author of the shot (collaborative attribution, REQ-091).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub author: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +225,7 @@ fn resolve_shot(
         text_preview,
         scene_preview,
         notes: shot.notes.clone(),
+        author: shot.author.clone(),
     })
 }
 

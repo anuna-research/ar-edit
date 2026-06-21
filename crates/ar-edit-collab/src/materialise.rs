@@ -3,7 +3,8 @@
 //! CRDT state always yields the same [`EditSnapshot`] (REQ-083).
 
 use crate::crdt::{
-    as_string, range_from_json, CollabDoc, NoteRec, NOTES, ORDER, SHOT_RANGE, SHOT_SOURCE,
+    as_string, range_from_json, CollabDoc, NoteRec, NOTES, ORDER, SHOT_AUTHOR, SHOT_RANGE,
+    SHOT_SOURCE,
 };
 use ar_edit_core::models::{EditDocument, EditSnapshot, Shot, ShotNote, ShotRange};
 use chrono::{TimeZone, Utc};
@@ -16,6 +17,7 @@ pub fn materialise(collab: &CollabDoc) -> EditSnapshot {
     let order = doc.get_movable_list(ORDER);
     let source_map = doc.get_map(SHOT_SOURCE);
     let range_map = doc.get_map(SHOT_RANGE);
+    let author_map = doc.get_map(SHOT_AUTHOR);
 
     // Group notes by shot id (note-id kept for deterministic tie-break).
     let mut notes_by_shot: HashMap<String, Vec<(String, NoteRec)>> = HashMap::new();
@@ -58,16 +60,19 @@ pub fn materialise(collab: &CollabDoc) -> EditSnapshot {
                 v.into_iter()
                     .map(|(_, rec)| ShotNote {
                         text: rec.text,
+                        author: rec.author,
                         created: rec.created,
                     })
                     .collect()
             })
             .unwrap_or_default();
+        let author = as_string(author_map.get(id.as_str())).unwrap_or_default();
         shots.push(Shot {
             id,
             source,
             range,
             notes,
+            author,
         });
     }
     EditSnapshot { shots }

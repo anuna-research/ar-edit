@@ -245,6 +245,7 @@ mod tests {
                 text_preview: None,
                 scene_preview: None,
                 notes: vec![],
+                author: String::new(),
             },
             ResolvedShot {
                 id: "shot-002".into(),
@@ -256,6 +257,7 @@ mod tests {
                 text_preview: None,
                 scene_preview: None,
                 notes: vec![],
+                author: String::new(),
             },
             ResolvedShot {
                 id: "shot-003".into(),
@@ -270,6 +272,7 @@ mod tests {
                 text_preview: None,
                 scene_preview: None,
                 notes: vec![],
+                author: String::new(),
             },
         ]
     }
