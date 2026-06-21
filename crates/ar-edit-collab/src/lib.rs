@@ -15,6 +15,7 @@
 //! implemented and tested.
 
 // ---- pure core ----
+pub mod annotations;
 pub mod crdt;
 pub mod ids;
 pub mod materialise;

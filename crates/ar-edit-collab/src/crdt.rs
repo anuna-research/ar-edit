@@ -372,6 +372,23 @@ impl CollabDoc {
         ids.into_iter().collect()
     }
 
+    /// Live OR-set members as their serialised JSON values, one per logical id
+    /// (ordered by id). When concurrent instances of one id exist, a single
+    /// deterministic value is returned (last by map-iteration order).
+    fn orset_values(&self, name: &str) -> Vec<String> {
+        let mut by_id: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+        if let LoroValue::Map(m) = self.doc.get_map(name).get_value() {
+            for (k, v) in m.iter() {
+                if let LoroValue::String(s) = v {
+                    let key = k.to_string();
+                    let logical = key.split(TAG_SEP).next().unwrap_or(&key).to_string();
+                    by_id.insert(logical, s.to_string());
+                }
+            }
+        }
+        by_id.into_values().collect()
+    }
+
     /// Add (or update) an OR-set member. An update is modelled as an
     /// observed-replace: the instances this replica currently sees are tombstoned
     /// and a fresh tagged instance is written, so concurrent adds elsewhere are
@@ -428,6 +445,16 @@ impl CollabDoc {
     /// Live POI ids (observed-remove set, REQ-082).
     pub fn poi_ids(&self) -> Vec<String> {
         self.orset_live_ids(POIS)
+    }
+
+    /// Live markers as serialised JSON values (REQ-082), one per id.
+    pub fn marker_values(&self) -> Vec<String> {
+        self.orset_values(MARKERS)
+    }
+
+    /// Live POIs as serialised JSON values (REQ-082), one per id.
+    pub fn poi_values(&self) -> Vec<String> {
+        self.orset_values(POIS)
     }
 
     // ---- durable head-over-oplog undo (SPIKE: SPEC-003 OQ-8 / ADR-011) ----
