@@ -646,6 +646,7 @@ mod tests {
             text_preview: Some("Welcome to the interview".into()),
             scene_preview: None,
             notes: vec![],
+            author: String::new(),
         }
     }
 
@@ -660,6 +661,7 @@ mod tests {
             text_preview: None,
             scene_preview: Some("Interior office, wide shot; Close-up interview".into()),
             notes: vec![],
+            author: String::new(),
         }
     }
 
@@ -677,6 +679,7 @@ mod tests {
             text_preview: None,
             scene_preview: None,
             notes: vec![],
+            author: String::new(),
         }
     }
 
@@ -777,6 +780,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mut shot = make_time_shot();
         shot.notes.push(ShotNote {
+            author: String::new(),
             text: "Great take".into(),
             created: "2026-02-19T15:00:00Z".parse().unwrap(),
         });

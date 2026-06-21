@@ -49,6 +49,9 @@ pub struct ResolvedShot {
     pub scene_preview: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<ShotNote>,
+    /// Human-readable author of the shot (collaborative attribution, REQ-091).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub author: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +95,9 @@ pub struct ResolvedMarker {
     pub label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Human-readable author (collaborative attribution, REQ-091).
+    #[serde(default)]
+    pub author: String,
     pub created: DateTime<Utc>,
     pub start_ms: u64,
     pub end_ms: u64,
@@ -162,6 +168,7 @@ pub fn resolve_markers(
             range: marker.range.clone(),
             label: marker.label.clone(),
             note: marker.note.clone(),
+            author: marker.author.clone(),
             created: marker.created,
             start_ms,
             end_ms,
@@ -218,6 +225,7 @@ fn resolve_shot(
         text_preview,
         scene_preview,
         notes: shot.notes.clone(),
+        author: shot.author.clone(),
     })
 }
 
@@ -794,6 +802,7 @@ mod tests {
             },
             label: label.into(),
             note: None,
+            author: "tester".into(),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
             start_ms,
             end_ms,
@@ -906,6 +915,7 @@ mod tests {
             range: ShotRange::Words { from: 0, to: 10 },
             label: "select".into(),
             note: None,
+            author: String::new(),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
         }];
 
@@ -934,6 +944,7 @@ mod tests {
             range: ShotRange::Scenes { from: 0, to: 3 },
             label: "avoid".into(),
             note: Some("bad lighting".into()),
+            author: String::new(),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
         }];
 
@@ -963,6 +974,7 @@ mod tests {
             },
             label: "highlight".into(),
             note: None,
+            author: String::new(),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
         }];
 

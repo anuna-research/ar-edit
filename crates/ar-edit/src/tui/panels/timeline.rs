@@ -62,6 +62,7 @@ pub fn fallback_resolved(shots: &[Shot]) -> Vec<ResolvedShot> {
                 text_preview: None,
                 scene_preview: None,
                 notes: shot.notes.clone(),
+                author: String::new(),
             }
         })
         .collect()
@@ -153,6 +154,7 @@ mod tests {
                 text_preview: Some("Welcome to the interview".into()),
                 scene_preview: None,
                 notes: vec![],
+                author: String::new(),
             },
             ResolvedShot {
                 id: "shot-002".into(),
@@ -164,6 +166,7 @@ mod tests {
                 text_preview: None,
                 scene_preview: Some("Interior office; Close-up interview".into()),
                 notes: vec![],
+                author: String::new(),
             },
             ResolvedShot {
                 id: "shot-003".into(),
@@ -178,6 +181,7 @@ mod tests {
                 text_preview: None,
                 scene_preview: None,
                 notes: vec![],
+                author: String::new(),
             },
         ]
     }
@@ -186,12 +190,14 @@ mod tests {
     fn fallback_preserves_shot_ids() {
         let shots = vec![
             Shot {
+                author: String::new(),
                 id: "shot-001".into(),
                 source: "src-001".into(),
                 range: ShotRange::Words { from: 0, to: 52 },
                 notes: vec![],
             },
             Shot {
+                author: String::new(),
                 id: "shot-002".into(),
                 source: "src-002".into(),
                 range: ShotRange::Time {
@@ -211,6 +217,7 @@ mod tests {
     #[test]
     fn fallback_time_range_has_duration() {
         let shots = vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Time {
@@ -229,6 +236,7 @@ mod tests {
     #[test]
     fn fallback_word_range_zero_duration() {
         let shots = vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Words { from: 0, to: 52 },
@@ -243,10 +251,12 @@ mod tests {
     #[test]
     fn fallback_preserves_notes() {
         let note = ShotNote {
+            author: String::new(),
             text: "Great take".into(),
             created: "2026-02-19T15:00:00Z".parse().unwrap(),
         };
         let shots = vec![Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Words { from: 0, to: 52 },

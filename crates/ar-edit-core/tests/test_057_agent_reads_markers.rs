@@ -195,6 +195,7 @@ fn make_resolved_marker(id: &str, label: &str, start_ms: u64, end_ms: u64) -> Re
         },
         label: label.into(),
         note: None,
+        author: String::new(),
         created: "2026-02-19T14:00:00Z".parse().unwrap(),
         start_ms,
         end_ms,

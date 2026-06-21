@@ -530,6 +530,7 @@ Today we discuss climate\n";
             text_preview: None,
             scene_preview: None,
             notes: vec![],
+            author: String::new(),
         };
 
         let mut idx = 1;
@@ -555,6 +556,7 @@ Today we discuss climate\n";
             text_preview: None,
             scene_preview: None,
             notes: vec![],
+            author: String::new(),
         };
 
         // Suppose this shot appears after 1200ms of previous content
@@ -582,6 +584,7 @@ Today we discuss climate\n";
             text_preview: None,
             scene_preview: None,
             notes: vec![],
+            author: String::new(),
         };
 
         let mut idx = 1;
@@ -612,6 +615,7 @@ Today we discuss climate\n";
             text_preview: None,
             scene_preview: None,
             notes: vec![],
+            author: String::new(),
         };
 
         let mut idx = 1;
@@ -646,6 +650,7 @@ Today we discuss climate\n";
                 text_preview: None,
                 scene_preview: None,
                 notes: vec![],
+                author: String::new(),
             },
             ResolvedShot {
                 id: "shot-002".into(),
@@ -657,6 +662,7 @@ Today we discuss climate\n";
                 text_preview: None,
                 scene_preview: None,
                 notes: vec![],
+                author: String::new(),
             },
         ];
 
@@ -688,6 +694,7 @@ Today we discuss climate\n";
             text_preview: None,
             scene_preview: None,
             notes: vec![],
+            author: String::new(),
         }];
 
         // No transcript file — should produce empty SRT
@@ -727,6 +734,7 @@ Today we discuss climate\n";
                 text_preview: None,
                 scene_preview: None,
                 notes: vec![],
+                author: String::new(),
             },
             // Shot from source without transcript (skipped)
             ResolvedShot {
@@ -742,6 +750,7 @@ Today we discuss climate\n";
                 text_preview: None,
                 scene_preview: None,
                 notes: vec![],
+                author: String::new(),
             },
             // Shot from source with transcript again
             ResolvedShot {
@@ -754,6 +763,7 @@ Today we discuss climate\n";
                 text_preview: None,
                 scene_preview: None,
                 notes: vec![],
+                author: String::new(),
             },
         ];
 

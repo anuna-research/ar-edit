@@ -46,8 +46,41 @@ pub struct Cli {
 // Commands
 // ---------------------------------------------------------------------------
 
+/// Subcommands for an active collaborative session (SPEC-003 CON-012).
+#[derive(Subcommand)]
+pub enum SessionCommand {
+    /// Show session and sync status
+    Status,
+    /// List connected peers
+    Peers,
+    /// Leave the current session
+    Leave,
+}
+
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Open this project for realtime collaboration; prints a pairing phrase (SPEC-003)
+    Share,
+
+    /// Join a collaborative session with a pairing phrase (SPEC-003)
+    Pair {
+        /// Pairing phrase in the form <num>-<word>-<word>
+        phrase: String,
+    },
+
+    /// Inspect or leave the current collaborative session (SPEC-003)
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
+
+    /// Run the collaborative session daemon for this project (SPEC-003)
+    Daemon {
+        /// Edit document to host (in-memory session for now; persistence is OQ-8)
+        #[arg(long)]
+        edit: Option<String>,
+    },
+
     /// Create a new project directory
     Init {
         /// Project name (becomes the directory name)
@@ -120,6 +153,12 @@ pub enum Commands {
         /// Filter by label
         #[arg(long)]
         label: Option<String>,
+    },
+
+    /// Points of interest operations
+    Poi {
+        #[command(subcommand)]
+        command: PoiCommand,
     },
 
     /// Output JSON Schema for data formats
@@ -524,6 +563,70 @@ pub struct MarkArgs {
 
     #[command(flatten)]
     pub range: RangeArgs,
+}
+
+// ---------------------------------------------------------------------------
+// POI (Points of Interest) — SPEC-002; storage via the annotation CRDT (ADR-015)
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+pub enum PoiCommand {
+    /// Add a point of interest to a source
+    Add(PoiAddArgs),
+    /// List points of interest
+    List(PoiListArgs),
+    /// Remove points of interest
+    Remove(PoiRemoveArgs),
+}
+
+#[derive(Args)]
+pub struct PoiAddArgs {
+    /// Source ID
+    pub source_id: String,
+
+    /// Word index
+    #[arg(long, conflicts_with_all = ["at_scene", "at_ms"])]
+    pub at_word: Option<u32>,
+
+    /// Scene index
+    #[arg(long, conflicts_with_all = ["at_word", "at_ms"])]
+    pub at_scene: Option<u32>,
+
+    /// Timestamp in milliseconds
+    #[arg(long, conflicts_with_all = ["at_word", "at_scene"])]
+    pub at_ms: Option<u64>,
+
+    /// POI category (highlight, issue, transition, cue, note)
+    #[arg(long)]
+    pub category: String,
+
+    /// Optional note
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PoiListArgs {
+    /// Source ID (omit to list across all sources)
+    pub source_id: Option<String>,
+
+    /// Filter by category
+    #[arg(long)]
+    pub category: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PoiRemoveArgs {
+    /// Source ID
+    pub source_id: String,
+
+    /// POI ID to remove
+    #[arg(long, conflicts_with = "category")]
+    pub id: Option<String>,
+
+    /// Remove all POIs with this category
+    #[arg(long, conflicts_with = "id")]
+    pub category: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

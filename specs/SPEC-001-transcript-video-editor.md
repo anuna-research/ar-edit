@@ -37,11 +37,12 @@ Trace:
 
 **REQ-002: Source Registration**
 
-The system SHALL register one or more video files as sources in the project, assigning each a stable source ID (format: `src-NNN`) WHEN the user runs `ar-edit add <file>...` WITH the result being source metadata (path, duration, codec, resolution) stored in the project manifest.
+The system SHALL register one or more video files as sources in the project, assigning each a stable source ID (format: `src-NNN`) WHEN the user runs `ar-edit add <file>...` WITH the result being source metadata (path, duration, codec, resolution) stored in the project manifest. The mechanism by which a source file is placed under `sources/` (symbolic link vs copy/hard link) is platform-dependent and specified in [[ADR-012-cross-platform-source-linking]].
 
 Trace:
 - TEST-002
 - CON-001
+- [[ADR-012-cross-platform-source-linking]]
 
 **REQ-003: Source Validation**
 
@@ -531,7 +532,7 @@ Trace:
 
 **NFR-005: Project Portability**
 
-Project directories SHALL be self-contained (all paths relative) and copyable between machines WITH only external dependencies being ffmpeg, whisper.cpp, and a video player.
+Project directories SHALL be self-contained (all paths relative) and copyable between machines — including between machines of different operating systems (macOS, Linux, Windows) — WITH only external dependencies being ffmpeg, whisper.cpp, and a video player, and WITH no absolute or platform-specific paths persisted in the manifest or edit documents. The source-linking mechanism that varies by platform is specified in [[ADR-012-cross-platform-source-linking]].
 
 Trace:
 - TEST-035
@@ -542,6 +543,16 @@ The system SHALL handle edit documents with up to 500 segments across up to 50 s
 
 Trace:
 - TEST-036
+
+**NFR-015: Platform Support**
+
+The system SHALL build and run on macOS (Apple Silicon and Intel), Linux (x86-64 and ARM64), and Windows 10+ (x86-64) WITH an identical command surface and project format on every platform. Platform-conditional behaviour SHALL be limited to documented variances: source linking ([[ADR-012-cross-platform-source-linking]]) and the terminal backend (the ratatui TUI uses crossterm's [[ConPTY]] backend on Windows). Cross-platform parity SHALL be enforced by a CI verification lane that runs the core test suite on all three platforms; a platform whose lane is not green is not a supported platform.
+
+This NFR governs the whole tool, including the realtime collaboration stack of [[SPEC-003-realtime-collaborative-editing]], whose libraries (loro, iroh, iroh-blobs, spake2, blake3) are cross-platform Rust.
+
+Trace:
+- [[test-specs#TEST-118]]
+- [[ADR-012-cross-platform-source-linking]]
 
 ---
 

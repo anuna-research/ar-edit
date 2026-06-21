@@ -175,6 +175,15 @@ whisper.cpp's `--output-json` produces tokens with timestamps. The ingestion ste
 
 The edit document is an **append-only operation log** with a cached snapshot. Nothing is ever deleted — undo/redo moves a head pointer. This makes every edit non-destructive and fully auditable.
 
+> **Collaborative mode (SPEC-003):** for realtime multiplayer editing the edit
+> document is reformulated as a CRDT (a Loro document) so concurrent edits from
+> multiple peers merge automatically. The single-writer op-log described here is
+> the single-player form; the JSON structure below remains the canonical
+> on-disk/agent **view** (materialised from the CRDT), so all read-side commands
+> are unchanged. See [[SPEC-003-realtime-collaborative-editing]] and
+> [[SPEC-003-realtime-collaborative-editing#ADR-011]] (which supersedes
+> [[ADR-001-event-sourced-edits]]'s single-writer mutation model).
+
 ### Non-destructive editing principles
 
 | Layer | Mutated by edits? | Undo strategy |

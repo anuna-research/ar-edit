@@ -148,6 +148,7 @@ fn annotate_then_build_edit_from_markers() {
                 range: ShotRange::Words { from: 0, to: 7 },
                 label: "select".into(),
                 note: Some("Good opening".into()),
+                author: String::new(),
                 created: Utc::now(),
             },
             Marker {
@@ -155,6 +156,7 @@ fn annotate_then_build_edit_from_markers() {
                 range: ShotRange::Words { from: 12, to: 15 },
                 label: "select".into(),
                 note: Some("Key features section".into()),
+                author: String::new(),
                 created: Utc::now(),
             },
             Marker {
@@ -162,6 +164,7 @@ fn annotate_then_build_edit_from_markers() {
                 range: ShotRange::Words { from: 16, to: 21 },
                 label: "select".into(),
                 note: None,
+                author: String::new(),
                 created: Utc::now(),
             },
         ],
@@ -236,6 +239,7 @@ fn markers_with_avoid_label_are_excluded() {
                 range: ShotRange::Words { from: 0, to: 7 },
                 label: "select".into(),
                 note: None,
+                author: String::new(),
                 created: Utc::now(),
             },
             Marker {
@@ -243,6 +247,7 @@ fn markers_with_avoid_label_are_excluded() {
                 range: ShotRange::Words { from: 8, to: 11 },
                 label: "avoid".into(),
                 note: Some("Bad take".into()),
+                author: String::new(),
                 created: Utc::now(),
             },
             Marker {
@@ -250,6 +255,7 @@ fn markers_with_avoid_label_are_excluded() {
                 range: ShotRange::Words { from: 16, to: 21 },
                 label: "select".into(),
                 note: None,
+                author: String::new(),
                 created: Utc::now(),
             },
         ],

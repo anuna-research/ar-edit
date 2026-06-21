@@ -37,6 +37,7 @@ pub fn add_marker(
         range,
         label: label.to_string(),
         note: note.map(|s| s.to_string()),
+        author: String::new(), // attribution is stamped by the CLI via the CRDT store
         created: Utc::now(),
     };
 
@@ -327,6 +328,7 @@ mod tests {
                     range: ShotRange::Words { from: 0, to: 10 },
                     label: "select".into(),
                     note: None,
+                    author: String::new(),
                     created: Utc::now(),
                 },
                 Marker {
@@ -334,6 +336,7 @@ mod tests {
                     range: ShotRange::Words { from: 20, to: 30 },
                     label: "hero".into(),
                     note: None,
+                    author: String::new(),
                     created: Utc::now(),
                 },
             ],

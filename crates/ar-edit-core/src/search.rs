@@ -560,6 +560,7 @@ mod tests {
                     },
                     label: "hero".into(),
                     note: Some("Best take".into()),
+                    author: String::new(),
                     created: "2026-02-19T14:00:00Z".parse().unwrap(),
                 },
                 Marker {
@@ -570,6 +571,7 @@ mod tests {
                     },
                     label: "avoid".into(),
                     note: None,
+                    author: String::new(),
                     created: "2026-02-19T14:01:00Z".parse().unwrap(),
                 },
             ],
@@ -599,6 +601,7 @@ mod tests {
                 },
                 label: "select".into(),
                 note: Some("Best take of the climate answer".into()),
+                author: String::new(),
                 created: "2026-02-19T14:00:00Z".parse().unwrap(),
             }],
         };
@@ -638,6 +641,7 @@ mod tests {
                 },
                 label: "select".into(),
                 note: Some("Good office shot".into()),
+                author: String::new(),
                 created: "2026-02-19T14:00:00Z".parse().unwrap(),
             }],
         };
@@ -723,6 +727,7 @@ mod tests {
                 },
                 label: "office-shot".into(),
                 note: None,
+                author: String::new(),
                 created: "2026-02-19T14:00:00Z".parse().unwrap(),
             }],
         };

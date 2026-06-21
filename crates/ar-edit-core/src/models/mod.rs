@@ -121,11 +121,18 @@ pub struct Shot {
     pub range: ShotRange,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<ShotNote>,
+    /// Human-readable author of the shot (collaborative attribution, REQ-091).
+    /// Defaulted empty for pre-attribution / legacy data.
+    #[serde(default)]
+    pub author: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ShotNote {
     pub text: String,
+    /// Human-readable author of the note (collaborative attribution, REQ-091).
+    #[serde(default)]
+    pub author: String,
     pub created: DateTime<Utc>,
 }
 
@@ -226,6 +233,10 @@ pub struct Marker {
     pub range: ShotRange,
     pub label: String,
     pub note: Option<String>,
+    /// Human-readable author of the marker (collaborative attribution, REQ-091).
+    /// Defaulted empty for pre-attribution / legacy data.
+    #[serde(default)]
+    pub author: String,
     pub created: DateTime<Utc>,
 }
 
@@ -296,6 +307,10 @@ pub struct Poi {
     pub category: PoiCategory,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Human-readable author of the POI (collaborative attribution, REQ-091).
+    /// Defaulted empty for pre-attribution / legacy data.
+    #[serde(default)]
+    pub author: String,
     pub created: DateTime<Utc>,
 }
 
@@ -361,6 +376,7 @@ mod tests {
             ts: "2026-02-19T13:00:01Z".parse().unwrap(),
             op: EditOpKind::AddShot {
                 shot: Shot {
+                    author: String::new(),
                     id: "shot-001".into(),
                     source: "src-001".into(),
                     range: ShotRange::Words { from: 0, to: 52 },
@@ -695,6 +711,7 @@ mod tests {
             op: EditOpKind::AddNote {
                 shot_id: "shot-002".into(),
                 note: ShotNote {
+                    author: String::new(),
                     text: "Too long, trim the first half".into(),
                     created: "2026-02-19T15:00:00Z".parse().unwrap(),
                 },
@@ -713,10 +730,12 @@ mod tests {
     #[test]
     fn shot_notes_included_when_present() {
         let shot = Shot {
+            author: String::new(),
             id: "shot-002".into(),
             source: "src-003".into(),
             range: ShotRange::Words { from: 200, to: 280 },
             notes: vec![ShotNote {
+                author: String::new(),
                 text: "Too long, trim the first half".into(),
                 created: "2026-02-19T15:00:00Z".parse().unwrap(),
             }],
@@ -733,6 +752,7 @@ mod tests {
     #[test]
     fn shot_notes_omitted_when_empty() {
         let shot = Shot {
+            author: String::new(),
             id: "shot-001".into(),
             source: "src-001".into(),
             range: ShotRange::Words { from: 0, to: 52 },
@@ -798,9 +818,15 @@ mod tests {
 
     #[test]
     fn poi_category_from_str_valid() {
-        assert_eq!("highlight".parse::<PoiCategory>().unwrap(), PoiCategory::Highlight);
+        assert_eq!(
+            "highlight".parse::<PoiCategory>().unwrap(),
+            PoiCategory::Highlight
+        );
         assert_eq!("issue".parse::<PoiCategory>().unwrap(), PoiCategory::Issue);
-        assert_eq!("transition".parse::<PoiCategory>().unwrap(), PoiCategory::Transition);
+        assert_eq!(
+            "transition".parse::<PoiCategory>().unwrap(),
+            PoiCategory::Transition
+        );
         assert_eq!("cue".parse::<PoiCategory>().unwrap(), PoiCategory::Cue);
         assert_eq!("note".parse::<PoiCategory>().unwrap(), PoiCategory::Note);
     }
@@ -881,6 +907,7 @@ mod tests {
             point: PoiPoint::Word(10),
             category: PoiCategory::Cue,
             note: None,
+            author: String::new(),
             created: "2026-03-13T10:00:00Z".parse().unwrap(),
         };
 

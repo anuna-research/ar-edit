@@ -9,6 +9,7 @@ pub mod marker;
 pub mod models;
 pub mod overlay;
 pub mod playback;
+pub mod poi;
 pub mod project;
 pub mod render;
 pub mod resolve;

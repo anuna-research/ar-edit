@@ -6,12 +6,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process;
 
-use ar_edit_core::models::{EditDocument, EditOpKind, ShotRange, Source};
+use ar_edit_core::models::{EditDocument, Shot, ShotRange, Source};
 use ar_edit_core::playback;
 use clap::Parser;
 use cli::{
     exit_code, Cli, Commands, EditCommand, IndexCommand, PlayArgs, RangeArgs, SchemaCommand,
-    SearchType, TranscriptsCommand,
+    SearchType, SessionCommand, TranscriptsCommand,
 };
 
 use std::thread;
@@ -112,6 +112,208 @@ fn main() {
 
 fn run(cli: &Cli) -> anyhow::Result<()> {
     match &cli.command {
+        // ---- Realtime collaboration (SPEC-003) ----
+        Commands::Daemon { edit } => {
+            #[cfg(unix)]
+            {
+                // The daemon now OWNS the canonical edit store (ADR-011): it
+                // loads `edits/<name>.edit.json`, applies IPC mutations to it,
+                // and persists it back — a single store, so a live session and a
+                // one-shot command never diverge (OQ-8).
+                let edit_name = edit.clone().ok_or_else(|| {
+                    anyhow::Error::new(CliError::user(
+                        "specify which edit to host: `ar-edit daemon --edit <name>`",
+                    ))
+                })?;
+                let sock = session_socket();
+                let path = edit_path(&edit_name);
+                let store = if path.exists() {
+                    load_store(&edit_name)?
+                } else {
+                    ar_edit_collab::store::PersistentEdit::create(&edit_name, local_actor())
+                };
+                let json = cli.json;
+                let rt = tokio::runtime::Runtime::new()?;
+                rt.block_on(async move {
+                    let daemon = ar_edit_collab::shell::daemon::Daemon::bind(&sock, path, store)
+                        .map_err(|e| anyhow::anyhow!("daemon bind failed: {e}"))?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "socket": sock.display().to_string(),
+                                "edit": edit_name,
+                                "status": "listening",
+                            })
+                        );
+                    } else {
+                        println!(
+                            "Session daemon for '{edit_name}' listening on {}",
+                            sock.display()
+                        );
+                        println!(
+                            "(Ctrl-C to stop; clients attach via `ar-edit edit …` — REQ-090.)"
+                        );
+                    }
+                    daemon.run().await;
+                    Ok::<(), anyhow::Error>(())
+                })?;
+                Ok(())
+            }
+            #[cfg(not(unix))]
+            {
+                // The session daemon uses a Unix-domain socket; the Windows
+                // named-pipe equivalent is SPEC-003 OQ-8.
+                anyhow::bail!(
+                    "the session daemon is only supported on Unix (Windows named-pipe IPC is OQ-8)"
+                )
+            }
+        }
+        Commands::Share => {
+            let phrase = ar_edit_collab::recognise::phrase::generate_secure();
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "phrase": phrase.render(),
+                        "channel": phrase.channel,
+                        "note": "establishing the live session needs --features collab-transport and the ADR-009-reviewed SPAKE2 pairing",
+                    })
+                );
+            } else {
+                println!(
+                    "Share this pairing phrase with your collaborator:\n\n    {}\n\nThey join with:  ar-edit pair {}",
+                    phrase.render(),
+                    phrase.render()
+                );
+            }
+            Ok(())
+        }
+        Commands::Pair { phrase } => {
+            // LangSec (CON-013): fully recognise the phrase BEFORE any network
+            // action; a malformed phrase fails closed with exit code 1 and
+            // opens no socket (SPEC-003 TEST-078).
+            match ar_edit_collab::recognise::phrase::parse(phrase) {
+                Ok(p) => {
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "phrase": p.render(),
+                                "channel": p.channel,
+                                "status": "phrase-valid",
+                                "note": "live session join requires the collab-transport build + reviewed SPAKE2 (ADR-009)",
+                            })
+                        );
+                    } else {
+                        println!(
+                            "Pairing phrase accepted (channel {}). Live session join requires a \
+                             collab-transport build and the reviewed SPAKE2 pairing (ADR-009).",
+                            p.channel
+                        );
+                    }
+                    Ok(())
+                }
+                Err(e) => anyhow::bail!("invalid pairing phrase '{phrase}': {e}"),
+            }
+        }
+        Commands::Session { command } => {
+            #[cfg(unix)]
+            {
+                use ar_edit_collab::shell::daemon::{DaemonClient, Request, Response};
+                let sock = session_socket();
+                let json = cli.json;
+                let rt = tokio::runtime::Runtime::new()?;
+                rt.block_on(async move {
+                    // Query the live daemon; a missing one is *not* success —
+                    // peers/leave must report the real state (CON-012) and the
+                    // documented exit code 1 when there is no session.
+                    let mut client = match DaemonClient::connect(&sock).await {
+                        Ok(c) => c,
+                        Err(_) => {
+                            return Err(anyhow::Error::new(CliError::user(
+                                "no active collaborative session (start one with `ar-edit daemon`)",
+                            )))
+                        }
+                    };
+                    let shot_count = match client.request(&Request::Status).await {
+                        Ok(Response::Status { shot_count, .. }) => shot_count,
+                        Ok(other) => {
+                            return Err(anyhow::anyhow!("unexpected daemon response: {other:?}"))
+                        }
+                        Err(e) => {
+                            return Err(anyhow::Error::new(CliError::system(format!(
+                                "session daemon query failed: {e}"
+                            ))))
+                        }
+                    };
+                    let socket = sock.display().to_string();
+                    match command {
+                        SessionCommand::Status => {
+                            if json {
+                                println!(
+                                    "{}",
+                                    serde_json::json!({
+                                        "session": { "socket": socket, "shot_count": shot_count },
+                                        "status": "active"
+                                    })
+                                );
+                            } else {
+                                println!(
+                                    "Active collaborative session on {socket} ({shot_count} shots)."
+                                );
+                            }
+                        }
+                        SessionCommand::Peers => {
+                            // The in-memory daemon does not yet maintain a peer
+                            // registry (presence is OQ); report the session truthfully.
+                            if json {
+                                println!(
+                                    "{}",
+                                    serde_json::json!({
+                                        "session": { "socket": socket },
+                                        "peers": [],
+                                        "status": "active",
+                                        "note": "peer presence tracking is not yet wired into the daemon"
+                                    })
+                                );
+                            } else {
+                                println!(
+                                    "Active session on {socket} — peer presence tracking is not yet available."
+                                );
+                            }
+                        }
+                        SessionCommand::Leave => {
+                            // A single CLI invocation cannot tear down the shared
+                            // daemon; surface how to actually leave.
+                            if json {
+                                println!(
+                                    "{}",
+                                    serde_json::json!({
+                                        "session": { "socket": socket },
+                                        "status": "active",
+                                        "note": "stop the session daemon to leave; per-client leave is OQ"
+                                    })
+                                );
+                            } else {
+                                println!(
+                                    "Active session on {socket}. Stop the session daemon to leave."
+                                );
+                            }
+                        }
+                    }
+                    Ok::<(), anyhow::Error>(())
+                })?;
+                Ok(())
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = command;
+                Err(anyhow::Error::new(CliError::user(
+                    "no active collaborative session (the session daemon is Unix-only — OQ-8)",
+                )))
+            }
+        }
         Commands::Init { name } => {
             let path = PathBuf::from(name);
             let manifest = ar_edit_core::project::init(&path)?;
@@ -192,18 +394,19 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 if path.exists() {
                     anyhow::bail!("edit '{}' already exists", name);
                 }
-                let doc = EditDocument::create(name);
-                doc.save(&path)?;
+                let store = ar_edit_collab::store::PersistentEdit::create(name, local_actor());
+                save_store(&store, name)?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&store.to_edit_document())?
+                    );
                 } else {
                     println!("Created edit '{}'", name);
                 }
                 Ok(())
             }
             EditCommand::AddSegment(args) => {
-                let path = edit_path(&args.edit);
-                let mut doc = EditDocument::load(&path)?;
                 let range = parse_range(&args.range)?;
 
                 // Eager validation: check source exists and range is in bounds
@@ -220,13 +423,14 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     anyhow::bail!("invalid segment:\n{}", details.join("\n"));
                 }
 
-                let shot = doc.add_shot(&args.source, range)?;
-                let shot_id = shot.id.clone();
-                doc.save(&path)?;
+                let mut session = EditSession::open(&args.edit)?;
+                let author = local_author();
+                let shot_id = session.add_shot(&args.source, range, &author)?;
+                session.commit()?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                    print_shots_json(&mut session)?;
                 } else {
-                    println!("Added {} to '{}'", shot_id, args.edit);
+                    println!("Added {} to '{}' by {}", shot_id, args.edit, author);
                 }
                 Ok(())
             }
@@ -235,41 +439,37 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 shot,
                 position,
             } => {
-                let path = edit_path(edit);
-                let mut doc = EditDocument::load(&path)?;
-                doc.move_shot(shot, *position as usize)?;
-                doc.save(&path)?;
+                let mut session = EditSession::open(edit)?;
+                session.move_shot(shot, *position as usize)?;
+                session.commit()?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                    print_shots_json(&mut session)?;
                 } else {
                     println!("Moved {} to position {} in '{}'", shot, position, edit);
                 }
                 Ok(())
             }
             EditCommand::RemoveSegment { edit, shot } => {
-                let path = edit_path(edit);
-                let mut doc = EditDocument::load(&path)?;
-                doc.remove_shot(shot)?;
-                doc.save(&path)?;
+                let mut session = EditSession::open(edit)?;
+                session.remove_shot(shot)?;
+                session.commit()?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                    print_shots_json(&mut session)?;
                 } else {
                     println!("Removed {} from '{}'", shot, edit);
                 }
                 Ok(())
             }
             EditCommand::TrimSegment(args) => {
-                let path = edit_path(&args.edit);
-                let mut doc = EditDocument::load(&path)?;
                 let range = parse_range(&args.range)?;
+                let mut session = EditSession::open(&args.edit)?;
 
                 // Find the shot's source for validation
-                let shot_source = doc
-                    .snapshot
-                    .shots
-                    .iter()
+                let shot_source = session
+                    .shots()?
+                    .into_iter()
                     .find(|s| s.id == args.shot)
-                    .map(|s| s.source.clone())
+                    .map(|s| s.source)
                     .ok_or_else(|| anyhow::anyhow!("shot '{}' not found", args.shot))?;
 
                 // Eager validation: check range is in bounds for the source
@@ -286,10 +486,10 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                     anyhow::bail!("invalid segment:\n{}", details.join("\n"));
                 }
 
-                doc.trim_shot(&args.shot, range)?;
-                doc.save(&path)?;
+                session.trim_shot(&args.shot, range)?;
+                session.commit()?;
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                    print_shots_json(&mut session)?;
                 } else {
                     println!("Trimmed {} in '{}'", args.shot, args.edit);
                 }
@@ -321,6 +521,11 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         Commands::Markers { source_id, label } => {
             cmd_markers(cli, source_id.as_deref(), label.as_deref())
         }
+        Commands::Poi { command } => match command {
+            cli::PoiCommand::Add(args) => cmd_poi_add(cli, args),
+            cli::PoiCommand::List(args) => cmd_poi_list(cli, args),
+            cli::PoiCommand::Remove(args) => cmd_poi_remove(cli, args),
+        },
         Commands::Schema { command } => match command {
             SchemaCommand::Edit => {
                 println!("{}", ar_edit_core::schema::edit_document_schema());
@@ -355,16 +560,404 @@ fn edit_path(name: &str) -> PathBuf {
     PathBuf::from("edits").join(format!("{name}.edit.json"))
 }
 
-/// Return a human-readable label and the affected shot ID for an op.
-fn op_summary(kind: &EditOpKind) -> (&str, &str) {
-    match kind {
-        EditOpKind::AddShot { shot } => ("add_shot", &shot.id),
-        EditOpKind::RemoveShot { shot_id, .. } => ("remove_shot", shot_id),
-        EditOpKind::MoveShot { shot_id, .. } => ("move_shot", shot_id),
-        EditOpKind::TrimShot { shot_id, .. } => ("trim_shot", shot_id),
-        EditOpKind::ReplaceRangeType { shot_id, .. } => ("replace_range_type", shot_id),
-        EditOpKind::AddNote { shot_id, .. } => ("add_note", shot_id),
+/// The project-local CRDT actor id for file-store edits (ADR-011). Persisted at
+/// `.ar-edit/actor` and shared with the session daemon, so an edit and its live
+/// session carry the same site identity. New edits / migrations are owned by it.
+fn local_actor() -> ar_edit_collab::ids::ActorId {
+    use ar_edit_collab::ids::ActorId;
+    let dir = PathBuf::from(".ar-edit");
+    let path = dir.join("actor");
+    if let Ok(s) = std::fs::read_to_string(&path) {
+        if let Ok(n) = u64::from_str_radix(s.trim(), 16) {
+            return ActorId(n);
+        }
     }
+    let actor = ActorId::generate();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(&path, format!("{:016x}\n", actor.0));
+    actor
+}
+
+/// A human-readable author name for collaborative attribution (REQ-091),
+/// autopopulated and cached. Priority: `AR_EDIT_AUTHOR` env → cached
+/// `.ar-edit/author` → git `user.name` → OS username → `"unknown"`. The resolved
+/// value is cached to `.ar-edit/author` (stable, and editable to override).
+fn local_author() -> String {
+    // Explicit override (wins, never cached).
+    if let Ok(a) = std::env::var("AR_EDIT_AUTHOR") {
+        let a = a.trim();
+        if !a.is_empty() {
+            return a.to_string();
+        }
+    }
+    let path = PathBuf::from(".ar-edit").join("author");
+    if let Ok(s) = std::fs::read_to_string(&path) {
+        let s = s.trim();
+        if !s.is_empty() {
+            return s.to_string();
+        }
+    }
+    // Autopopulate from the environment: git identity, then OS username.
+    let resolved = git_user_name()
+        .or_else(|| std::env::var("USER").ok())
+        .or_else(|| std::env::var("USERNAME").ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    let _ = std::fs::create_dir_all(".ar-edit");
+    let _ = std::fs::write(&path, format!("{resolved}\n"));
+    resolved
+}
+
+/// `git config user.name`, if git is installed and configured.
+fn git_user_name() -> Option<String> {
+    let out = std::process::Command::new("git")
+        .args(["config", "user.name"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+/// Load the canonical CRDT-backed edit store (ADR-011), transparently migrating
+/// a legacy event-sourced document on first open (REQ-088).
+fn load_store(edit: &str) -> anyhow::Result<ar_edit_collab::store::PersistentEdit> {
+    let path = edit_path(edit);
+    let bytes = std::fs::read(&path).map_err(|e| {
+        anyhow::Error::new(CliError::user(e).with_hint(&format!(
+            "check that edit '{edit}' exists in the edits/ directory"
+        )))
+    })?;
+    ar_edit_collab::store::PersistentEdit::from_bytes(&bytes, local_actor())
+        .map_err(|e| anyhow::Error::new(CliError::user(e)))
+}
+
+/// Connect to a live host that owns `edit` (matched via `Status`), returning a
+/// blocking runtime + client to drive it. `None` if no daemon, it hosts a
+/// different edit, or the round-trip fails (the caller then uses the file store).
+#[cfg(unix)]
+/// Result of probing whether a live host owns `edit`. Distinguishes an absent
+/// daemon from a failed round-trip so a *mutation* can fail closed on the latter
+/// (a transient IPC failure must NOT be mistaken for "no host" and modify the
+/// file behind a possibly-live host's back).
+#[cfg(unix)]
+enum HostStatus {
+    /// No daemon socket — operate the file directly.
+    Absent,
+    /// Socket present but connect/Status failed (or returned garbage) — a host
+    /// may own this edit; mutations must abort rather than touch the file.
+    Failed,
+    /// A daemon is live but hosts a DIFFERENT edit — file-direct is safe.
+    OtherEdit,
+    /// A live host owns this edit; drive it over `client`.
+    Hosting(
+        tokio::runtime::Runtime,
+        ar_edit_collab::shell::daemon::DaemonClient,
+    ),
+}
+
+#[cfg(unix)]
+fn host_status(edit: &str) -> HostStatus {
+    use ar_edit_collab::shell::daemon::{DaemonClient, Request, Response};
+    let sock = session_socket();
+    if !sock.exists() {
+        return HostStatus::Absent;
+    }
+    let Ok(rt) = tokio::runtime::Runtime::new() else {
+        return HostStatus::Failed;
+    };
+    // Bound the WHOLE probe (connect + status) so a stalled accepter can never
+    // hang the command — `request` is already deadlined, this also bounds the
+    // connect for defense-in-depth.
+    let answered = rt.block_on(async {
+        let probe = async {
+            let mut c = DaemonClient::connect(&sock).await.ok()?;
+            let resp = c.request(&Request::Status).await.ok()?;
+            Some((c, resp))
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(10), probe)
+            .await
+            .ok()
+            .flatten()
+    });
+    match answered {
+        // Socket exists but no clean Status — fail closed (a host may own it).
+        None => HostStatus::Failed,
+        Some((client, Response::Status { edit: hosted, .. })) => {
+            if hosted == edit {
+                HostStatus::Hosting(rt, client)
+            } else {
+                HostStatus::OtherEdit
+            }
+        }
+        Some((_, _)) => HostStatus::Failed,
+    }
+}
+
+/// A mutation handle to an edit (REQ-090). Routed to a live host when one *owns*
+/// the edit — so the host and the canonical file remain ONE store and never
+/// diverge — or to the file store directly otherwise.
+enum EditSession {
+    File {
+        store: ar_edit_collab::store::PersistentEdit,
+        edit: String,
+        dirty: bool,
+    },
+    #[cfg(unix)]
+    Attached {
+        rt: tokio::runtime::Runtime,
+        client: ar_edit_collab::shell::daemon::DaemonClient,
+    },
+}
+
+impl EditSession {
+    /// Open `edit` for mutation, attaching to a live host if one owns it. Fails
+    /// closed if a daemon socket is present but unresponsive (REQ-090): the host
+    /// might own this edit, so a file-direct write could diverge from it.
+    fn open(edit: &str) -> anyhow::Result<Self> {
+        #[cfg(unix)]
+        match host_status(edit) {
+            HostStatus::Hosting(rt, client) => return Ok(EditSession::Attached { rt, client }),
+            HostStatus::Failed => {
+                return Err(anyhow::Error::new(CliError::system(
+                    "a session daemon socket is present but did not respond; aborting to avoid \
+                     diverging from a possibly-live host — retry, or remove a stale \
+                     .ar-edit/session.sock if no daemon is running",
+                )))
+            }
+            HostStatus::Absent | HostStatus::OtherEdit => {}
+        }
+        Ok(EditSession::File {
+            store: load_store(edit)?,
+            edit: edit.to_string(),
+            dirty: false,
+        })
+    }
+
+    /// Round-trip a request to the attached host.
+    #[cfg(unix)]
+    fn call(
+        rt: &tokio::runtime::Runtime,
+        client: &mut ar_edit_collab::shell::daemon::DaemonClient,
+        req: ar_edit_collab::shell::daemon::Request,
+    ) -> anyhow::Result<ar_edit_collab::shell::daemon::Response> {
+        rt.block_on(client.request(&req))
+            .map_err(|e| anyhow::Error::new(CliError::system(format!("session daemon: {e}"))))
+    }
+
+    /// Expect `Response::Ok` (or surface an `Error`) from the host.
+    #[cfg(unix)]
+    fn expect_ok(
+        rt: &tokio::runtime::Runtime,
+        client: &mut ar_edit_collab::shell::daemon::DaemonClient,
+        req: ar_edit_collab::shell::daemon::Request,
+    ) -> anyhow::Result<()> {
+        use ar_edit_collab::shell::daemon::Response;
+        match Self::call(rt, client, req)? {
+            Response::Ok => Ok(()),
+            Response::Error { message } => Err(anyhow::Error::new(CliError::user(message))),
+            other => anyhow::bail!("unexpected daemon response: {other:?}"),
+        }
+    }
+
+    /// The current ordered shots.
+    fn shots(&mut self) -> anyhow::Result<Vec<Shot>> {
+        match self {
+            EditSession::File { store, .. } => Ok(store.snapshot().shots),
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => {
+                use ar_edit_collab::shell::daemon::{Request, Response};
+                match Self::call(rt, client, Request::Snapshot)? {
+                    Response::Snapshot { shots } => Ok(shots),
+                    other => anyhow::bail!("unexpected daemon response: {other:?}"),
+                }
+            }
+        }
+    }
+
+    fn add_shot(&mut self, source: &str, range: ShotRange, author: &str) -> anyhow::Result<String> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                let id = store
+                    .add_shot(source, range, None, author)
+                    .map_err(|e| anyhow::Error::new(CliError::user(e)))?;
+                *dirty = true;
+                Ok(id)
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => {
+                use ar_edit_collab::shell::daemon::{Request, Response};
+                let shot = Shot {
+                    author: author.to_string(),
+                    id: String::new(),
+                    source: source.to_string(),
+                    range,
+                    notes: vec![],
+                };
+                match Self::call(rt, client, Request::AddShot { shot })? {
+                    Response::Added { shot_id } => Ok(shot_id),
+                    Response::Error { message } => Err(anyhow::Error::new(CliError::user(message))),
+                    other => anyhow::bail!("unexpected daemon response: {other:?}"),
+                }
+            }
+        }
+    }
+
+    fn move_shot(&mut self, shot_id: &str, to: usize) -> anyhow::Result<()> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                store.move_shot(shot_id, to, None);
+                *dirty = true;
+                Ok(())
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => Self::expect_ok(
+                rt,
+                client,
+                ar_edit_collab::shell::daemon::Request::MoveShot {
+                    shot_id: shot_id.to_string(),
+                    to,
+                },
+            ),
+        }
+    }
+
+    fn trim_shot(&mut self, shot_id: &str, range: ShotRange) -> anyhow::Result<()> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                store
+                    .trim_shot(shot_id, range, None)
+                    .map_err(|e| anyhow::Error::new(CliError::user(e)))?;
+                *dirty = true;
+                Ok(())
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => Self::expect_ok(
+                rt,
+                client,
+                ar_edit_collab::shell::daemon::Request::TrimShot {
+                    shot_id: shot_id.to_string(),
+                    range,
+                },
+            ),
+        }
+    }
+
+    fn remove_shot(&mut self, shot_id: &str) -> anyhow::Result<()> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                store.remove_shot(shot_id, None);
+                *dirty = true;
+                Ok(())
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => Self::expect_ok(
+                rt,
+                client,
+                ar_edit_collab::shell::daemon::Request::RemoveShot {
+                    shot_id: shot_id.to_string(),
+                },
+            ),
+        }
+    }
+
+    fn add_note(&mut self, shot_id: &str, text: &str, author: &str) -> anyhow::Result<()> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                store.add_note_text(shot_id, text, None, author);
+                *dirty = true;
+                Ok(())
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => Self::expect_ok(
+                rt,
+                client,
+                ar_edit_collab::shell::daemon::Request::AddNote {
+                    shot_id: shot_id.to_string(),
+                    text: text.to_string(),
+                    author: author.to_string(),
+                },
+            ),
+        }
+    }
+
+    /// Undo the most recent change; returns whether anything was reverted.
+    fn undo(&mut self) -> anyhow::Result<bool> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                let did = store.undo();
+                if did {
+                    *dirty = true;
+                }
+                Ok(did)
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => {
+                use ar_edit_collab::shell::daemon::{Request, Response};
+                match Self::call(rt, client, Request::Undo)? {
+                    Response::Reverted { reverted } => Ok(reverted),
+                    other => anyhow::bail!("unexpected daemon response: {other:?}"),
+                }
+            }
+        }
+    }
+
+    fn redo(&mut self) -> anyhow::Result<bool> {
+        match self {
+            EditSession::File { store, dirty, .. } => {
+                let did = store.redo();
+                if did {
+                    *dirty = true;
+                }
+                Ok(did)
+            }
+            #[cfg(unix)]
+            EditSession::Attached { rt, client } => {
+                use ar_edit_collab::shell::daemon::{Request, Response};
+                match Self::call(rt, client, Request::Redo)? {
+                    Response::Reverted { reverted } => Ok(reverted),
+                    other => anyhow::bail!("unexpected daemon response: {other:?}"),
+                }
+            }
+        }
+    }
+
+    /// Persist a file session (a host persists itself per mutation).
+    fn commit(&mut self) -> anyhow::Result<()> {
+        match self {
+            EditSession::File { store, edit, dirty } => {
+                if *dirty {
+                    save_store(store, edit)?;
+                }
+                Ok(())
+            }
+            #[cfg(unix)]
+            EditSession::Attached { .. } => Ok(()),
+        }
+    }
+}
+
+/// Persist the canonical store back to `edits/<name>.edit.json`.
+fn save_store(store: &ar_edit_collab::store::PersistentEdit, edit: &str) -> anyhow::Result<()> {
+    let path = edit_path(edit);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).system_err()?;
+    }
+    // Atomic write (temp + rename), so a crash mid-write can't truncate the
+    // canonical edit — matching the daemon's persist (REQ-088 durability).
+    let tmp = path.with_extension("edit.tmp");
+    std::fs::write(&tmp, store.to_bytes()).system_err()?;
+    std::fs::rename(&tmp, &path).system_err()?;
+    Ok(())
+}
+
+/// This project's session-daemon IPC socket (REQ-089/090).
+#[cfg(unix)]
+fn session_socket() -> PathBuf {
+    PathBuf::from(".ar-edit").join("session.sock")
 }
 
 fn fmt_range(range: &ShotRange) -> String {
@@ -375,146 +968,156 @@ fn fmt_range(range: &ShotRange) -> String {
     }
 }
 
-fn op_detail(kind: &EditOpKind) -> String {
-    match kind {
-        EditOpKind::AddShot { shot } => {
-            format!("{} {}", shot.source, fmt_range(&shot.range))
-        }
-        EditOpKind::RemoveShot { shot, .. } => {
-            format!("{} {}", shot.source, fmt_range(&shot.range))
-        }
-        EditOpKind::MoveShot {
-            from_position,
-            to_position,
-            ..
-        } => {
-            format!("pos {} \u{2192} {}", from_position, to_position)
-        }
-        EditOpKind::TrimShot {
-            old_range,
-            new_range,
-            ..
-        } => {
-            format!("{} \u{2192} {}", fmt_range(old_range), fmt_range(new_range))
-        }
-        EditOpKind::ReplaceRangeType {
-            old_range,
-            new_range,
-            ..
-        } => {
-            format!("{} \u{2192} {}", fmt_range(old_range), fmt_range(new_range))
-        }
-        EditOpKind::AddNote { note, .. } => {
-            let text = &note.text;
-            let truncated: String = text.chars().take(40).collect();
-            if truncated.len() < text.len() {
-                format!("\"{}…\"", truncated)
-            } else {
-                format!("\"{}\"", text)
-            }
+/// Load the materialised read view of an edit (REQ-079) for the read-side
+/// commands (`show`/`validate`/`render`/`--json`). If a live host owns the edit,
+/// read its in-memory snapshot so reads reflect the live session (no stale-file
+/// window); otherwise read the canonical file store.
+fn load_edit(edit: &str) -> anyhow::Result<EditDocument> {
+    // Reads never write, so they don't fail closed: only attach when a host
+    // definitely owns this edit; otherwise (absent / failed / other edit) read
+    // the canonical file, which a host keeps current by persisting per mutation.
+    #[cfg(unix)]
+    if let HostStatus::Hosting(rt, mut client) = host_status(edit) {
+        use ar_edit_collab::shell::daemon::{Request, Response};
+        if let Ok(Response::Snapshot { shots }) = rt.block_on(client.request(&Request::Snapshot)) {
+            let mut ed = EditDocument::create(edit);
+            ed.snapshot = ar_edit_core::models::EditSnapshot { shots };
+            return Ok(ed);
         }
     }
-}
-
-/// Load an edit document, producing a user-error with hint on failure.
-fn load_edit(edit: &str) -> anyhow::Result<EditDocument> {
-    let path = edit_path(edit);
-    EditDocument::load(&path).map_err(|e| {
-        anyhow::Error::new(CliError::user(e).with_hint(&format!(
-            "check that edit '{edit}' exists in the edits/ directory"
-        )))
-    })
+    Ok(load_store(edit)?.to_edit_document())
 }
 
 // ---------------------------------------------------------------------------
 // Command handlers: undo / redo / history
 // ---------------------------------------------------------------------------
 
-fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
-    let path = edit_path(edit);
-    let mut doc = load_edit(edit)?;
+/// Describe the difference an undo/redo made, for human output: shots removed
+/// vs. added between `before` and `after` (a move/trim shows neither).
+fn describe_change(before: &[Shot], after: &[Shot]) -> String {
+    let removed: Vec<&str> = before
+        .iter()
+        .filter(|b| !after.iter().any(|a| a.id == b.id))
+        .map(|s| s.id.as_str())
+        .collect();
+    let added: Vec<&str> = after
+        .iter()
+        .filter(|a| !before.iter().any(|b| b.id == a.id))
+        .map(|s| s.id.as_str())
+        .collect();
+    match (removed.as_slice(), added.as_slice()) {
+        ([], []) => "reordered/retrimmed".to_string(),
+        (r, []) => format!("removed {}", r.join(", ")),
+        ([], a) => format!("restored {}", a.join(", ")),
+        (r, a) => format!("removed {}, restored {}", r.join(", "), a.join(", ")),
+    }
+}
 
-    let undone = doc
-        .undo()
-        .map_err(|e| anyhow::Error::new(CliError::user(e)))?
-        .clone();
-    doc.save(&path).system_err()?;
+/// Print `{ "shots": [...] }` for the current edit state (JSON mode).
+fn print_shots_json(session: &mut EditSession) -> anyhow::Result<()> {
+    let shots = session.shots()?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({ "shots": shots }))?
+    );
+    Ok(())
+}
+
+fn cmd_undo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
+    // Durable undo over the canonical CRDT store's oplog cursor (ADR-011 /
+    // REQ-086), routed to a live host if one owns the edit (single store).
+    let mut session = EditSession::open(edit)?;
+    let before = session.shots()?;
+    if !session.undo()? {
+        return Err(anyhow::Error::new(CliError::user("nothing to undo")));
+    }
+    session.commit()?;
+    let after = session.shots()?;
 
     if cli.json {
-        let output = serde_json::json!({
-            "head": doc.head,
-            "undone_op": undone,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        let (op_type, shot_id) = op_summary(&undone.op);
-        let detail = op_detail(&undone.op);
         println!(
-            "Undone: #{} {} {} — {} (head \u{2192} {})",
-            undone.id, op_type, shot_id, detail, doc.head
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "undone": true,
+                "shots": after.len(),
+            }))?
+        );
+    } else {
+        println!(
+            "Undone in '{}': {} ({} shots)",
+            edit,
+            describe_change(&before, &after),
+            after.len()
         );
     }
     Ok(())
 }
 
 fn cmd_redo(cli: &Cli, edit: &str) -> anyhow::Result<()> {
-    let path = edit_path(edit);
-    let mut doc = load_edit(edit)?;
-
-    let redone = doc
-        .redo()
-        .map_err(|e| anyhow::Error::new(CliError::user(e)))?
-        .clone();
-    doc.save(&path).system_err()?;
+    let mut session = EditSession::open(edit)?;
+    let before = session.shots()?;
+    if !session.redo()? {
+        return Err(anyhow::Error::new(CliError::user("nothing to redo")));
+    }
+    session.commit()?;
+    let after = session.shots()?;
 
     if cli.json {
-        let output = serde_json::json!({
-            "head": doc.head,
-            "redone_op": redone,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        let (op_type, shot_id) = op_summary(&redone.op);
-        let detail = op_detail(&redone.op);
         println!(
-            "Redone: #{} {} {} — {} (head \u{2192} {})",
-            redone.id, op_type, shot_id, detail, doc.head
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "redone": true,
+                "shots": after.len(),
+            }))?
+        );
+    } else {
+        println!(
+            "Redone in '{}': {} ({} shots)",
+            edit,
+            describe_change(&before, &after),
+            after.len()
         );
     }
     Ok(())
 }
 
 fn cmd_history(cli: &Cli, edit: &str) -> anyhow::Result<()> {
-    let doc = load_edit(edit)?;
+    // The CRDT is the canonical store (ADR-011): the timeline is the current
+    // ordered shot list, plus whether durable undo/redo is available. (The
+    // event-sourced per-op log is retired with the single-store model.)
+    let store = load_store(edit)?;
+    let shots = store.snapshot().shots;
 
     if cli.json {
-        let output = serde_json::json!({
-            "head": doc.head,
-            "ops": doc.ops,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else if doc.ops.is_empty() {
-        println!("No operations.");
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "shots": shots,
+                "can_undo": store.can_undo(),
+                "can_redo": store.can_redo(),
+            }))?
+        );
+    } else if shots.is_empty() {
+        println!(
+            "No shots in '{edit}'. (undo: {}, redo: {})",
+            store.can_undo(),
+            store.can_redo()
+        );
     } else {
-        for (i, op) in doc.ops.iter().enumerate() {
-            let (op_type, shot_id) = op_summary(&op.op);
-            let detail = op_detail(&op.op);
-            let marker = if i as i32 == doc.head {
-                "\u{2192}"
-            } else {
-                " "
-            };
-            let ts = op.ts.format("%Y-%m-%d %H:%M:%S");
-            let suffix = if (i as i32) > doc.head {
-                "  (undone)"
-            } else {
-                ""
-            };
+        println!("Timeline for '{edit}':");
+        for (i, s) in shots.iter().enumerate() {
             println!(
-                "{marker} {id:>3}  {op_type:<19} {shot_id:<12} {detail:<40} {ts}{suffix}",
-                id = op.id
+                "  {i:>3}  {id:<14} {src:<10} {range}",
+                id = s.id,
+                src = s.source,
+                range = fmt_range(&s.range)
             );
         }
+        println!(
+            "(undo available: {}, redo available: {})",
+            store.can_undo(),
+            store.can_redo()
+        );
     }
     Ok(())
 }
@@ -880,19 +1483,13 @@ fn cmd_show(cli: &Cli, edit: &str) -> anyhow::Result<()> {
         let total_duration_ms: u64 = resolved.iter().map(|s| s.duration_ms).sum();
         let output = serde_json::json!({
             "name": doc.name,
-            "head": doc.head,
             "shot_count": resolved.len(),
             "total_duration_ms": total_duration_ms,
             "shots": resolved,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        println!(
-            "Edit: {}  ({} shots, head: {})",
-            doc.name,
-            resolved.len(),
-            doc.head
-        );
+        println!("Edit: {}  ({} shots)", doc.name, resolved.len());
         println!();
 
         if resolved.is_empty() {
@@ -949,21 +1546,22 @@ fn cmd_note(cli: &Cli, edit: &str, shot: &str, text: &str) -> anyhow::Result<()>
     if text.trim().is_empty() {
         anyhow::bail!("note text must not be empty");
     }
-    let path = edit_path(edit);
-    let mut doc = load_edit(edit)?;
-
-    let note = doc
-        .add_note(shot, text)
-        .map_err(|e| {
-            anyhow::Error::new(CliError::user(e).with_hint(&format!(
+    let mut session = EditSession::open(edit)?;
+    if !session.shots()?.iter().any(|s| s.id == shot) {
+        return Err(anyhow::Error::new(
+            CliError::user(format!("shot '{shot}' not found")).with_hint(&format!(
                 "run `ar-edit edit show {edit}` to list available shots"
-            )))
-        })?
-        .clone();
-    doc.save(&path).system_err()?;
+            )),
+        ));
+    }
+    session.add_note(shot, text, &local_author())?;
+    session.commit()?;
 
     if cli.json {
-        println!("{}", serde_json::to_string_pretty(&note)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({ "shot": shot, "text": text }))?
+        );
     } else {
         println!("Added note to {shot}: {text}");
     }
@@ -1543,6 +2141,82 @@ fn build_edit_play_request(
 // Command handlers: mark / markers (REQ-049, REQ-050)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Annotation CRDT store (markers + POIs, ADR-015) — the `mark`/`markers`
+// commands route through a per-source CRDT store so markers converge between
+// peers like edits. Legacy `annotations/<source>.markers.json` is migrated to
+// `annotations/<source>.annot.json` on first write.
+// ---------------------------------------------------------------------------
+
+fn annot_path(source_id: &str) -> PathBuf {
+    PathBuf::from("annotations").join(format!("{source_id}.annot.json"))
+}
+
+/// Load a source's annotation store: the CRDT file if present, else migrate the
+/// legacy plain-JSON markers in memory (saved on the first mutation, not on read).
+fn load_annotations(
+    source_id: &str,
+) -> anyhow::Result<ar_edit_collab::annotations::AnnotationStore> {
+    use ar_edit_collab::annotations::AnnotationStore;
+    let path = annot_path(source_id);
+    if path.exists() {
+        let bytes = std::fs::read(&path).system_err()?;
+        return AnnotationStore::from_bytes(&bytes, local_actor()).system_err();
+    }
+    // Legacy migration: read any plain-JSON markers + POIs for this source.
+    let markers = ar_edit_core::marker::list_markers(&PathBuf::from("."), source_id)
+        .map(|d| d.markers)
+        .unwrap_or_default();
+    let pois = ar_edit_core::poi::list_pois(&PathBuf::from("."), source_id)
+        .map(|d| d.pois)
+        .unwrap_or_default();
+    Ok(AnnotationStore::migrate(
+        source_id,
+        &markers,
+        &pois,
+        local_actor(),
+    ))
+}
+
+/// Persist a source's annotation store atomically (temp + rename).
+fn save_annotations(store: &ar_edit_collab::annotations::AnnotationStore) -> anyhow::Result<()> {
+    let path = annot_path(store.source_id());
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).system_err()?;
+    }
+    let tmp = path.with_extension("annot.tmp");
+    std::fs::write(&tmp, store.to_bytes()).system_err()?;
+    std::fs::rename(&tmp, &path).system_err()?;
+    Ok(())
+}
+
+/// Next sequential `mark-NNN` id given the existing markers.
+fn next_marker_num(markers: &[ar_edit_core::models::Marker]) -> u32 {
+    markers
+        .iter()
+        .filter_map(|m| m.id.strip_prefix("mark-"))
+        .filter_map(|n| n.parse::<u32>().ok())
+        .max()
+        .map(|n| n + 1)
+        .unwrap_or(1)
+}
+
+/// Source ids that have annotations on disk (new CRDT or legacy markers).
+fn annotated_source_ids() -> Vec<String> {
+    let mut ids = std::collections::BTreeSet::new();
+    if let Ok(entries) = std::fs::read_dir("annotations") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            for suffix in [".annot.json", ".markers.json"] {
+                if let Some(stem) = name.strip_suffix(suffix) {
+                    ids.insert(stem.to_string());
+                }
+            }
+        }
+    }
+    ids.into_iter().collect()
+}
+
 fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
     let range = parse_range(&args.range)?;
     let project_dir = PathBuf::from(".");
@@ -1568,14 +2242,13 @@ fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
         anyhow::bail!("label must not be empty");
     }
 
-    let marker = ar_edit_core::marker::add_marker(
-        &project_dir,
-        &args.source_id,
-        range,
-        &args.label,
-        args.note.as_deref(),
-    )
-    .user_err()?;
+    // Route through the per-source annotation CRDT store (ADR-015) so markers
+    // converge between peers; legacy markers are migrated on this first write.
+    let store = load_annotations(&args.source_id)?;
+    let id = format!("mark-{:03}", next_marker_num(&store.markers()));
+    let marker =
+        store.add_marker_fields(&id, range, &args.label, args.note.clone(), &local_author());
+    save_annotations(&store)?;
 
     if cli.json {
         println!("{}", serde_json::to_string_pretty(&marker)?);
@@ -1586,11 +2259,12 @@ fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
             .map(|n| format!("  note: {n}"))
             .unwrap_or_default();
         println!(
-            "Created {} on {} [{}] label={}{}",
+            "Created {} on {} [{}] label={} by {}{}",
             marker.id,
             args.source_id,
             range_summary(&marker.range),
             marker.label,
+            marker.author,
             note_part,
         );
     }
@@ -1600,25 +2274,31 @@ fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
 fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
 
-    // Collect source markers: either one source or all
-    let source_docs = if let Some(sid) = source_id {
-        let doc = ar_edit_core::marker::list_markers(&project_dir, sid).user_err()?;
-        vec![doc]
-    } else {
-        ar_edit_core::marker::list_all_markers(&project_dir).user_err()?
+    // Collect source markers from the annotation CRDT store(s) (ADR-015):
+    // either one source or every source that has annotations on disk.
+    let sources: Vec<(String, Vec<ar_edit_core::models::Marker>)> = match source_id {
+        Some(sid) => vec![(sid.to_string(), load_annotations(sid)?.markers())],
+        None => {
+            let mut v = Vec::new();
+            for sid in annotated_source_ids() {
+                let markers = load_annotations(&sid)?.markers();
+                v.push((sid, markers));
+            }
+            v
+        }
     };
 
     // Resolve all markers and apply label filter
     let mut all_resolved = Vec::new();
-    for doc in &source_docs {
+    for (sid, source_markers) in &sources {
         let markers: Vec<_> = if let Some(lbl) = label {
-            doc.markers
+            source_markers
                 .iter()
                 .filter(|m| m.label == lbl)
                 .cloned()
                 .collect()
         } else {
-            doc.markers.clone()
+            source_markers.clone()
         };
 
         if markers.is_empty() {
@@ -1626,8 +2306,7 @@ fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyho
         }
 
         let resolved =
-            ar_edit_core::display::resolve_markers(&markers, &doc.source_id, &project_dir)
-                .user_err()?;
+            ar_edit_core::display::resolve_markers(&markers, sid, &project_dir).user_err()?;
         all_resolved.extend(resolved);
     }
 
@@ -1660,9 +2339,240 @@ fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyho
                 .or(m.scene_preview.as_deref())
                 .unwrap_or("");
 
+            let author = if m.author.is_empty() {
+                String::new()
+            } else {
+                format!(" by {}", m.author)
+            };
             println!(
-                "  {}  {}  {:<8} [{}] {}{}",
-                m.id, m.source_id, m.label, time_range, preview, note_part,
+                "  {}  {}  {:<8}{}  [{}] {}{}",
+                m.id, m.source_id, m.label, author, time_range, preview, note_part,
+            );
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: POI (SPEC-002) — storage via the annotation CRDT (ADR-015)
+// ---------------------------------------------------------------------------
+
+fn fmt_poi_point(point: &ar_edit_core::models::PoiPoint) -> String {
+    use ar_edit_core::models::PoiPoint;
+    match point {
+        PoiPoint::Word(w) => format!("word {w}"),
+        PoiPoint::Scene(s) => format!("scene {s}"),
+        PoiPoint::TimeMs(ms) => format!("{ms}ms"),
+    }
+}
+
+/// Next sequential `poi-NNN` id given the existing POIs.
+fn next_poi_num(pois: &[ar_edit_core::models::Poi]) -> u32 {
+    pois.iter()
+        .filter_map(|p| p.id.strip_prefix("poi-"))
+        .filter_map(|n| n.parse::<u32>().ok())
+        .max()
+        .map(|n| n + 1)
+        .unwrap_or(1)
+}
+
+fn cmd_poi_add(cli: &Cli, args: &cli::PoiAddArgs) -> anyhow::Result<()> {
+    use ar_edit_core::models::{PoiCategory, PoiPoint};
+
+    let point = if let Some(w) = args.at_word {
+        PoiPoint::Word(w)
+    } else if let Some(s) = args.at_scene {
+        PoiPoint::Scene(s)
+    } else if let Some(ms) = args.at_ms {
+        PoiPoint::TimeMs(ms)
+    } else {
+        eprintln!("error: one of --at-word, --at-scene, or --at-ms is required");
+        process::exit(exit_code::USER_ERROR);
+    };
+
+    let category: PoiCategory = match args.category.parse() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e}");
+            process::exit(exit_code::VALIDATION_ERROR);
+        }
+    };
+
+    let manifest = ar_edit_core::project::read_manifest(&PathBuf::from("."))?;
+    if !manifest.sources.iter().any(|s| s.id == args.source_id) {
+        eprintln!("error: source '{}' not found in manifest", args.source_id);
+        process::exit(exit_code::USER_ERROR);
+    }
+
+    // Route through the per-source annotation CRDT store (ADR-015).
+    let store = load_annotations(&args.source_id)?;
+    let id = format!("poi-{:03}", next_poi_num(&store.pois()));
+    let poi = store.add_poi_fields(&id, point, category, args.note.clone(), &local_author());
+    save_annotations(&store)?;
+
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&poi)?);
+    } else {
+        let note_part = poi
+            .note
+            .as_deref()
+            .map(|n| format!("  note: \"{n}\""))
+            .unwrap_or_default();
+        println!(
+            "Created {} on {} at {} category={} by {}{}",
+            poi.id,
+            args.source_id,
+            fmt_poi_point(&poi.point),
+            poi.category,
+            poi.author,
+            note_part,
+        );
+    }
+    Ok(())
+}
+
+fn cmd_poi_list(cli: &Cli, args: &cli::PoiListArgs) -> anyhow::Result<()> {
+    use ar_edit_core::models::{Poi, PoiCategory, SourcePois};
+
+    let sources: Vec<(String, Vec<Poi>)> = match &args.source_id {
+        Some(sid) => vec![(sid.clone(), load_annotations(sid)?.pois())],
+        None => {
+            let mut v = Vec::new();
+            for sid in annotated_source_ids() {
+                let pois = load_annotations(&sid)?.pois();
+                v.push((sid, pois));
+            }
+            v
+        }
+    };
+
+    let cat_filter: Option<PoiCategory> = if let Some(c) = &args.category {
+        match c.parse() {
+            Ok(cat) => Some(cat),
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(exit_code::VALIDATION_ERROR);
+            }
+        }
+    } else {
+        None
+    };
+
+    if cli.json {
+        let mut docs: Vec<SourcePois> = Vec::new();
+        for (sid, pois) in &sources {
+            let filtered: Vec<_> = pois
+                .iter()
+                .filter(|p| cat_filter.map_or(true, |c| p.category == c))
+                .cloned()
+                .collect();
+            if !filtered.is_empty() {
+                docs.push(SourcePois {
+                    source_id: sid.clone(),
+                    pois: filtered,
+                });
+            }
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({ "pois": docs }))?
+        );
+        return Ok(());
+    }
+
+    let mut rows: Vec<(&str, &Poi)> = Vec::new();
+    for (sid, pois) in &sources {
+        for p in pois {
+            if cat_filter.map_or(true, |c| p.category == c) {
+                rows.push((sid.as_str(), p));
+            }
+        }
+    }
+    if rows.is_empty() {
+        match &args.source_id {
+            Some(sid) => println!("No POIs for {sid}."),
+            None => println!("No POIs."),
+        }
+    } else {
+        println!(
+            "  {:<10} {:<12} {:<14} {:<12} {:<12} {}",
+            "ID", "Source", "Point", "Category", "Author", "Note"
+        );
+        for (sid, poi) in &rows {
+            let note = poi.note.as_deref().unwrap_or("");
+            println!(
+                "  {:<10} {:<12} {:<14} {:<12} {:<12} {}",
+                poi.id,
+                sid,
+                fmt_poi_point(&poi.point),
+                poi.category,
+                poi.author,
+                note,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn cmd_poi_remove(cli: &Cli, args: &cli::PoiRemoveArgs) -> anyhow::Result<()> {
+    use ar_edit_core::models::PoiCategory;
+
+    if args.id.is_none() && args.category.is_none() {
+        eprintln!("error: one of --id or --category is required");
+        process::exit(exit_code::USER_ERROR);
+    }
+
+    let store = load_annotations(&args.source_id)?;
+
+    if let Some(poi_id) = &args.id {
+        if !store.pois().iter().any(|p| &p.id == poi_id) {
+            eprintln!("error: POI not found: {poi_id}");
+            process::exit(exit_code::USER_ERROR);
+        }
+        store.remove_poi(poi_id);
+        save_annotations(&store)?;
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({ "removed": poi_id }))?
+            );
+        } else {
+            println!("Removed {poi_id} from {}", args.source_id);
+        }
+    } else if let Some(cat_str) = &args.category {
+        let category: PoiCategory = match cat_str.parse() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(exit_code::VALIDATION_ERROR);
+            }
+        };
+        let removed: Vec<String> = store
+            .pois()
+            .iter()
+            .filter(|p| p.category == category)
+            .map(|p| p.id.clone())
+            .collect();
+        for id in &removed {
+            store.remove_poi(id);
+        }
+        save_annotations(&store)?;
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({ "removed": removed }))?
+            );
+        } else if removed.is_empty() {
+            println!(
+                "No POIs with category '{cat_str}' found for {}",
+                args.source_id
+            );
+        } else {
+            println!(
+                "Removed {} POI(s) from {}: {}",
+                removed.len(),
+                args.source_id,
+                removed.join(", ")
             );
         }
     }
@@ -1964,16 +2874,20 @@ fn cmd_from_transcript(cli: &Cli, file: &Path, output: Option<&str>) -> anyhow::
     let edits_dir = PathBuf::from("edits");
     std::fs::create_dir_all(&edits_dir)?;
 
-    let path = edits_dir.join(format!("{}.edit.json", doc.name));
     let shot_count = doc.snapshot.shots.len();
     let name = doc.name.clone();
 
-    doc.save(&path).system_err()?;
+    // Persist as the canonical CRDT store (ADR-011): migrate the imported
+    // event-sourced document into the store format and write it.
+    let bytes = serde_json::to_vec(&doc).system_err()?;
+    let store = ar_edit_collab::store::PersistentEdit::from_bytes(&bytes, local_actor())
+        .map_err(|e| anyhow::Error::new(CliError::system(e)))?;
+    save_store(&store, &name)?;
 
     if cli.json {
         let output = serde_json::json!({
             "name": name,
-            "path": path.display().to_string(),
+            "path": edit_path(&name).display().to_string(),
             "shot_count": shot_count,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
