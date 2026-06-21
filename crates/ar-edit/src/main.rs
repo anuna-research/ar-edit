@@ -2077,6 +2077,72 @@ fn build_edit_play_request(
 // Command handlers: mark / markers (REQ-049, REQ-050)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Annotation CRDT store (markers + POIs, ADR-015) — the `mark`/`markers`
+// commands route through a per-source CRDT store so markers converge between
+// peers like edits. Legacy `annotations/<source>.markers.json` is migrated to
+// `annotations/<source>.annot.json` on first write.
+// ---------------------------------------------------------------------------
+
+fn annot_path(source_id: &str) -> PathBuf {
+    PathBuf::from("annotations").join(format!("{source_id}.annot.json"))
+}
+
+/// Load a source's annotation store: the CRDT file if present, else migrate the
+/// legacy plain-JSON markers in memory (saved on the first mutation, not on read).
+fn load_annotations(source_id: &str) -> anyhow::Result<ar_edit_collab::annotations::AnnotationStore> {
+    use ar_edit_collab::annotations::AnnotationStore;
+    let path = annot_path(source_id);
+    if path.exists() {
+        let bytes = std::fs::read(&path).system_err()?;
+        return AnnotationStore::from_bytes(&bytes, local_actor()).system_err();
+    }
+    // Legacy migration: only markers were ever written to disk (no POI CLI).
+    let markers = ar_edit_core::marker::list_markers(&PathBuf::from("."), source_id)
+        .map(|d| d.markers)
+        .unwrap_or_default();
+    Ok(AnnotationStore::migrate(source_id, &markers, &[], local_actor()))
+}
+
+/// Persist a source's annotation store atomically (temp + rename).
+fn save_annotations(store: &ar_edit_collab::annotations::AnnotationStore) -> anyhow::Result<()> {
+    let path = annot_path(store.source_id());
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).system_err()?;
+    }
+    let tmp = path.with_extension("annot.tmp");
+    std::fs::write(&tmp, store.to_bytes()).system_err()?;
+    std::fs::rename(&tmp, &path).system_err()?;
+    Ok(())
+}
+
+/// Next sequential `mark-NNN` id given the existing markers.
+fn next_marker_num(markers: &[ar_edit_core::models::Marker]) -> u32 {
+    markers
+        .iter()
+        .filter_map(|m| m.id.strip_prefix("mark-"))
+        .filter_map(|n| n.parse::<u32>().ok())
+        .max()
+        .map(|n| n + 1)
+        .unwrap_or(1)
+}
+
+/// Source ids that have annotations on disk (new CRDT or legacy markers).
+fn annotated_source_ids() -> Vec<String> {
+    let mut ids = std::collections::BTreeSet::new();
+    if let Ok(entries) = std::fs::read_dir("annotations") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            for suffix in [".annot.json", ".markers.json"] {
+                if let Some(stem) = name.strip_suffix(suffix) {
+                    ids.insert(stem.to_string());
+                }
+            }
+        }
+    }
+    ids.into_iter().collect()
+}
+
 fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
     let range = parse_range(&args.range)?;
     let project_dir = PathBuf::from(".");
@@ -2102,14 +2168,12 @@ fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
         anyhow::bail!("label must not be empty");
     }
 
-    let marker = ar_edit_core::marker::add_marker(
-        &project_dir,
-        &args.source_id,
-        range,
-        &args.label,
-        args.note.as_deref(),
-    )
-    .user_err()?;
+    // Route through the per-source annotation CRDT store (ADR-015) so markers
+    // converge between peers; legacy markers are migrated on this first write.
+    let store = load_annotations(&args.source_id)?;
+    let id = format!("mark-{:03}", next_marker_num(&store.markers()));
+    let marker = store.add_marker_fields(&id, range, &args.label, args.note.clone());
+    save_annotations(&store)?;
 
     if cli.json {
         println!("{}", serde_json::to_string_pretty(&marker)?);
@@ -2134,25 +2198,27 @@ fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
 fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyhow::Result<()> {
     let project_dir = PathBuf::from(".");
 
-    // Collect source markers: either one source or all
-    let source_docs = if let Some(sid) = source_id {
-        let doc = ar_edit_core::marker::list_markers(&project_dir, sid).user_err()?;
-        vec![doc]
-    } else {
-        ar_edit_core::marker::list_all_markers(&project_dir).user_err()?
+    // Collect source markers from the annotation CRDT store(s) (ADR-015):
+    // either one source or every source that has annotations on disk.
+    let sources: Vec<(String, Vec<ar_edit_core::models::Marker>)> = match source_id {
+        Some(sid) => vec![(sid.to_string(), load_annotations(sid)?.markers())],
+        None => {
+            let mut v = Vec::new();
+            for sid in annotated_source_ids() {
+                let markers = load_annotations(&sid)?.markers();
+                v.push((sid, markers));
+            }
+            v
+        }
     };
 
     // Resolve all markers and apply label filter
     let mut all_resolved = Vec::new();
-    for doc in &source_docs {
+    for (sid, source_markers) in &sources {
         let markers: Vec<_> = if let Some(lbl) = label {
-            doc.markers
-                .iter()
-                .filter(|m| m.label == lbl)
-                .cloned()
-                .collect()
+            source_markers.iter().filter(|m| m.label == lbl).cloned().collect()
         } else {
-            doc.markers.clone()
+            source_markers.clone()
         };
 
         if markers.is_empty() {
@@ -2160,8 +2226,7 @@ fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyho
         }
 
         let resolved =
-            ar_edit_core::display::resolve_markers(&markers, &doc.source_id, &project_dir)
-                .user_err()?;
+            ar_edit_core::display::resolve_markers(&markers, sid, &project_dir).user_err()?;
         all_resolved.extend(resolved);
     }
 

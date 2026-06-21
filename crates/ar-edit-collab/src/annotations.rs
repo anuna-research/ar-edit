@@ -104,6 +104,26 @@ impl AnnotationStore {
         self.doc.put_marker(&marker.id, &serde_json::to_string(marker).expect("marker json"));
     }
 
+    /// Build and add a marker (timestamped now); returns it. Keeps `chrono` out
+    /// of one-shot CLI callers.
+    pub fn add_marker_fields(
+        &self,
+        id: &str,
+        range: ar_edit_core::models::ShotRange,
+        label: &str,
+        note: Option<String>,
+    ) -> Marker {
+        let marker = Marker {
+            id: id.to_string(),
+            range,
+            label: label.to_string(),
+            note,
+            created: chrono::Utc::now(),
+        };
+        self.add_marker(&marker);
+        marker
+    }
+
     /// Remove a marker by id (REQ-082 observed-remove).
     pub fn remove_marker(&self, id: &str) {
         self.doc.remove_marker(id);
