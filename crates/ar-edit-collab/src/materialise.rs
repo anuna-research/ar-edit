@@ -24,7 +24,7 @@ pub fn materialise(collab: &CollabDoc) -> EditSnapshot {
     if let LoroValue::Map(m) = doc.get_map(NOTES).get_value() {
         for (k, v) in m.iter() {
             if let LoroValue::String(s) = v {
-                if let Ok(rec) = serde_json::from_str::<NoteRec>(&s.to_string()) {
+                if let Ok(rec) = serde_json::from_str::<NoteRec>(s.as_ref()) {
                     notes_by_shot
                         .entry(rec.shot_id.clone())
                         .or_default()

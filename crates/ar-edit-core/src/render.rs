@@ -187,7 +187,7 @@ pub fn compute_progress(
 /// The preview lives in a temp directory named after the edit so it persists
 /// across invocations and can be reused when the edit hasn't changed.
 pub fn preview_output_path(edit_name: &str) -> PathBuf {
-    let preview_dir = std::env::temp_dir().join(format!("ar-edit-preview-{}", edit_name));
+    let preview_dir = std::env::temp_dir().join(format!("ar-edit-preview-{edit_name}"));
     preview_dir.join("preview.mp4")
 }
 

@@ -28,6 +28,7 @@
 //!   domain-separated context strings; replace the raw `blake3(key)` here.
 //! - **Burn-on-first-wrong-guess** (cbcl consumes the invite on the first
 //!   failed confirm) vs this module's `ChannelGuard` N-attempt lockout.
+//!
 //! See `../../cbcl-bus/docs/AGENT-AUTH.md` and
 //! `cbcl-bus/docs/decisions/SPEC-012-tier1-gate-decisions.md`.
 //!

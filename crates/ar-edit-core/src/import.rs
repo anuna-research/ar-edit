@@ -348,8 +348,7 @@ fn parse_annotations(content: &str) -> (Vec<AnnotationBlock>, Vec<ParseError>) {
                     errors.push(ParseError {
                         line: line_no,
                         message: format!(
-                            "closing annotation for '{}' without matching opening",
-                            close_source
+                            "closing annotation for '{close_source}' without matching opening"
                         ),
                     });
                 }
@@ -529,8 +528,7 @@ fn parse_content_blocks(content: &str) -> (Vec<ContentBlock>, Vec<ParseError>) {
                     errors.push(ParseError {
                         line: line_no,
                         message: format!(
-                            "closing annotation for '{}' without matching opening",
-                            close_source
+                            "closing annotation for '{close_source}' without matching opening"
                         ),
                     });
                 }

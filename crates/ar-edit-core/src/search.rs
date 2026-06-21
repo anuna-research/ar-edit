@@ -224,11 +224,11 @@ fn search_transcript(transcript: &Transcript, re: &Regex, results: &mut Vec<Sear
 
         let mut context = String::new();
         if !context_before.is_empty() {
-            context.push_str(&format!("...{} ", context_before));
+            context.push_str(&format!("...{context_before} "));
         }
-        context.push_str(&format!("[{}]", matched_text));
+        context.push_str(&format!("[{matched_text}]"));
         if !context_after.is_empty() {
-            context.push_str(&format!(" {}...", context_after));
+            context.push_str(&format!(" {context_after}..."));
         }
 
         results.push(SearchResult {

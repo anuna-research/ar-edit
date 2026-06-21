@@ -42,7 +42,7 @@ pub fn validate_shot_source(
     let source = match manifest.sources.iter().find(|s| s.id == source_id) {
         Some(s) => s,
         None => {
-            errors.push(format!("source '{}' not found in project", source_id));
+            errors.push(format!("source '{source_id}' not found in project"));
             return errors;
         }
     };
@@ -303,7 +303,7 @@ pub fn validate(doc: &EditDocument, manifest: &Manifest, project_dir: &Path) -> 
 fn load_transcript(project_dir: &Path, source_id: &str) -> Option<Transcript> {
     let path = project_dir
         .join("transcripts")
-        .join(format!("{}.transcript.json", source_id));
+        .join(format!("{source_id}.transcript.json"));
     let data = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str(&data).ok()
 }
@@ -311,7 +311,7 @@ fn load_transcript(project_dir: &Path, source_id: &str) -> Option<Transcript> {
 fn load_index(project_dir: &Path, source_id: &str) -> Option<SourceIndex> {
     let path = project_dir
         .join("index")
-        .join(format!("{}.index.json", source_id));
+        .join(format!("{source_id}.index.json"));
     let data = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str(&data).ok()
 }
@@ -348,8 +348,8 @@ mod tests {
     fn make_source(id: &str, duration_ms: u64, transcribed: bool, indexed: bool) -> Source {
         Source {
             id: id.into(),
-            path: format!("sources/{}.mp4", id).into(),
-            original_filename: format!("{}.mp4", id),
+            path: format!("sources/{id}.mp4").into(),
+            original_filename: format!("{id}.mp4"),
             duration_ms,
             video_codec: "h264".into(),
             audio_codec: "aac".into(),
@@ -379,7 +379,7 @@ mod tests {
         for i in 0..word_count {
             words.push(Word {
                 index: i,
-                text: format!("word{}", i),
+                text: format!("word{i}"),
                 start_ms: (i as u64) * 100,
                 end_ms: (i as u64) * 100 + 80,
                 confidence: 0.95,
@@ -407,7 +407,7 @@ mod tests {
                 index: i,
                 start_ms: (i as u64) * 10000,
                 end_ms: ((i + 1) as u64) * 10000,
-                thumbnail: format!("thumbnails/{}_scene{}.jpg", source_id, i).into(),
+                thumbnail: format!("thumbnails/{source_id}_scene{i}.jpg").into(),
                 description: None,
             })
             .collect();

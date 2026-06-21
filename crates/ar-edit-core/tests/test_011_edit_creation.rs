@@ -33,7 +33,7 @@ fn create_timestamp_is_recent() {
 fn create_accepts_string_types() {
     let _from_str = EditDocument::create("name-a");
     let _from_string = EditDocument::create(String::from("name-b"));
-    let _from_ref = EditDocument::create(&String::from("name-c"));
+    let _from_ref = EditDocument::create(String::from("name-c"));
 }
 
 #[test]

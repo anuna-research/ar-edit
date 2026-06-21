@@ -33,7 +33,7 @@ pub fn add_marker(
 
     let next_id = next_marker_id(&doc);
     let marker = Marker {
-        id: format!("mark-{:03}", next_id),
+        id: format!("mark-{next_id:03}"),
         range,
         label: label.to_string(),
         note: note.map(|s| s.to_string()),

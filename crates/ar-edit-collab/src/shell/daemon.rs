@@ -226,14 +226,9 @@ impl Daemon {
     pub async fn run(self) {
         // `Daemon` implements Drop, so fields can't be moved out of `self`.
         let edit_path = Arc::new(self.edit_path.clone());
-        loop {
-            match self.listener.accept().await {
-                Ok((stream, _)) => {
-                    let store = self.store.clone();
-                    tokio::spawn(handle_client(stream, store, edit_path.clone()));
-                }
-                Err(_) => break,
-            }
+        while let Ok((stream, _)) = self.listener.accept().await {
+            let store = self.store.clone();
+            tokio::spawn(handle_client(stream, store, edit_path.clone()));
         }
     }
 }

@@ -35,7 +35,7 @@ pub fn add_poi(
 
     let next_id = next_poi_id(&doc);
     let poi = Poi {
-        id: format!("poi-{:03}", next_id),
+        id: format!("poi-{next_id:03}"),
         point,
         category,
         note: note.map(|s| s.to_string()),
