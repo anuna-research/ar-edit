@@ -354,6 +354,45 @@ mod tests {
         assert_eq!(doc.next_shot_id, 1);
     }
 
+    // -- validate_range -------------------------------------------------------
+
+    #[test]
+    fn validate_range_rejects_inverted_with_ordering_message() {
+        for range in [
+            ShotRange::Words { from: 10, to: 3 },
+            ShotRange::Scenes { from: 5, to: 2 },
+            ShotRange::Time { from_ms: 9000, to_ms: 1000 },
+        ] {
+            let err = validate_range(&range).unwrap_err().to_string();
+            assert!(err.contains("must be <= to"), "inverted range message: {err}");
+        }
+    }
+
+    #[test]
+    fn validate_range_rejects_zero_width_with_zero_duration_message() {
+        // A zero-width range (from == to) is rejected as "zero duration", NOT as
+        // an ordering error — distinguishes `from > to` from `from >= to`.
+        for range in [
+            ShotRange::Words { from: 7, to: 7 },
+            ShotRange::Scenes { from: 0, to: 0 },
+            ShotRange::Time { from_ms: 500, to_ms: 500 },
+        ] {
+            let err = validate_range(&range).unwrap_err().to_string();
+            assert!(err.contains("zero duration"), "zero-width range message: {err}");
+        }
+    }
+
+    #[test]
+    fn validate_range_accepts_proper_ranges() {
+        for range in [
+            ShotRange::Words { from: 0, to: 1 },
+            ShotRange::Scenes { from: 0, to: 3 },
+            ShotRange::Time { from_ms: 0, to_ms: 1 },
+        ] {
+            assert!(validate_range(&range).is_ok(), "proper range is valid: {range:?}");
+        }
+    }
+
     // -- add_shot -------------------------------------------------------------
 
     #[test]
