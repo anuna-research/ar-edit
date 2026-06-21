@@ -53,6 +53,56 @@ fn annot_poi_ids(project: &Path, source_id: &str) -> Vec<String> {
         .collect()
 }
 
+fn annot_marker_authors(project: &Path, source_id: &str) -> Vec<String> {
+    let bytes = fs::read(project.join(format!("annotations/{source_id}.annot.json"))).unwrap();
+    AnnotationStore::from_bytes(&bytes, ActorId(1))
+        .unwrap()
+        .markers()
+        .into_iter()
+        .map(|m| m.author)
+        .collect()
+}
+
+fn annot_poi_authors(project: &Path, source_id: &str) -> Vec<String> {
+    let bytes = fs::read(project.join(format!("annotations/{source_id}.annot.json"))).unwrap();
+    AnnotationStore::from_bytes(&bytes, ActorId(1))
+        .unwrap()
+        .pois()
+        .into_iter()
+        .map(|p| p.author)
+        .collect()
+}
+
+/// TEST-121 — Validates: REQ-091 (author attribution autopopulates, persists in
+/// the CRDT, and shows in output).
+#[test]
+fn markers_and_pois_record_the_author() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("manifest.json"), manifest_json()).unwrap();
+    let ar = || {
+        let mut c = Command::cargo_bin("ar-edit").unwrap();
+        c.current_dir(tmp.path());
+        c.env("AR_EDIT_AUTHOR", "alice"); // attribution autopopulation override
+        c
+    };
+
+    let out = ar()
+        .args(["mark", "src-001", "--label", "select", "--from-ms", "1000", "--to-ms", "2000"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("by alice"), "marker output shows author");
+    assert_eq!(annot_marker_authors(tmp.path(), "src-001"), vec!["alice"]);
+
+    let out = ar()
+        .args(["poi", "add", "src-001", "--at-ms", "5000", "--category", "highlight"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("by alice"), "POI output shows author");
+    assert_eq!(annot_poi_authors(tmp.path(), "src-001"), vec!["alice"]);
+}
+
 #[test]
 fn poi_add_list_remove_through_crdt_store() {
     let tmp = TempDir::new().unwrap();

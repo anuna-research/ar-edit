@@ -226,6 +226,10 @@ pub struct Marker {
     pub range: ShotRange,
     pub label: String,
     pub note: Option<String>,
+    /// Human-readable author of the marker (collaborative attribution, REQ-091).
+    /// Defaulted empty for pre-attribution / legacy data.
+    #[serde(default)]
+    pub author: String,
     pub created: DateTime<Utc>,
 }
 
@@ -296,6 +300,10 @@ pub struct Poi {
     pub category: PoiCategory,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Human-readable author of the POI (collaborative attribution, REQ-091).
+    /// Defaulted empty for pre-attribution / legacy data.
+    #[serde(default)]
+    pub author: String,
     pub created: DateTime<Utc>,
 }
 
@@ -881,6 +889,7 @@ mod tests {
             point: PoiPoint::Word(10),
             category: PoiCategory::Cue,
             note: None,
+            author: String::new(),
             created: "2026-03-13T10:00:00Z".parse().unwrap(),
         };
 

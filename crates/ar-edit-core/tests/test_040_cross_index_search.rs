@@ -204,6 +204,7 @@ fn search_finds_all_three_types() {
             },
             label: "select".into(),
             note: Some("Best interview take".into()),
+            author: String::new(),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
         }],
     };

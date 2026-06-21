@@ -224,6 +224,7 @@ fn search_finds_marker_label() {
             },
             label: "hero-shot".into(),
             note: Some("Best take".into()),
+            author: String::new(),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
         }],
     };
@@ -250,6 +251,7 @@ fn search_finds_marker_note() {
             },
             label: "select".into(),
             note: Some("Great performance here".into()),
+            author: String::new(),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
         }],
     };
@@ -288,6 +290,7 @@ fn search_unified_across_all_types() {
             },
             label: "office-best".into(),
             note: None,
+            author: String::new(),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
         }],
     };
@@ -361,6 +364,7 @@ fn filter_metadata_only() {
             },
             label: "office-select".into(),
             note: None,
+            author: String::new(),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
         }],
     };
@@ -553,6 +557,7 @@ fn marker_result_context_has_id_and_label() {
             },
             label: "hero".into(),
             note: Some("Best take".into()),
+            author: String::new(),
             created: "2026-02-19T14:00:00Z".parse().unwrap(),
         }],
     };

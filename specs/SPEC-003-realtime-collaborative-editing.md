@@ -529,6 +529,22 @@ Trace:
 - [[SPEC-003-realtime-collaborative-editing#TEST-099]]
 - [[SPEC-003-realtime-collaborative-editing#TEST-100]]
 
+**REQ-091: Author Attribution for Annotations**
+
+The system SHALL record a **human-readable author** with every marker and point
+of interest at creation, stored as CRDT state
+([[SPEC-003-realtime-collaborative-editing#ADR-015]]) so attribution converges
+and is visible across peers, AND surface it in `markers` / `poi list` output
+(text and `--json`) WITH the author **auto-populated** from the environment — in
+priority order: `AR_EDIT_AUTHOR`, a cached project identity (`.ar-edit/author`),
+git `user.name`, then the OS username — so no manual entry is required.
+Pre-attribution / legacy annotations carry an empty author. (Attribution for
+edit shots/notes is the natural extension, deferred.)
+
+Trace:
+- [[SPEC-003-realtime-collaborative-editing#TEST-121]]
+- [[SPEC-003-realtime-collaborative-editing#ADR-015]]
+
 **REQ-083: Strong Eventual Consistency**
 
 The system SHALL guarantee that any two peers that have observed the same set of
@@ -1599,6 +1615,7 @@ REQ-087 → TEST-107, TEST-108 → CON-015 ; NFR-012
 REQ-088 → TEST-109, TEST-110 → ADR-011
 REQ-089 → TEST-119           → CON-018 ; ADR-014
 REQ-090 → TEST-120           → CON-018 ; ADR-014
+REQ-091 → TEST-121           → ADR-015
 NFR-009 → TEST-111 → OBS-003
 NFR-010 → TEST-112 → OBS-003
 NFR-011 → TEST-113 → OBS-003

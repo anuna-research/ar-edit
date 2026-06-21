@@ -568,6 +568,50 @@ fn local_actor() -> ar_edit_collab::ids::ActorId {
     actor
 }
 
+/// A human-readable author name for collaborative attribution (REQ-091),
+/// autopopulated and cached. Priority: `AR_EDIT_AUTHOR` env → cached
+/// `.ar-edit/author` → git `user.name` → OS username → `"unknown"`. The resolved
+/// value is cached to `.ar-edit/author` (stable, and editable to override).
+fn local_author() -> String {
+    // Explicit override (wins, never cached).
+    if let Ok(a) = std::env::var("AR_EDIT_AUTHOR") {
+        let a = a.trim();
+        if !a.is_empty() {
+            return a.to_string();
+        }
+    }
+    let path = PathBuf::from(".ar-edit").join("author");
+    if let Ok(s) = std::fs::read_to_string(&path) {
+        let s = s.trim();
+        if !s.is_empty() {
+            return s.to_string();
+        }
+    }
+    // Autopopulate from the environment: git identity, then OS username.
+    let resolved = git_user_name()
+        .or_else(|| std::env::var("USER").ok())
+        .or_else(|| std::env::var("USERNAME").ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    let _ = std::fs::create_dir_all(".ar-edit");
+    let _ = std::fs::write(&path, format!("{resolved}\n"));
+    resolved
+}
+
+/// `git config user.name`, if git is installed and configured.
+fn git_user_name() -> Option<String> {
+    let out = std::process::Command::new("git")
+        .args(["config", "user.name"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
 /// Load the canonical CRDT-backed edit store (ADR-011), transparently migrating
 /// a legacy event-sourced document on first open (REQ-088).
 fn load_store(edit: &str) -> anyhow::Result<ar_edit_collab::store::PersistentEdit> {
@@ -2180,7 +2224,7 @@ fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
     // converge between peers; legacy markers are migrated on this first write.
     let store = load_annotations(&args.source_id)?;
     let id = format!("mark-{:03}", next_marker_num(&store.markers()));
-    let marker = store.add_marker_fields(&id, range, &args.label, args.note.clone());
+    let marker = store.add_marker_fields(&id, range, &args.label, args.note.clone(), &local_author());
     save_annotations(&store)?;
 
     if cli.json {
@@ -2192,11 +2236,12 @@ fn cmd_mark(cli: &Cli, args: &cli::MarkArgs) -> anyhow::Result<()> {
             .map(|n| format!("  note: {n}"))
             .unwrap_or_default();
         println!(
-            "Created {} on {} [{}] label={}{}",
+            "Created {} on {} [{}] label={} by {}{}",
             marker.id,
             args.source_id,
             range_summary(&marker.range),
             marker.label,
+            marker.author,
             note_part,
         );
     }
@@ -2267,9 +2312,10 @@ fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyho
                 .or(m.scene_preview.as_deref())
                 .unwrap_or("");
 
+            let author = if m.author.is_empty() { String::new() } else { format!(" by {}", m.author) };
             println!(
-                "  {}  {}  {:<8} [{}] {}{}",
-                m.id, m.source_id, m.label, time_range, preview, note_part,
+                "  {}  {}  {:<8}{}  [{}] {}{}",
+                m.id, m.source_id, m.label, author, time_range, preview, note_part,
             );
         }
     }
@@ -2330,7 +2376,7 @@ fn cmd_poi_add(cli: &Cli, args: &cli::PoiAddArgs) -> anyhow::Result<()> {
     // Route through the per-source annotation CRDT store (ADR-015).
     let store = load_annotations(&args.source_id)?;
     let id = format!("poi-{:03}", next_poi_num(&store.pois()));
-    let poi = store.add_poi_fields(&id, point, category, args.note.clone());
+    let poi = store.add_poi_fields(&id, point, category, args.note.clone(), &local_author());
     save_annotations(&store)?;
 
     if cli.json {
@@ -2342,11 +2388,12 @@ fn cmd_poi_add(cli: &Cli, args: &cli::PoiAddArgs) -> anyhow::Result<()> {
             .map(|n| format!("  note: \"{n}\""))
             .unwrap_or_default();
         println!(
-            "Created {} on {} at {} category={}{}",
+            "Created {} on {} at {} category={} by {}{}",
             poi.id,
             args.source_id,
             fmt_poi_point(&poi.point),
             poi.category,
+            poi.author,
             note_part,
         );
     }
@@ -2410,15 +2457,19 @@ fn cmd_poi_list(cli: &Cli, args: &cli::PoiListArgs) -> anyhow::Result<()> {
             None => println!("No POIs."),
         }
     } else {
-        println!("  {:<10} {:<12} {:<14} {:<12} {}", "ID", "Source", "Point", "Category", "Note");
+        println!(
+            "  {:<10} {:<12} {:<14} {:<12} {:<12} {}",
+            "ID", "Source", "Point", "Category", "Author", "Note"
+        );
         for (sid, poi) in &rows {
             let note = poi.note.as_deref().unwrap_or("");
             println!(
-                "  {:<10} {:<12} {:<14} {:<12} {}",
+                "  {:<10} {:<12} {:<14} {:<12} {:<12} {}",
                 poi.id,
                 sid,
                 fmt_poi_point(&poi.point),
                 poi.category,
+                poi.author,
                 note,
             );
         }

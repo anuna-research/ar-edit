@@ -39,6 +39,7 @@ pub fn add_poi(
         point,
         category,
         note: note.map(|s| s.to_string()),
+        author: String::new(), // attribution is stamped by the CLI via the CRDT store
         created: Utc::now(),
     };
 
@@ -478,6 +479,7 @@ mod tests {
                     point: PoiPoint::Word(10),
                     category: PoiCategory::Highlight,
                     note: None,
+                    author: String::new(),
                     created: Utc::now(),
                 },
                 Poi {
@@ -485,6 +487,7 @@ mod tests {
                     point: PoiPoint::Word(20),
                     category: PoiCategory::Issue,
                     note: None,
+                    author: String::new(),
                     created: Utc::now(),
                 },
             ],

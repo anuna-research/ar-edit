@@ -104,20 +104,22 @@ impl AnnotationStore {
         self.doc.put_marker(&marker.id, &serde_json::to_string(marker).expect("marker json"));
     }
 
-    /// Build and add a marker (timestamped now); returns it. Keeps `chrono` out
-    /// of one-shot CLI callers.
+    /// Build and add a marker (timestamped now, attributed to `author`); returns
+    /// it. Keeps `chrono` out of one-shot CLI callers.
     pub fn add_marker_fields(
         &self,
         id: &str,
         range: ar_edit_core::models::ShotRange,
         label: &str,
         note: Option<String>,
+        author: &str,
     ) -> Marker {
         let marker = Marker {
             id: id.to_string(),
             range,
             label: label.to_string(),
             note,
+            author: author.to_string(),
             created: chrono::Utc::now(),
         };
         self.add_marker(&marker);
@@ -151,8 +153,16 @@ impl AnnotationStore {
         point: ar_edit_core::models::PoiPoint,
         category: ar_edit_core::models::PoiCategory,
         note: Option<String>,
+        author: &str,
     ) -> Poi {
-        let poi = Poi { id: id.to_string(), point, category, note, created: chrono::Utc::now() };
+        let poi = Poi {
+            id: id.to_string(),
+            point,
+            category,
+            note,
+            author: author.to_string(),
+            created: chrono::Utc::now(),
+        };
         self.add_poi(&poi);
         poi
     }
@@ -188,6 +198,7 @@ mod tests {
             range: ShotRange::Words { from: 0, to: 10 },
             label: label.into(),
             note: None,
+            author: "tester".into(),
             created: ts(),
         }
     }
@@ -198,6 +209,7 @@ mod tests {
             point: PoiPoint::Word(5),
             category: cat,
             note: None,
+            author: "tester".into(),
             created: ts(),
         }
     }
