@@ -844,11 +844,19 @@ fn extract_segment_encoded(
 
 /// Write a concat demuxer file listing segment paths.
 ///
-/// Each line follows the format `file '<absolute-path>'`.
+/// Each line follows the format `file '<absolute-path>'`. Paths are made
+/// absolute because ffmpeg's concat demuxer resolves relative `file` entries
+/// against the directory containing the list file, not the process working
+/// directory. When the render output is given as a relative path the work dir
+/// (and thus the segment paths) are relative, so writing them verbatim would
+/// make ffmpeg look for `<workdir>/<workdir>/segment.mp4` and fail.
 fn write_concat_list(segment_paths: &[PathBuf], output: &Path) -> Result<(), RenderError> {
     let mut f = std::fs::File::create(output)?;
     for path in segment_paths {
-        writeln!(f, "file '{}'", path.display())?;
+        // The segments exist by now, so canonicalize resolves cleanly; fall
+        // back to the original path only if it somehow doesn't.
+        let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+        writeln!(f, "file '{}'", abs.display())?;
     }
     Ok(())
 }
@@ -1268,6 +1276,49 @@ mod tests {
 
         let content = std::fs::read_to_string(&list_path).unwrap();
         assert_eq!(content.trim(), "file '/my videos/segment 001.mp4'");
+    }
+
+    // Serializes the few tests that mutate the process-wide current directory.
+    static CWD_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Regression: rendering to a *relative* output path produced a relative
+    /// work dir, so the concat filelist held relative segment paths. ffmpeg's
+    /// concat demuxer resolves those against the list file's own directory,
+    /// looking for `<workdir>/<workdir>/segment.mp4` and failing with
+    /// "Error opening input files". write_concat_list must emit absolute paths
+    /// for segments that exist, regardless of the cwd-relative input.
+    #[test]
+    fn write_concat_list_makes_existing_relative_segments_absolute() {
+        let _guard = CWD_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let work_dir = tmp.path().join(".ar-edit-render-out");
+        std::fs::create_dir_all(&work_dir).unwrap();
+        std::fs::write(work_dir.join("segment_0000.mp4"), b"x").unwrap();
+        let list_path = work_dir.join("filelist.txt");
+
+        // Reproduce the buggy scenario: cwd is the project dir and the segment
+        // is referenced by a relative path (as it would be for `--output out.mp4`).
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let segments = vec![PathBuf::from(".ar-edit-render-out/segment_0000.mp4")];
+        let result = write_concat_list(&segments, &list_path);
+        // Restore cwd before any assertion can unwind the test.
+        std::env::set_current_dir(&original_cwd).unwrap();
+        result.unwrap();
+
+        let content = std::fs::read_to_string(&list_path).unwrap();
+        let line = content.trim();
+        let path_str = line
+            .strip_prefix("file '")
+            .and_then(|s| s.strip_suffix('\''))
+            .expect("filelist line should be wrapped in file '...'");
+        let written = std::path::Path::new(path_str);
+        assert!(
+            written.is_absolute(),
+            "concat entry must be absolute, got: {path_str}"
+        );
+        let expected = std::fs::canonicalize(work_dir.join("segment_0000.mp4")).unwrap();
+        assert_eq!(written, expected);
     }
 
     // -- extract_segment (error path) -----------------------------------------
