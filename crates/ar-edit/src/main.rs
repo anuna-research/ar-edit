@@ -511,6 +511,11 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         Commands::Markers { source_id, label } => {
             cmd_markers(cli, source_id.as_deref(), label.as_deref())
         }
+        Commands::Poi { command } => match command {
+            cli::PoiCommand::Add(args) => cmd_poi_add(cli, args),
+            cli::PoiCommand::List(args) => cmd_poi_list(cli, args),
+            cli::PoiCommand::Remove(args) => cmd_poi_remove(cli, args),
+        },
         Commands::Schema { command } => match command {
             SchemaCommand::Edit => {
                 println!("{}", ar_edit_core::schema::edit_document_schema());
@@ -2097,11 +2102,14 @@ fn load_annotations(source_id: &str) -> anyhow::Result<ar_edit_collab::annotatio
         let bytes = std::fs::read(&path).system_err()?;
         return AnnotationStore::from_bytes(&bytes, local_actor()).system_err();
     }
-    // Legacy migration: only markers were ever written to disk (no POI CLI).
+    // Legacy migration: read any plain-JSON markers + POIs for this source.
     let markers = ar_edit_core::marker::list_markers(&PathBuf::from("."), source_id)
         .map(|d| d.markers)
         .unwrap_or_default();
-    Ok(AnnotationStore::migrate(source_id, &markers, &[], local_actor()))
+    let pois = ar_edit_core::poi::list_pois(&PathBuf::from("."), source_id)
+        .map(|d| d.pois)
+        .unwrap_or_default();
+    Ok(AnnotationStore::migrate(source_id, &markers, &pois, local_actor()))
 }
 
 /// Persist a source's annotation store atomically (temp + rename).
@@ -2262,6 +2270,212 @@ fn cmd_markers(cli: &Cli, source_id: Option<&str>, label: Option<&str>) -> anyho
             println!(
                 "  {}  {}  {:<8} [{}] {}{}",
                 m.id, m.source_id, m.label, time_range, preview, note_part,
+            );
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Command handlers: POI (SPEC-002) — storage via the annotation CRDT (ADR-015)
+// ---------------------------------------------------------------------------
+
+fn fmt_poi_point(point: &ar_edit_core::models::PoiPoint) -> String {
+    use ar_edit_core::models::PoiPoint;
+    match point {
+        PoiPoint::Word(w) => format!("word {w}"),
+        PoiPoint::Scene(s) => format!("scene {s}"),
+        PoiPoint::TimeMs(ms) => format!("{ms}ms"),
+    }
+}
+
+/// Next sequential `poi-NNN` id given the existing POIs.
+fn next_poi_num(pois: &[ar_edit_core::models::Poi]) -> u32 {
+    pois.iter()
+        .filter_map(|p| p.id.strip_prefix("poi-"))
+        .filter_map(|n| n.parse::<u32>().ok())
+        .max()
+        .map(|n| n + 1)
+        .unwrap_or(1)
+}
+
+fn cmd_poi_add(cli: &Cli, args: &cli::PoiAddArgs) -> anyhow::Result<()> {
+    use ar_edit_core::models::{PoiCategory, PoiPoint};
+
+    let point = if let Some(w) = args.at_word {
+        PoiPoint::Word(w)
+    } else if let Some(s) = args.at_scene {
+        PoiPoint::Scene(s)
+    } else if let Some(ms) = args.at_ms {
+        PoiPoint::TimeMs(ms)
+    } else {
+        eprintln!("error: one of --at-word, --at-scene, or --at-ms is required");
+        process::exit(exit_code::USER_ERROR);
+    };
+
+    let category: PoiCategory = match args.category.parse() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e}");
+            process::exit(exit_code::VALIDATION_ERROR);
+        }
+    };
+
+    let manifest = ar_edit_core::project::read_manifest(&PathBuf::from("."))?;
+    if !manifest.sources.iter().any(|s| s.id == args.source_id) {
+        eprintln!("error: source '{}' not found in manifest", args.source_id);
+        process::exit(exit_code::USER_ERROR);
+    }
+
+    // Route through the per-source annotation CRDT store (ADR-015).
+    let store = load_annotations(&args.source_id)?;
+    let id = format!("poi-{:03}", next_poi_num(&store.pois()));
+    let poi = store.add_poi_fields(&id, point, category, args.note.clone());
+    save_annotations(&store)?;
+
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&poi)?);
+    } else {
+        let note_part = poi
+            .note
+            .as_deref()
+            .map(|n| format!("  note: \"{n}\""))
+            .unwrap_or_default();
+        println!(
+            "Created {} on {} at {} category={}{}",
+            poi.id,
+            args.source_id,
+            fmt_poi_point(&poi.point),
+            poi.category,
+            note_part,
+        );
+    }
+    Ok(())
+}
+
+fn cmd_poi_list(cli: &Cli, args: &cli::PoiListArgs) -> anyhow::Result<()> {
+    use ar_edit_core::models::{Poi, PoiCategory, SourcePois};
+
+    let sources: Vec<(String, Vec<Poi>)> = match &args.source_id {
+        Some(sid) => vec![(sid.clone(), load_annotations(sid)?.pois())],
+        None => {
+            let mut v = Vec::new();
+            for sid in annotated_source_ids() {
+                let pois = load_annotations(&sid)?.pois();
+                v.push((sid, pois));
+            }
+            v
+        }
+    };
+
+    let cat_filter: Option<PoiCategory> = if let Some(c) = &args.category {
+        match c.parse() {
+            Ok(cat) => Some(cat),
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(exit_code::VALIDATION_ERROR);
+            }
+        }
+    } else {
+        None
+    };
+
+    if cli.json {
+        let mut docs: Vec<SourcePois> = Vec::new();
+        for (sid, pois) in &sources {
+            let filtered: Vec<_> = pois
+                .iter()
+                .filter(|p| cat_filter.map_or(true, |c| p.category == c))
+                .cloned()
+                .collect();
+            if !filtered.is_empty() {
+                docs.push(SourcePois { source_id: sid.clone(), pois: filtered });
+            }
+        }
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "pois": docs }))?);
+        return Ok(());
+    }
+
+    let mut rows: Vec<(&str, &Poi)> = Vec::new();
+    for (sid, pois) in &sources {
+        for p in pois {
+            if cat_filter.map_or(true, |c| p.category == c) {
+                rows.push((sid.as_str(), p));
+            }
+        }
+    }
+    if rows.is_empty() {
+        match &args.source_id {
+            Some(sid) => println!("No POIs for {sid}."),
+            None => println!("No POIs."),
+        }
+    } else {
+        println!("  {:<10} {:<12} {:<14} {:<12} {}", "ID", "Source", "Point", "Category", "Note");
+        for (sid, poi) in &rows {
+            let note = poi.note.as_deref().unwrap_or("");
+            println!(
+                "  {:<10} {:<12} {:<14} {:<12} {}",
+                poi.id,
+                sid,
+                fmt_poi_point(&poi.point),
+                poi.category,
+                note,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn cmd_poi_remove(cli: &Cli, args: &cli::PoiRemoveArgs) -> anyhow::Result<()> {
+    use ar_edit_core::models::PoiCategory;
+
+    if args.id.is_none() && args.category.is_none() {
+        eprintln!("error: one of --id or --category is required");
+        process::exit(exit_code::USER_ERROR);
+    }
+
+    let store = load_annotations(&args.source_id)?;
+
+    if let Some(poi_id) = &args.id {
+        if !store.pois().iter().any(|p| &p.id == poi_id) {
+            eprintln!("error: POI not found: {poi_id}");
+            process::exit(exit_code::USER_ERROR);
+        }
+        store.remove_poi(poi_id);
+        save_annotations(&store)?;
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "removed": poi_id }))?);
+        } else {
+            println!("Removed {poi_id} from {}", args.source_id);
+        }
+    } else if let Some(cat_str) = &args.category {
+        let category: PoiCategory = match cat_str.parse() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(exit_code::VALIDATION_ERROR);
+            }
+        };
+        let removed: Vec<String> = store
+            .pois()
+            .iter()
+            .filter(|p| p.category == category)
+            .map(|p| p.id.clone())
+            .collect();
+        for id in &removed {
+            store.remove_poi(id);
+        }
+        save_annotations(&store)?;
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "removed": removed }))?);
+        } else if removed.is_empty() {
+            println!("No POIs with category '{cat_str}' found for {}", args.source_id);
+        } else {
+            println!(
+                "Removed {} POI(s) from {}: {}",
+                removed.len(),
+                args.source_id,
+                removed.join(", ")
             );
         }
     }

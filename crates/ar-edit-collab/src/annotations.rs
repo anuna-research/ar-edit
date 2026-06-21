@@ -143,6 +143,20 @@ impl AnnotationStore {
         self.doc.put_poi(&poi.id, &serde_json::to_string(poi).expect("poi json"));
     }
 
+    /// Build and add a POI (timestamped now); returns it. Keeps `chrono` out of
+    /// one-shot CLI callers.
+    pub fn add_poi_fields(
+        &self,
+        id: &str,
+        point: ar_edit_core::models::PoiPoint,
+        category: ar_edit_core::models::PoiCategory,
+        note: Option<String>,
+    ) -> Poi {
+        let poi = Poi { id: id.to_string(), point, category, note, created: chrono::Utc::now() };
+        self.add_poi(&poi);
+        poi
+    }
+
     /// Remove a POI by id (REQ-082 observed-remove).
     pub fn remove_poi(&self, id: &str) {
         self.doc.remove_poi(id);

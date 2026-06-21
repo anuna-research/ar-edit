@@ -155,6 +155,12 @@ pub enum Commands {
         label: Option<String>,
     },
 
+    /// Points of interest operations
+    Poi {
+        #[command(subcommand)]
+        command: PoiCommand,
+    },
+
     /// Output JSON Schema for data formats
     Schema {
         #[command(subcommand)]
@@ -557,6 +563,70 @@ pub struct MarkArgs {
 
     #[command(flatten)]
     pub range: RangeArgs,
+}
+
+// ---------------------------------------------------------------------------
+// POI (Points of Interest) — SPEC-002; storage via the annotation CRDT (ADR-015)
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+pub enum PoiCommand {
+    /// Add a point of interest to a source
+    Add(PoiAddArgs),
+    /// List points of interest
+    List(PoiListArgs),
+    /// Remove points of interest
+    Remove(PoiRemoveArgs),
+}
+
+#[derive(Args)]
+pub struct PoiAddArgs {
+    /// Source ID
+    pub source_id: String,
+
+    /// Word index
+    #[arg(long, conflicts_with_all = ["at_scene", "at_ms"])]
+    pub at_word: Option<u32>,
+
+    /// Scene index
+    #[arg(long, conflicts_with_all = ["at_word", "at_ms"])]
+    pub at_scene: Option<u32>,
+
+    /// Timestamp in milliseconds
+    #[arg(long, conflicts_with_all = ["at_word", "at_scene"])]
+    pub at_ms: Option<u64>,
+
+    /// POI category (highlight, issue, transition, cue, note)
+    #[arg(long)]
+    pub category: String,
+
+    /// Optional note
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PoiListArgs {
+    /// Source ID (omit to list across all sources)
+    pub source_id: Option<String>,
+
+    /// Filter by category
+    #[arg(long)]
+    pub category: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PoiRemoveArgs {
+    /// Source ID
+    pub source_id: String,
+
+    /// POI ID to remove
+    #[arg(long, conflicts_with = "category")]
+    pub id: Option<String>,
+
+    /// Remove all POIs with this category
+    #[arg(long, conflicts_with = "id")]
+    pub category: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

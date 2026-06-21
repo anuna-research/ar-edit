@@ -43,6 +43,65 @@ fn annot_labels(project: &Path, source_id: &str) -> Vec<String> {
         .collect()
 }
 
+fn annot_poi_ids(project: &Path, source_id: &str) -> Vec<String> {
+    let bytes = fs::read(project.join(format!("annotations/{source_id}.annot.json"))).unwrap();
+    AnnotationStore::from_bytes(&bytes, ActorId(1))
+        .unwrap()
+        .pois()
+        .into_iter()
+        .map(|p| p.id)
+        .collect()
+}
+
+#[test]
+fn poi_add_list_remove_through_crdt_store() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("manifest.json"), manifest_json()).unwrap();
+
+    let ar = || {
+        let mut c = Command::cargo_bin("ar-edit").unwrap();
+        c.current_dir(tmp.path());
+        c
+    };
+
+    // Add a POI — lands in the CRDT annotation store, shared with markers.
+    ar().args(["poi", "add", "src-001", "--at-ms", "5000", "--category", "highlight"])
+        .assert()
+        .success();
+    assert_eq!(annot_poi_ids(tmp.path(), "src-001"), vec!["poi-001"]);
+
+    // `poi list` reads it back.
+    let out = ar().args(["--json", "poi", "list", "src-001"]).output().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["pois"][0]["pois"].as_array().unwrap().len(), 1);
+
+    // Remove it.
+    ar().args(["poi", "remove", "src-001", "--id", "poi-001"]).assert().success();
+    assert!(annot_poi_ids(tmp.path(), "src-001").is_empty());
+}
+
+#[test]
+fn markers_and_pois_share_one_annotation_store() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("manifest.json"), manifest_json()).unwrap();
+    let ar = || {
+        let mut c = Command::cargo_bin("ar-edit").unwrap();
+        c.current_dir(tmp.path());
+        c
+    };
+
+    ar().args(["mark", "src-001", "--label", "select", "--from-ms", "1000", "--to-ms", "2000"])
+        .assert()
+        .success();
+    ar().args(["poi", "add", "src-001", "--at-ms", "5000", "--category", "issue"])
+        .assert()
+        .success();
+
+    // One CRDT store holds both the marker and the POI for the source.
+    assert_eq!(annot_labels(tmp.path(), "src-001"), vec!["select"]);
+    assert_eq!(annot_poi_ids(tmp.path(), "src-001"), vec!["poi-001"]);
+}
+
 #[test]
 fn mark_writes_crdt_store_and_markers_lists_it() {
     let tmp = TempDir::new().unwrap();
