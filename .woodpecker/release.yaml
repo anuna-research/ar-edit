@@ -1,0 +1,121 @@
+when:
+  - event: tag
+    branch: main
+
+# Build steps declare `depends_on: []` so Woodpecker runs them in parallel
+# instead of sequentially. macOS is cross-compiled with a prebuilt image that
+# already bundles osxcross + the macOS SDK, so the job just runs `cargo build`
+# (no ~30-min toolchain build). Total wall-clock stays well under Codeberg's
+# 60-min pipeline timeout (~10-15 min).
+
+steps:
+  - name: build-linux
+    image: rust:1-bookworm
+    depends_on: []
+    # Container-local target dir: parallel steps share the workspace volume, so
+    # a per-step CARGO_TARGET_DIR avoids cargo's lock on a shared target/.
+    environment:
+      CARGO_TARGET_DIR: /tmp/cargo-target
+    commands:
+      - cargo build --release --target x86_64-unknown-linux-gnu --bin ar-edit
+      - mkdir -p dist
+      - cp /tmp/cargo-target/x86_64-unknown-linux-gnu/release/ar-edit dist/ar-edit
+      - cd dist && tar czf ar-edit-linux-x86_64.tar.gz ar-edit && rm ar-edit && cd ..
+
+  - name: build-macos
+    # Prebuilt osxcross + macOS SDK + both darwin targets. Pin this tag to track
+    # the project's Rust version (keep roughly in sync with rust:1-bookworm).
+    image: joseluisq/rust-linux-darwin-builder:latest
+    depends_on: []
+    environment:
+      CARGO_TARGET_DIR: /tmp/cargo-target
+    commands:
+      - rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      # osxcross ships stable clang wrapper aliases: o64 = x86_64, oa64 = arm64
+      - export CC_x86_64_apple_darwin=o64-clang CXX_x86_64_apple_darwin=o64-clang++ CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER=o64-clang
+      - export CC_aarch64_apple_darwin=oa64-clang CXX_aarch64_apple_darwin=oa64-clang++ CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=oa64-clang
+      - mkdir -p dist
+      - cargo build --release --target aarch64-apple-darwin --bin ar-edit
+      - cp /tmp/cargo-target/aarch64-apple-darwin/release/ar-edit dist/ar-edit
+      - cd dist && tar czf ar-edit-macos-arm64.tar.gz ar-edit && rm ar-edit && cd ..
+      - cargo build --release --target x86_64-apple-darwin --bin ar-edit
+      - cp /tmp/cargo-target/x86_64-apple-darwin/release/ar-edit dist/ar-edit
+      - cd dist && tar czf ar-edit-macos-x86_64.tar.gz ar-edit && rm ar-edit && cd ..
+
+  - name: build-windows
+    image: rust:1-bookworm
+    depends_on: []
+    environment:
+      CARGO_TARGET_DIR: /tmp/cargo-target
+    commands:
+      - apt-get update && apt-get install -y gcc-mingw-w64-x86-64 zip
+      - rustup target add x86_64-pc-windows-gnu
+      - cargo build --release --target x86_64-pc-windows-gnu --bin ar-edit
+      - mkdir -p dist
+      - cp /tmp/cargo-target/x86_64-pc-windows-gnu/release/ar-edit.exe dist/ar-edit.exe
+      - cd dist && zip ar-edit-windows-x86_64.zip ar-edit.exe && rm ar-edit.exe && cd ..
+
+  - name: create-metadata
+    image: alpine:3
+    depends_on: [build-linux, build-macos, build-windows]
+    commands:
+      - apk add --no-cache jq
+      - |
+        cat > dist/version.json << EOF
+        {
+          "version": "${CI_COMMIT_TAG#v}",
+          "download_url": "https://files.anuna.io/ar-edit/${CI_COMMIT_TAG}"
+        }
+        EOF
+      - cp install.sh dist/install.sh
+      - ls -la dist/
+
+  - name: upload-to-cloudflare-r2
+    image: amazon/aws-cli:2.15.0
+    depends_on: [create-metadata]
+    environment:
+      AWS_ACCESS_KEY_ID:
+        from_secret: cf_r2_access_key_id
+      AWS_SECRET_ACCESS_KEY:
+        from_secret: cf_r2_secret_access_key
+      CF_ACCOUNT_ID:
+        from_secret: cf_account_id
+    commands:
+      - export AWS_DEFAULT_REGION=auto
+      - export R2_ENDPOINT="https://$${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
+      - export BUCKET="anuna-files"
+      - export PROJECT="ar-edit"
+
+      # Upload versioned release
+      - echo "Uploading to $${PROJECT}/$${CI_COMMIT_TAG}/..."
+      - |
+        for file in dist/ar-edit-*.tar.gz dist/ar-edit-*.zip dist/version.json dist/install.sh; do
+          if [ -f "$$file" ]; then
+            filename=$$(basename "$$file")
+            aws s3 cp "$$file" "s3://$${BUCKET}/$${PROJECT}/$${CI_COMMIT_TAG}/$$filename" \
+              --endpoint-url "$$R2_ENDPOINT"
+            echo "Uploaded: $$filename"
+          fi
+        done
+
+      # Upload to latest/
+      - echo "Uploading to $${PROJECT}/latest/..."
+      - |
+        for file in dist/ar-edit-*.tar.gz dist/ar-edit-*.zip dist/version.json dist/install.sh; do
+          if [ -f "$$file" ]; then
+            filename=$$(basename "$$file")
+            aws s3 cp "$$file" "s3://$${BUCKET}/$${PROJECT}/latest/$$filename" \
+              --endpoint-url "$$R2_ENDPOINT"
+            echo "Uploaded to latest: $$filename"
+          fi
+        done
+
+      # List uploaded files
+      - echo "Files in $${PROJECT}/$${CI_COMMIT_TAG}:"
+      - aws s3 ls "s3://$${BUCKET}/$${PROJECT}/$${CI_COMMIT_TAG}/" --endpoint-url "$$R2_ENDPOINT"
+      - echo "Files in $${PROJECT}/latest:"
+      - aws s3 ls "s3://$${BUCKET}/$${PROJECT}/latest/" --endpoint-url "$$R2_ENDPOINT"
+      - echo ""
+      - echo "Release available at:"
+      - echo "  https://files.anuna.io/$${PROJECT}/$${CI_COMMIT_TAG}/"
+      - echo "  https://files.anuna.io/$${PROJECT}/latest/"
