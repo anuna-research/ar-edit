@@ -41,6 +41,10 @@ pub struct DoctorResult {
     pub ffprobe: DepStatus,
     pub whisper: DepStatus,
     pub vlc: DepStatus,
+    /// Whether ffmpeg exposes the `drawtext` filter (requires a libfreetype-enabled
+    /// build). Overlays (`--burn-overlay`, `play --overlay`) depend on it. Some
+    /// packaged ffmpeg builds — notably Homebrew core — omit libfreetype.
+    pub overlay_drawtext: DepStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -154,6 +158,72 @@ pub fn doctor() -> DoctorResult {
         ffprobe: check_dep("ffprobe"),
         whisper: check_dep("whisper-cli"),
         vlc,
+        overlay_drawtext: check_drawtext(),
+    }
+}
+
+/// Detect whether ffmpeg exposes the `drawtext` video filter.
+///
+/// `drawtext` is only compiled in when ffmpeg is built against libfreetype.
+/// Several common distributions ship without it (e.g. Homebrew's core
+/// `ffmpeg` formula), which makes overlay rendering (REQ-023) fail with a
+/// cryptic `No such filter: 'drawtext'`. Reported as a `DepStatus` so the
+/// `doctor` command can surface a remediation hint.
+fn check_drawtext() -> DepStatus {
+    let found = ffmpeg_has_drawtext();
+    DepStatus {
+        found,
+        path: None,
+        version: None,
+        fallback: None,
+        install_hint: if found { None } else { drawtext_install_hint() },
+    }
+}
+
+/// Return `true` if the system ffmpeg lists the `drawtext` filter.
+///
+/// Runs `ffmpeg -hide_banner -filters` and scans the output. Returns `false`
+/// when ffmpeg is missing or the probe fails, so callers can treat "unknown"
+/// the same as "unavailable" for the purposes of gating overlays.
+pub fn ffmpeg_has_drawtext() -> bool {
+    let output = Command::new("ffmpeg")
+        .args(["-hide_banner", "-filters"])
+        .output();
+    match output {
+        Ok(out) => ffmpeg_filters_lists(&String::from_utf8_lossy(&out.stdout), "drawtext"),
+        Err(_) => false,
+    }
+}
+
+/// Pure helper: does `ffmpeg -filters` output list the given filter name?
+///
+/// Each `-filters` line looks like ` T.. drawtext  V->V  Draw text ...`; we
+/// match the filter name as a whitespace-delimited token to avoid matching it
+/// inside a description.
+fn ffmpeg_filters_lists(filters_output: &str, filter: &str) -> bool {
+    filters_output.lines().any(|line| {
+        // The filter name is the second whitespace token (after the flags column).
+        line.split_whitespace().nth(1) == Some(filter)
+    })
+}
+
+/// Platform-specific hint for obtaining a libfreetype-enabled ffmpeg.
+fn drawtext_install_hint() -> Option<String> {
+    if cfg!(target_os = "macos") {
+        // Homebrew's core `ffmpeg` formula omits libfreetype; the homebrew-ffmpeg
+        // tap ships an ffmpeg built with it (and many more libraries).
+        Some(
+            "Homebrew's core ffmpeg lacks libfreetype; install a build with it: \
+             brew install homebrew-ffmpeg/ffmpeg/ffmpeg"
+                .to_string(),
+        )
+    } else if cfg!(target_os = "linux") {
+        Some(
+            "install an ffmpeg built with --enable-libfreetype (most distro packages include it)"
+                .to_string(),
+        )
+    } else {
+        None
     }
 }
 
@@ -564,6 +634,7 @@ mod tests {
         assert!(json.get("ffprobe").is_some());
         assert!(json.get("whisper").is_some());
         assert!(json.get("vlc").is_some());
+        assert!(json.get("overlay_drawtext").is_some());
     }
 
     #[test]
@@ -597,6 +668,13 @@ mod tests {
                 fallback: Some("ffplay".into()),
                 install_hint: Some("brew install --cask vlc".into()),
             },
+            overlay_drawtext: DepStatus {
+                found: false,
+                path: None,
+                version: None,
+                fallback: None,
+                install_hint: Some("brew install homebrew-ffmpeg/ffmpeg/ffmpeg".into()),
+            },
         };
 
         let json = serde_json::to_value(&result).unwrap();
@@ -605,6 +683,7 @@ mod tests {
         assert_eq!(json["vlc"]["found"], false);
         assert_eq!(json["vlc"]["fallback"], "ffplay");
         assert_eq!(json["vlc"]["install_hint"], "brew install --cask vlc");
+        assert_eq!(json["overlay_drawtext"]["found"], false);
         // Optional fields absent when None
         assert!(json["vlc"].get("path").is_none());
         assert!(json["vlc"].get("version").is_none());
@@ -612,5 +691,49 @@ mod tests {
 
         let back: DoctorResult = serde_json::from_value(json).unwrap();
         assert_eq!(back, result);
+    }
+
+    // -- ffmpeg_filters_lists -------------------------------------------------
+
+    #[test]
+    fn filters_lists_detects_drawtext_present() {
+        // Representative `ffmpeg -filters` output (freetype-enabled build).
+        let sample = "\
+Filters:
+  T.. crop             V->V       Crop the input video.
+ TS.. drawtext         V->V       Draw text on top of video frames using libfreetype.
+  ... overlay          VV->V      Overlay a video source on top of the input.
+";
+        assert!(ffmpeg_filters_lists(sample, "drawtext"));
+        assert!(ffmpeg_filters_lists(sample, "overlay"));
+        assert!(ffmpeg_filters_lists(sample, "crop"));
+    }
+
+    #[test]
+    fn filters_lists_detects_drawtext_absent() {
+        // A build without libfreetype omits the drawtext line entirely.
+        let sample = "\
+Filters:
+  T.. crop             V->V       Crop the input video.
+  ... overlay          VV->V      Overlay a video source on top of the input.
+";
+        assert!(!ffmpeg_filters_lists(sample, "drawtext"));
+        // Still finds the filters that are present.
+        assert!(ffmpeg_filters_lists(sample, "overlay"));
+    }
+
+    #[test]
+    fn filters_lists_ignores_name_in_description() {
+        // "drawtext" appearing only inside a description must not count as present.
+        let sample = "  ... subtitles        V->V       Like drawtext but for subtitles.\n";
+        assert!(!ffmpeg_filters_lists(sample, "drawtext"));
+    }
+
+    #[test]
+    fn drawtext_install_hint_is_present_on_supported_platforms() {
+        // macOS and Linux both provide a hint; the exact text is platform-specific.
+        if cfg!(any(target_os = "macos", target_os = "linux")) {
+            assert!(drawtext_install_hint().is_some());
+        }
     }
 }

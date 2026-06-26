@@ -368,6 +368,18 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 check("ffprobe", &result.ffprobe);
                 check("whisper-cli", &result.whisper);
                 check("vlc", &result.vlc);
+                // Overlay capability: drawtext requires a libfreetype-enabled ffmpeg.
+                if result.overlay_drawtext.found {
+                    println!("  overlay (drawtext) available");
+                } else {
+                    let hint = result
+                        .overlay_drawtext
+                        .install_hint
+                        .as_deref()
+                        .map(|h| format!("  {h}"))
+                        .unwrap_or_default();
+                    println!("  overlay (drawtext) MISSING — --burn-overlay/--overlay unavailable.{hint}");
+                }
             }
             Ok(())
         }

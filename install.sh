@@ -85,6 +85,47 @@ install_binary() {
   fi
 }
 
+check_runtime_deps() {
+  # ar-edit shells out to ffmpeg/ffprobe/whisper at runtime (ADR-003). We do not
+  # install them, but a quick check here saves a confusing first-run failure.
+  echo ""
+  info "Checking runtime dependencies..."
+
+  local ffmpeg_hint whisper_hint
+  if [ "$OS" = "macos" ]; then
+    ffmpeg_hint="brew install ffmpeg"
+    whisper_hint="brew install whisper-cpp"
+  else
+    ffmpeg_hint="sudo apt install ffmpeg"
+    whisper_hint="see https://github.com/ggerganov/whisper.cpp"
+  fi
+
+  if command -v ffmpeg >/dev/null 2>&1; then
+    info "ffmpeg found"
+    # Overlays (--burn-overlay, play --overlay) use ffmpeg's drawtext filter,
+    # which only exists in libfreetype-enabled builds. Homebrew's core ffmpeg
+    # omits it, so flag the gap up front rather than failing mid-render.
+    if ffmpeg -hide_banner -filters 2>/dev/null | grep -qE '(^|[[:space:]])drawtext([[:space:]]|$)'; then
+      info "ffmpeg has the drawtext filter (overlays available)"
+    else
+      warn "ffmpeg lacks the 'drawtext' filter — overlays (--burn-overlay/--overlay) will be unavailable."
+      if [ "$OS" = "macos" ]; then
+        echo "  Homebrew's core ffmpeg omits libfreetype. Install one that includes it:"
+        echo "    brew install homebrew-ffmpeg/ffmpeg/ffmpeg"
+      else
+        echo "  Install an ffmpeg built with --enable-libfreetype (most distro packages include it)."
+      fi
+    fi
+  else
+    warn "ffmpeg not found (required for rendering). Install: $ffmpeg_hint"
+  fi
+
+  command -v whisper-cli >/dev/null 2>&1 \
+    || warn "whisper-cli not found (required for transcription). Install: $whisper_hint"
+
+  echo "  Run 'ar-edit doctor' anytime to re-check dependencies."
+}
+
 main() {
   echo "================================"
   echo "  ar-edit Installer"
@@ -94,6 +135,7 @@ main() {
   detect_platform
   get_version
   install_binary
+  check_runtime_deps
 
   echo ""
   info "Installation complete!"

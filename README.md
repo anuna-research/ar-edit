@@ -138,6 +138,14 @@ my-project/
 
 Run `ar-edit doctor` to check availability.
 
+> **Overlays need a libfreetype-enabled ffmpeg.** The timecode/shot-ID overlay
+> (`ar-edit play --overlay`, `ar-edit render --burn-overlay`) is drawn with
+> ffmpeg's `drawtext` filter, which is only compiled in when ffmpeg is built
+> against libfreetype. Some packaged builds omit it — notably Homebrew's core
+> `ffmpeg`. If `ar-edit doctor` reports `overlay (drawtext) MISSING`, install a
+> build that includes it (macOS: `brew install homebrew-ffmpeg/ffmpeg/ffmpeg`).
+> Everything else works without it.
+
 ## Building
 
 ```bash
