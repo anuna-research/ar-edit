@@ -25,6 +25,12 @@ pub enum RenderError {
     FfmpegFailed(String),
     #[error("edit has no shots")]
     EmptyEdit,
+    #[error(
+        "overlay requested but this ffmpeg lacks the 'drawtext' filter \
+         (needs a libfreetype-enabled build). Run `ar-edit doctor` for an install hint, \
+         or render without --burn-overlay."
+    )]
+    OverlayUnavailable,
     #[error("invalid resolution format: {0} (expected WxH, e.g. 1920x1080)")]
     InvalidResolution(String),
     #[error(transparent)]
@@ -241,6 +247,14 @@ pub fn render_to_file(
         return Err(RenderError::EmptyEdit);
     }
 
+    // Overlays are drawn with ffmpeg's `drawtext` filter, which is only present
+    // in libfreetype-enabled builds. Fail early with an actionable message
+    // rather than letting each segment extraction die with a cryptic
+    // "No such filter: 'drawtext'" (REQ-023).
+    if overlay_mode != OverlayMode::Clean && !project::ffmpeg_has_drawtext() {
+        return Err(RenderError::OverlayUnavailable);
+    }
+
     // Use a work directory next to the output file for intermediate segments
     let work_dir = output.parent().unwrap_or(Path::new(".")).join(format!(
         ".ar-edit-render-{}",
@@ -289,6 +303,14 @@ where
     let resolved = display::resolve_edit(doc, project_dir)?;
     if resolved.is_empty() {
         return Err(RenderError::EmptyEdit);
+    }
+
+    // Overlays are drawn with ffmpeg's `drawtext` filter, which is only present
+    // in libfreetype-enabled builds. Fail early with an actionable message
+    // rather than letting each segment extraction die with a cryptic
+    // "No such filter: 'drawtext'" (REQ-023).
+    if overlay_mode != OverlayMode::Clean && !project::ffmpeg_has_drawtext() {
+        return Err(RenderError::OverlayUnavailable);
     }
 
     let work_dir = output.parent().unwrap_or(Path::new(".")).join(format!(
@@ -1209,6 +1231,15 @@ mod tests {
     fn empty_edit_error_message() {
         let err = RenderError::EmptyEdit;
         assert_eq!(err.to_string(), "edit has no shots");
+    }
+
+    #[test]
+    fn overlay_unavailable_error_message() {
+        let msg = RenderError::OverlayUnavailable.to_string();
+        // Actionable: names the missing filter, the cause, and where to look.
+        assert!(msg.contains("drawtext"));
+        assert!(msg.contains("libfreetype"));
+        assert!(msg.contains("ar-edit doctor"));
     }
 
     #[test]
