@@ -1,3 +1,15 @@
+<!-- anuna-moved-notice -->
+> [!IMPORTANT]
+> **This repository has moved.**
+>
+> New home: https://git.anuna.io/anuna-research/ar-edit
+> Public mirror: https://github.com/anuna-research/ar-edit
+>
+> This Codeberg copy is no longer updated. Please update your remotes:
+> `git remote set-url origin ssh://git@git.anuna.io/anuna-research/ar-edit.git`
+
+---
+
 # ar-edit
 
 A CLI video editor that enables transcript-based editing. Edit video by manipulating text transcripts rather than scrubbing timelines. Transcribe locally with whisper.cpp, preview with VLC, render with ffmpeg.
