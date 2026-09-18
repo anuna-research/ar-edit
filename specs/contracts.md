@@ -27,8 +27,8 @@ Implements: REQ-001, REQ-002
 Registers source video files.
 
 ```
-Pre-conditions:  Inside a project directory; files exist and are readable video
-Post-conditions: Files symlinked/copied to sources/; metadata extracted via ffprobe; manifest updated
+Pre-conditions:  Inside a project directory; files exist and are readable video (audio stream optional; still images rejected)
+Post-conditions: Files symlinked/copied to sources/; metadata extracted via ffprobe (silent sources get audio_channels = 0); manifest updated
 Exit codes:      0 = success, 1 = file not found or not a video, 2 = ffprobe failure
 Output (--json): { "sources": [{ "id": "src-001", "duration_ms": 124500, "resolution": [1920, 1080], ... }] }
 ```

@@ -1,3 +1,4 @@
+pub mod demo;
 pub mod display;
 pub mod edit;
 pub mod export;

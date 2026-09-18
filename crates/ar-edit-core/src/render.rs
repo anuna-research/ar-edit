@@ -394,6 +394,8 @@ where
             .source_info
             .iter()
             .find(|s| s.id == shot.source);
+        // Without a manifest entry, assume audio is present (legacy behaviour).
+        let has_audio = source_info.map(|s| s.has_audio).unwrap_or(true);
 
         let needs_video_reencode = match source_info {
             Some(info) => {
@@ -440,6 +442,7 @@ where
 
             extract_segment_with_progress(
                 &source_path,
+                has_audio,
                 shot.start_ms,
                 shot.end_ms,
                 &segment_path,
@@ -453,7 +456,13 @@ where
                 on_progress,
             )?;
         } else {
-            extract_segment(&source_path, shot.start_ms, shot.end_ms, &segment_path)?;
+            extract_segment(
+                &source_path,
+                has_audio,
+                shot.start_ms,
+                shot.end_ms,
+                &segment_path,
+            )?;
         }
 
         segment_paths.push(segment_path);
@@ -522,6 +531,8 @@ fn render_segments_and_concat(
             .source_info
             .iter()
             .find(|s| s.id == shot.source);
+        // Without a manifest entry, assume audio is present (legacy behaviour).
+        let has_audio = source_info.map(|s| s.has_audio).unwrap_or(true);
 
         let needs_video_reencode = match source_info {
             Some(info) => {
@@ -572,6 +583,7 @@ fn render_segments_and_concat(
 
             extract_segment_encoded(
                 &source_path,
+                has_audio,
                 shot.start_ms,
                 shot.end_ms,
                 &segment_path,
@@ -580,7 +592,13 @@ fn render_segments_and_concat(
             )?;
         } else {
             // Stream copy — codecs and resolution match, no overlay
-            extract_segment(&source_path, shot.start_ms, shot.end_ms, &segment_path)?;
+            extract_segment(
+                &source_path,
+                has_audio,
+                shot.start_ms,
+                shot.end_ms,
+                &segment_path,
+            )?;
         }
 
         segment_paths.push(segment_path);
@@ -639,6 +657,7 @@ struct SourceInfo {
     id: String,
     video_codec: String,
     resolution: (u32, u32),
+    has_audio: bool,
 }
 
 /// Resolved encoding parameters for the entire render.
@@ -675,6 +694,7 @@ fn resolve_encode_params(
                 id: s.id.clone(),
                 video_codec: s.video_codec.clone(),
                 resolution: s.resolution,
+                has_audio: s.has_audio(),
             })
             .collect(),
         None => Vec::new(),
@@ -758,13 +778,31 @@ pub fn ffmpeg_video_encoder(codec: &str) -> &str {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/// Generated-silence input used in place of a missing audio stream, so every
+/// segment carries the same aac/48kHz/stereo track the concat demuxer expects.
+const SILENT_AUDIO_SOURCE: &str = "anullsrc=channel_layout=stereo:sample_rate=48000";
+
+/// Append the audio input (if synthesised) and the `-map` arguments for a
+/// segment extraction. Input 0 is always the source video; when the source is
+/// silent, input 1 is an `anullsrc` generator and audio maps from there.
+/// The caller's `-t` bounds the output, so the infinite generator is safe.
+fn add_audio_input_and_maps(cmd: &mut Command, has_audio: bool) {
+    if has_audio {
+        cmd.args(["-map", "0:v:0", "-map", "0:a:0"]);
+    } else {
+        cmd.args(["-f", "lavfi", "-i", SILENT_AUDIO_SOURCE]);
+        cmd.args(["-map", "0:v:0", "-map", "1:a:0"]);
+    }
+}
+
 /// Extract a segment from a source video with frame-accurate seeking.
 ///
 /// Re-encodes video to ensure frame-accurate cuts and uniform output format
 /// (pixel format, frame rate, audio sample rate) so concat with stream copy
-/// is safe.
+/// is safe. Silent sources get a generated silent track.
 fn extract_segment(
     source: &Path,
+    has_audio: bool,
     start_ms: u64,
     end_ms: u64,
     output: &Path,
@@ -772,16 +810,14 @@ fn extract_segment(
     let start_secs = start_ms as f64 / 1000.0;
     let duration_secs = end_ms.saturating_sub(start_ms) as f64 / 1000.0;
 
-    let result = Command::new("ffmpeg")
-        .args(["-y", "-ss", &format!("{start_secs:.3}"), "-i"])
-        .arg(source)
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(["-y", "-ss", &format!("{start_secs:.3}"), "-i"])
+        .arg(source);
+    add_audio_input_and_maps(&mut cmd, has_audio);
+    let result = cmd
         .args([
             "-t",
             &format!("{duration_secs:.3}"),
-            "-map",
-            "0:v:0",
-            "-map",
-            "0:a:0",
             "-c:v",
             "libx264",
             "-crf",
@@ -817,9 +853,11 @@ fn extract_segment(
 /// Extract a segment with explicit video encoder and optional filter.
 ///
 /// Used when re-encoding is required due to codec mismatch, resolution change,
-/// or overlay filters. Audio is always copied unchanged.
+/// or overlay filters. Audio is re-encoded to the uniform aac track; silent
+/// sources get a generated silent track.
 fn extract_segment_encoded(
     source: &Path,
+    has_audio: bool,
     start_ms: u64,
     end_ms: u64,
     output: &Path,
@@ -831,15 +869,9 @@ fn extract_segment_encoded(
 
     let mut cmd = Command::new("ffmpeg");
     cmd.args(["-y", "-ss", &format!("{start_secs:.3}"), "-i"])
-        .arg(source)
-        .args([
-            "-t",
-            &format!("{duration_secs:.3}"),
-            "-map",
-            "0:v:0",
-            "-map",
-            "0:a:0",
-        ]);
+        .arg(source);
+    add_audio_input_and_maps(&mut cmd, has_audio);
+    cmd.args(["-t", &format!("{duration_secs:.3}")]);
 
     if let Some(vf) = video_filter {
         cmd.args(["-vf", vf]);
@@ -890,6 +922,7 @@ fn write_concat_list(segment_paths: &[PathBuf], output: &Path) -> Result<(), Ren
 #[allow(clippy::too_many_arguments)]
 fn extract_segment_with_progress<F>(
     source: &Path,
+    has_audio: bool,
     start_ms: u64,
     end_ms: u64,
     output: &Path,
@@ -917,15 +950,9 @@ where
         &format!("{start_secs:.3}"),
         "-i",
     ])
-    .arg(source)
-    .args([
-        "-t",
-        &format!("{duration_secs:.3}"),
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a:0",
-    ]);
+    .arg(source);
+    add_audio_input_and_maps(&mut cmd, has_audio);
+    cmd.args(["-t", &format!("{duration_secs:.3}")]);
 
     if let Some(vf) = video_filter {
         cmd.args(["-vf", vf]);
@@ -1216,6 +1243,7 @@ mod tests {
         let output = tmp.path().join("out.mp4");
         let result = extract_segment_encoded(
             &PathBuf::from("/nonexistent/video.mp4"),
+            true,
             0,
             5000,
             &output,
@@ -1358,7 +1386,13 @@ mod tests {
     fn extract_segment_nonexistent_source() {
         let tmp = TempDir::new().unwrap();
         let output = tmp.path().join("out.mp4");
-        let result = extract_segment(&PathBuf::from("/nonexistent/video.mp4"), 0, 5000, &output);
+        let result = extract_segment(
+            &PathBuf::from("/nonexistent/video.mp4"),
+            true,
+            0,
+            5000,
+            &output,
+        );
         assert!(result.is_err());
     }
 
@@ -1370,6 +1404,7 @@ mod tests {
         let output = tmp.path().join("out.mp4");
         let result = extract_segment_encoded(
             &PathBuf::from("/nonexistent/video.mp4"),
+            true,
             0,
             5000,
             &output,
@@ -1385,6 +1420,7 @@ mod tests {
         let output = tmp.path().join("out.mp4");
         let result = extract_segment_encoded(
             &PathBuf::from("/nonexistent/video.mp4"),
+            true,
             0,
             5000,
             &output,

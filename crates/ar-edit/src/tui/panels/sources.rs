@@ -56,7 +56,15 @@ pub fn draw_detail(f: &mut Frame, source: &Source, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("Codecs: ", Style::default().fg(Color::DarkGray)),
-            Span::raw(format!("{} / {}", source.video_codec, source.audio_codec)),
+            Span::raw(format!(
+                "{} / {}",
+                source.video_codec,
+                if source.has_audio() {
+                    source.audio_codec.as_str()
+                } else {
+                    "none"
+                }
+            )),
         ]),
         Line::from(vec![
             Span::styled("Frame rate: ", Style::default().fg(Color::DarkGray)),
@@ -64,10 +72,14 @@ pub fn draw_detail(f: &mut Frame, source: &Source, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("Audio: ", Style::default().fg(Color::DarkGray)),
-            Span::raw(format!(
-                "{}ch @ {} Hz",
-                source.audio_channels, source.audio_sample_rate
-            )),
+            Span::raw(if source.has_audio() {
+                format!(
+                    "{}ch @ {} Hz",
+                    source.audio_channels, source.audio_sample_rate
+                )
+            } else {
+                "none (silent)".to_string()
+            }),
         ]),
         Line::from(""),
         Line::from(vec![

@@ -36,6 +36,10 @@ ar-edit transcripts search "climate"
 ar-edit index --all
 ar-edit index set-description src-001 --scene 0 --text "Wide shot of office"
 
+# Demo bundles recorded by `ar-crawl session --record` (SPEC-004)
+ar-edit demo import ../demo/               # silent source + narration transcript
+                                           # + step scenes + markers/POIs + cursor log
+
 # Editing
 ar-edit edit create rough-cut
 ar-edit edit add-segment rough-cut --source src-001 --from-word 0 --to-word 52

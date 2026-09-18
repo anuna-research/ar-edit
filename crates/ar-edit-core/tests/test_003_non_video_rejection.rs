@@ -136,8 +136,8 @@ fn rejects_image_file() {
     let err = project::add(&project_dir, &[png]).unwrap_err();
     let msg = format!("{err}");
     assert!(
-        msg.contains("not a video") || msg.contains("no audio stream"),
-        "expected rejection of image file, got: {msg}"
+        msg.contains("not a video") && msg.contains("still image"),
+        "expected rejection of image file as a still image, got: {msg}"
     );
 }
 

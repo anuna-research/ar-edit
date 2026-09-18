@@ -162,6 +162,65 @@ pub fn build_source_index(
     Ok(index)
 }
 
+/// A scene given by its bounds and an optional description, for indexes built
+/// from external knowledge of the timeline (e.g. a demo bundle's steps,
+/// SPEC-004) rather than ffmpeg scene detection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneBoundary {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub description: Option<String>,
+}
+
+/// Build and save a SourceIndex from known scene boundaries (REQ-095): one
+/// thumbnail is extracted at each scene start; no scene detection runs.
+pub fn build_index_from_scenes(
+    project_dir: &Path,
+    source: &Source,
+    boundaries: &[SceneBoundary],
+) -> Result<SourceIndex, IndexError> {
+    let source_path = project_dir.join(&source.path);
+    let thumbs_dir = project_dir.join("thumbnails");
+    std::fs::create_dir_all(&thumbs_dir)?;
+    let file_size_bytes = std::fs::metadata(&source_path)?.len();
+
+    let mut scenes = Vec::with_capacity(boundaries.len());
+    let mut thumbnails = Vec::with_capacity(boundaries.len());
+    for (i, b) in boundaries.iter().enumerate() {
+        let filename = format_thumbnail_filename(&source.id, b.start_ms);
+        extract_frame(&source_path, b.start_ms, &thumbs_dir.join(&filename))?;
+        let rel_path = PathBuf::from("thumbnails").join(&filename);
+        thumbnails.push(Thumbnail {
+            path: rel_path.clone(),
+            timestamp_ms: b.start_ms,
+            description: b.description.clone(),
+        });
+        scenes.push(Scene {
+            index: i as u32,
+            start_ms: b.start_ms,
+            end_ms: b.end_ms,
+            thumbnail: rel_path,
+            description: b.description.clone(),
+        });
+    }
+
+    let index = SourceIndex {
+        source_id: source.id.clone(),
+        indexed_at: Utc::now(),
+        metadata: SourceMetadata {
+            duration_ms: source.duration_ms,
+            resolution: source.resolution,
+            codec: source.video_codec.clone(),
+            file_size_bytes,
+        },
+        thumbnails,
+        scene_count: scenes.len() as u32,
+        scenes,
+    };
+    save_index(project_dir, &index)?;
+    Ok(index)
+}
+
 /// Load a previously saved SourceIndex from `index/<source_id>.index.json`.
 pub fn load_index(project_dir: &Path, source_id: &str) -> Result<SourceIndex, IndexError> {
     let path = index_path(project_dir, source_id);
