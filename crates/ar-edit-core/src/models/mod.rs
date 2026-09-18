@@ -25,14 +25,30 @@ pub struct Source {
     pub original_filename: String,
     pub duration_ms: u64,
     pub video_codec: String,
+    /// Empty when the source has no audio stream (see [`Source::has_audio`]).
     pub audio_codec: String,
     pub resolution: (u32, u32),
     pub frame_rate: f64,
+    /// Zero when the source has no audio stream.
     pub audio_channels: u8,
+    /// Zero when the source has no audio stream.
     pub audio_sample_rate: u32,
     pub added: DateTime<Utc>,
     pub transcribed: bool,
     pub indexed: bool,
+}
+
+impl Source {
+    /// Whether the source carries an audio stream.
+    ///
+    /// Silent sources (screen recordings, browser screencasts, b-roll) are
+    /// registered with `audio_codec: ""`, `audio_channels: 0` and
+    /// `audio_sample_rate: 0`. Rendering substitutes generated silence so the
+    /// concat pipeline still sees a uniform audio track; transcription is a
+    /// no-op for them.
+    pub fn has_audio(&self) -> bool {
+        self.audio_channels > 0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

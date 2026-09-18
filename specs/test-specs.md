@@ -54,6 +54,18 @@ Then:   Error returned: "not a valid video container"
 ```
 Verifies: REQ-003
 
+### TEST-003b: Silent source accepted and rendered
+
+```
+Given:  A video file with a video stream and no audio stream
+When:   project::add() is called, then an edit with one time-range shot
+        from it is rendered
+Then:   Source registered with audio_channels = 0 and has_audio() = false;
+        render succeeds and the output contains both a video and an
+        aac audio stream (generated silence)
+```
+Verifies: REQ-003
+
 ### TEST-004: Transcription produces valid JSON
 
 ```

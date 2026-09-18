@@ -46,10 +46,11 @@ Trace:
 
 **REQ-003: Source Validation**
 
-The system SHALL validate that each added file is a readable video container with at least one audio stream WHEN registering a source, rejecting files that cannot be processed by ffmpeg WITH a structured error identifying the issue.
+The system SHALL validate that each added file is a readable video container with at least one video stream WHEN registering a source, rejecting still images and files that cannot be processed by ffmpeg WITH a structured error identifying the issue. An audio stream is optional: a silent source (screen recording, browser screencast, b-roll) SHALL be registered with zeroed audio metadata, SHALL render with a generated silent track so the output is uniform, and SHALL NOT be transcribed.
 
 Trace:
 - TEST-003
+- TEST-003b
 
 ---
 

@@ -617,11 +617,11 @@ struct Source {
     original_filename: String,
     duration_ms: u64,
     video_codec: String,
-    audio_codec: String,
+    audio_codec: String,        // "" when the source is silent
     resolution: (u32, u32),
     frame_rate: f64,
-    audio_channels: u8,
-    audio_sample_rate: u32,
+    audio_channels: u8,         // 0 when the source is silent (Source::has_audio)
+    audio_sample_rate: u32,     // 0 when the source is silent
     added: DateTime<Utc>,
     transcribed: bool,
     indexed: bool,

@@ -115,6 +115,9 @@ pub fn init(project_dir: &Path) -> Result<Manifest, ProjectError> {
 
 /// Add source files to the project. Validates each file via ffprobe (REQ-003),
 /// symlinks into sources/, and updates manifest.json.
+///
+/// A video stream is required; an audio stream is optional. Silent sources
+/// are registered with zeroed audio metadata (see [`Source::has_audio`]).
 pub fn add(project_dir: &Path, files: &[PathBuf]) -> Result<Vec<Source>, ProjectError> {
     let mut manifest = read_manifest(project_dir)?;
     let mut added = Vec::new();
@@ -278,6 +281,18 @@ fn run_ffprobe(file: &Path) -> Result<ProbeResult, ProjectError> {
     let ffprobe: FfprobeOutput = serde_json::from_slice(&output.stdout)
         .map_err(|e| ProjectError::FfprobeFailed(format!("failed to parse ffprobe output: {e}")))?;
 
+    // ffprobe reports still images (png, jpeg, ...) as a single-frame video
+    // stream inside an `image2`/`*_pipe` demuxer. Reject those explicitly now
+    // that a missing audio stream no longer disqualifies a file.
+    if let Some(format_name) = ffprobe.format.format_name.as_deref() {
+        if is_still_image_format(format_name) {
+            return Err(ProjectError::NotAVideo {
+                path: file.to_path_buf(),
+                reason: format!("still image ({format_name}), not a video container"),
+            });
+        }
+    }
+
     let video = ffprobe
         .streams
         .iter()
@@ -287,14 +302,11 @@ fn run_ffprobe(file: &Path) -> Result<ProbeResult, ProjectError> {
             reason: "no video stream found".into(),
         })?;
 
+    // Audio is optional: silent sources register with zeroed audio metadata.
     let audio = ffprobe
         .streams
         .iter()
-        .find(|s| s.codec_type.as_deref() == Some("audio"))
-        .ok_or_else(|| ProjectError::NotAVideo {
-            path: file.to_path_buf(),
-            reason: "no audio stream found".into(),
-        })?;
+        .find(|s| s.codec_type.as_deref() == Some("audio"));
 
     let duration_secs: f64 = ffprobe
         .format
@@ -310,20 +322,28 @@ fn run_ffprobe(file: &Path) -> Result<ProbeResult, ProjectError> {
         .unwrap_or(0.0);
 
     let sample_rate: u32 = audio
-        .sample_rate
-        .as_deref()
+        .and_then(|a| a.sample_rate.as_deref())
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
 
     Ok(ProbeResult {
         duration_ms: (duration_secs * 1000.0) as u64,
         video_codec: video.codec_name.clone().unwrap_or_default(),
-        audio_codec: audio.codec_name.clone().unwrap_or_default(),
+        audio_codec: audio.and_then(|a| a.codec_name.clone()).unwrap_or_default(),
         resolution: (video.width.unwrap_or(0), video.height.unwrap_or(0)),
         frame_rate,
-        audio_channels: audio.channels.unwrap_or(0),
+        audio_channels: audio.and_then(|a| a.channels).unwrap_or(0),
         audio_sample_rate: sample_rate,
     })
+}
+
+/// True for ffprobe format names that denote a still image rather than a
+/// video container: the `image2` family and the per-codec `*_pipe` demuxers
+/// (`png_pipe`, `jpeg_pipe`, `webp_pipe`, ...).
+fn is_still_image_format(format_name: &str) -> bool {
+    format_name
+        .split(',')
+        .any(|f| f.starts_with("image2") || f.ends_with("_pipe"))
 }
 
 fn register_source(
@@ -482,6 +502,7 @@ struct FfprobeStream {
 
 #[derive(Deserialize)]
 struct FfprobeFormat {
+    format_name: Option<String>,
     duration: Option<String>,
 }
 
