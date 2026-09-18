@@ -523,6 +523,39 @@ project/
 
 ---
 
+## 7. Demo Bundles and the Cursor Log (SPEC-004)
+
+`ar-edit demo import <dir>` ingests a bundle written by `ar-crawl session
+--record`. Nothing new is invented for the timeline: the narration becomes a
+**Transcript** (`model: "ar-crawl-demo"`), the steps become **Scenes**,
+**Markers** and **POIs**. The one new file is the preserved cursor log:
+
+```
+annotations/
+└── src-001.cursor.json
+```
+
+```json
+{
+  "coordinateSpace": "viewport-css-px",
+  "scale": 2,
+  "events": [
+    { "tMs": 1520, "type": "move",   "x": 366, "y": 135, "transitionMs": 302, "style": "pointer" },
+    { "tMs": 1790, "type": "ripple", "x": 366, "y": 135, "size": 100 },
+    { "tMs": 2900, "type": "hide" }
+  ]
+}
+```
+
+- `tMs` is milliseconds from the start of the source video.
+- `x`/`y` are viewport CSS pixels; multiply by `scale` to land on the video.
+- `move` carries `transitionMs` (how long the glide takes) and `style`
+  (`pointer` | `text` | `default`); `ripple` a `size`; `hide`/`show` nothing.
+
+It is data for a compositor, not for editing: shots reference the source by
+words, scenes or time as usual, and a future render option draws the cursor
+from this log at output resolution. Rust type: `demo::CursorLog`.
+
 ## 6. Annotated Transcript (for text-based editing)
 
 Exported by `ar-edit transcripts export --format editable`. This is a Markdown file with HTML comment annotations that survive text editing.

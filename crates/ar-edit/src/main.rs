@@ -538,6 +538,9 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             cli::PoiCommand::List(args) => cmd_poi_list(cli, args),
             cli::PoiCommand::Remove(args) => cmd_poi_remove(cli, args),
         },
+        Commands::Demo { command } => match command {
+            cli::DemoCommand::Import(args) => cmd_demo_import(cli, args),
+        },
         Commands::Schema { command } => match command {
             SchemaCommand::Edit => {
                 println!("{}", ar_edit_core::schema::edit_document_schema());
@@ -2378,6 +2381,131 @@ fn next_poi_num(pois: &[ar_edit_core::models::Poi]) -> u32 {
         .max()
         .map(|n| n + 1)
         .unwrap_or(1)
+}
+
+/// `ar-edit demo import <dir>` (CON-019): turn an ar-crawl demo bundle into a
+/// fully-populated source — silent screencast + narration transcript + step
+/// scenes + markers/POIs — with the cursor log kept verbatim for compositing.
+fn cmd_demo_import(cli: &Cli, args: &cli::DemoImportArgs) -> anyhow::Result<()> {
+    use ar_edit_core::models::PoiPoint;
+    use ar_edit_core::{demo, index, project};
+
+    let project_dir = PathBuf::from(".");
+    // Validate the bundle before touching the project (REQ-092).
+    let bundle = demo::load_bundle(&args.dir)?;
+    let transcript_preview = demo::build_transcript(&bundle.manifest, "pending");
+    let scenes = demo::scene_boundaries(&bundle.manifest);
+    let marker_specs = demo::marker_specs(&bundle.manifest);
+    let poi_specs = demo::poi_specs(&bundle.manifest);
+    let cursor_events = bundle.cursor.as_ref().map(|c| c.events.len()).unwrap_or(0);
+
+    if cli.dry_run {
+        println!(
+            "Would import {} as a source: {} narration segments ({} words), {} scenes, {} markers, {} POIs, {} cursor events",
+            bundle.video_path.display(),
+            transcript_preview.segments.len(),
+            transcript_preview.word_count,
+            scenes.len(),
+            marker_specs.len(),
+            poi_specs.len(),
+            cursor_events
+        );
+        return Ok(());
+    }
+
+    // 1. The screencast becomes a (silent) source (REQ-093).
+    let added = project::add(&project_dir, std::slice::from_ref(&bundle.video_path))?;
+    let source = added
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("no source registered from bundle"))?;
+
+    // 2. Narration → transcript (REQ-094).
+    let transcript = demo::build_transcript(&bundle.manifest, &source.id);
+    let transcripts_dir = project_dir.join("transcripts");
+    std::fs::create_dir_all(&transcripts_dir)?;
+    std::fs::write(
+        transcripts_dir.join(format!("{}.transcript.json", source.id)),
+        serde_json::to_string_pretty(&transcript)?,
+    )?;
+
+    // 3. Steps → scene index with a thumbnail per scene (REQ-095).
+    let source_index = index::build_index_from_scenes(&project_dir, &source, &scenes)?;
+
+    // 4. Markers + POIs through the per-source annotation store (REQ-096, ADR-015).
+    let store = load_annotations(&source.id)?;
+    let author = local_author();
+    let first_mark = next_marker_num(&store.markers());
+    for (i, m) in marker_specs.iter().enumerate() {
+        store.add_marker_fields(
+            &format!("mark-{:03}", first_mark + i as u32),
+            ShotRange::Time {
+                from_ms: m.start_ms,
+                to_ms: m.end_ms,
+            },
+            &m.label,
+            m.note.clone(),
+            &author,
+        );
+    }
+    let first_poi = next_poi_num(&store.pois());
+    for (i, p) in poi_specs.iter().enumerate() {
+        store.add_poi_fields(
+            &format!("poi-{:03}", first_poi + i as u32),
+            PoiPoint::TimeMs(p.at_ms),
+            p.category,
+            p.note.clone(),
+            &author,
+        );
+    }
+    save_annotations(&store)?;
+
+    // 5. Cursor log, verbatim, for the compositor (REQ-097).
+    if let Some(cursor) = &bundle.cursor {
+        let path = demo::cursor_log_path(&project_dir, &source.id);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, serde_json::to_string_pretty(cursor)?)?;
+    }
+
+    // 6. Flag the source so `transcribe --all` / `index --all` leave it alone.
+    let mut manifest = project::read_manifest(&project_dir)?;
+    if let Some(s) = manifest.sources.iter_mut().find(|s| s.id == source.id) {
+        s.transcribed = true;
+        s.indexed = true;
+    }
+    project::write_manifest(&project_dir, &manifest)?;
+
+    let summary = serde_json::json!({
+        "source_id": source.id,
+        "video": source.path,
+        "duration_ms": source.duration_ms,
+        "silent": !source.has_audio(),
+        "segments": transcript.segments.len(),
+        "words": transcript.word_count,
+        "scenes": source_index.scene_count,
+        "markers": marker_specs.len(),
+        "pois": poi_specs.len(),
+        "cursor_events": cursor_events,
+    });
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+    } else {
+        println!(
+            "Imported {} as {} ({:.1}s): {} narration segments ({} words), {} scenes, {} markers, {} POIs, {} cursor events",
+            bundle.video_path.display(),
+            source.id,
+            source.duration_ms as f64 / 1000.0,
+            transcript.segments.len(),
+            transcript.word_count,
+            source_index.scene_count,
+            marker_specs.len(),
+            poi_specs.len(),
+            cursor_events
+        );
+    }
+    Ok(())
 }
 
 fn cmd_poi_add(cli: &Cli, args: &cli::PoiAddArgs) -> anyhow::Result<()> {

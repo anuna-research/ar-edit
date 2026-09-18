@@ -161,6 +161,12 @@ pub enum Commands {
         command: PoiCommand,
     },
 
+    /// Demo bundle operations (SPEC-004): bundles recorded by `ar-crawl session --record`
+    Demo {
+        #[command(subcommand)]
+        command: DemoCommand,
+    },
+
     /// Output JSON Schema for data formats
     Schema {
         #[command(subcommand)]
@@ -563,6 +569,23 @@ pub struct MarkArgs {
 
     #[command(flatten)]
     pub range: RangeArgs,
+}
+
+// ---------------------------------------------------------------------------
+// Demo bundles — SPEC-004 (CON-019)
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+pub enum DemoCommand {
+    /// Import a demo bundle: registers the screencast as a source and derives a
+    /// narration transcript, step scenes, markers, POIs and the cursor log
+    Import(DemoImportArgs),
+}
+
+#[derive(Args)]
+pub struct DemoImportArgs {
+    /// Bundle directory (contains manifest.json, the video and cursor.json)
+    pub dir: PathBuf,
 }
 
 // ---------------------------------------------------------------------------
