@@ -1,18 +1,24 @@
-<!-- anuna-moved-notice -->
-> [!IMPORTANT]
-> **This repository has moved.**
->
-> New home: https://git.anuna.io/anuna-research/ar-edit
-> Public mirror: https://github.com/anuna-research/ar-edit
->
-> This Codeberg copy is no longer updated. Please update your remotes:
-> `git remote set-url origin ssh://git@git.anuna.io/anuna-research/ar-edit.git`
-
----
-
 # ar-edit
 
 A CLI video editor that enables transcript-based editing. Edit video by manipulating text transcripts rather than scrubbing timelines. Transcribe locally with whisper.cpp, preview with VLC, render with ffmpeg.
+
+## Quick install
+
+With a recent stable Rust toolchain and Cargo installed, build and install with:
+
+```bash
+cargo install --locked --git https://git.anuna.io/anuna-research/ar-edit.git ar-edit
+```
+
+The binary is installed to `~/.cargo/bin` by default; ensure that directory is on
+your `PATH`. Install [ffmpeg](https://ffmpeg.org/) for video processing and
+[whisper.cpp](https://github.com/ggerganov/whisper.cpp) for transcription (see
+[Dependencies](#dependencies)), then check your setup:
+
+```bash
+ar-edit --help
+ar-edit doctor
+```
 
 ## How it works
 
