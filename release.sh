@@ -38,7 +38,18 @@ fi
 
 TAG="v$VERSION"
 
-info "Preparing release $TAG"
+# The canonical remote is git.anuna.io (the Codeberg copy is a stale mirror).
+# Prefer the remote whose URL points there; allow an override; fall back to origin.
+REMOTE="${RELEASE_REMOTE:-$(git remote -v | awk '/git\.anuna\.io.*\(push\)/ {print $1; exit}')}"
+REMOTE="${REMOTE:-origin}"
+
+info "Preparing release $TAG (remote: $REMOTE)"
+
+# Releases are cut from main
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$BRANCH" != "main" ]]; then
+  error "Releases are cut from main (currently on $BRANCH)"
+fi
 
 # Check for uncommitted changes
 if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -64,19 +75,23 @@ cargo fmt --all -- --check
 info "Running clippy..."
 cargo clippy --all -- -D warnings
 
-# Commit version bump
-info "Committing version bump..."
+# Commit version bump (a no-op when the bump was already committed)
 git add Cargo.toml Cargo.lock
-git commit -m "chore: bump version to $VERSION"
+if git diff --cached --quiet; then
+  info "Version $VERSION already committed"
+else
+  info "Committing version bump..."
+  git commit -m "chore: bump version to $VERSION"
+fi
 
 # Create and push tag
 info "Creating tag $TAG..."
 git tag -a "$TAG" -m "Release $VERSION"
 
 # Push to remote
-info "Pushing to origin..."
-git push origin main
-git push origin "$TAG"
+info "Pushing to $REMOTE..."
+git push "$REMOTE" main
+git push "$REMOTE" "$TAG"
 
 echo ""
 info "Release $TAG published!"
