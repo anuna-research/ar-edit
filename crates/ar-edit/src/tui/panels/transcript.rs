@@ -797,34 +797,42 @@ mod tests {
 
     #[test]
     fn scroll_up_clamps_at_zero() {
-        let mut scroll = TranscriptScroll::default();
-        scroll.offset = 0;
+        let mut scroll = TranscriptScroll {
+            offset: 0,
+            ..Default::default()
+        };
         scroll_up(&mut scroll);
         assert_eq!(scroll.offset, 0);
     }
 
     #[test]
     fn scroll_down_increments() {
-        let mut scroll = TranscriptScroll::default();
-        scroll.offset = 0;
+        let mut scroll = TranscriptScroll {
+            offset: 0,
+            ..Default::default()
+        };
         scroll_down(&mut scroll, 100);
         assert_eq!(scroll.offset, 1);
     }
 
     #[test]
     fn scroll_down_clamps_at_max() {
-        let mut scroll = TranscriptScroll::default();
-        scroll.offset = 50;
+        let mut scroll = TranscriptScroll {
+            offset: 50,
+            ..Default::default()
+        };
         scroll_down(&mut scroll, 50);
         assert_eq!(scroll.offset, 50);
     }
 
     #[test]
     fn auto_scroll_on_shot_change() {
-        let mut scroll = TranscriptScroll::default();
-        scroll.cached_source = "src-001".into();
-        scroll.cached_shot = "shot-001".into();
-        scroll.offset = 0;
+        let mut scroll = TranscriptScroll {
+            cached_source: "src-001".into(),
+            cached_shot: "shot-001".into(),
+            offset: 0,
+            ..Default::default()
+        };
 
         // Simulate a shot change by checking the condition
         let new_source = "src-002";

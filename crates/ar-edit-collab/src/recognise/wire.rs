@@ -157,7 +157,7 @@ pub enum SourceSyncMsg<'a> {
 }
 
 fn parse_hashes(payload: &[u8]) -> Result<Vec<[u8; 32]>, WireError> {
-    if payload.len() % 32 != 0 {
+    if !payload.len().is_multiple_of(32) {
         return Err(WireError::BadHashLen);
     }
     Ok(payload

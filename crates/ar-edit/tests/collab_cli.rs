@@ -1,4 +1,5 @@
 //! Collaboration CLI tests (SPEC-003 CON-012; task s6).
+#![allow(deprecated)] // assert_cmd::cargo_bin — matches the rest of the suite
 
 use assert_cmd::Command;
 
