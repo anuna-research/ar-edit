@@ -827,7 +827,7 @@ mod tests {
 
     #[test]
     fn auto_scroll_on_shot_change() {
-        let mut scroll = TranscriptScroll {
+        let scroll = TranscriptScroll {
             cached_source: "src-001".into(),
             cached_shot: "shot-001".into(),
             offset: 0,
