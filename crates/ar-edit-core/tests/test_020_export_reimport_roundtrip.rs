@@ -49,10 +49,10 @@ fn make_manifest(sources: Vec<Source>) -> Manifest {
     }
 }
 
-fn make_transcript_with_segments(
-    source_id: &str,
-    segments: Vec<(Vec<(&str, u64, u64)>, &str)>,
-) -> Transcript {
+/// One transcript segment as test data: `(words as (text, start_ms, end_ms), segment text)`.
+type SegmentSpec<'a> = (Vec<(&'a str, u64, u64)>, &'a str);
+
+fn make_transcript_with_segments(source_id: &str, segments: Vec<SegmentSpec<'_>>) -> Transcript {
     let mut all_segments = Vec::new();
     let mut global_idx: u32 = 0;
     let mut duration_ms: u64 = 0;

@@ -71,7 +71,7 @@ fn make_resolved_shot(id: &str, duration_ms: u64) -> ResolvedShot {
 /// Total duration is the sum of all shot durations.
 #[test]
 fn total_duration_is_sum_of_shots() {
-    let shots = vec![
+    let shots = [
         make_resolved_shot("shot-001", 5000),
         make_resolved_shot("shot-002", 10000),
         make_resolved_shot("shot-003", 3000),
@@ -85,7 +85,7 @@ fn total_duration_is_sum_of_shots() {
 /// Position is calculated from shots before the selected index.
 #[test]
 fn position_at_first_shot() {
-    let shots = vec![
+    let shots = [
         make_resolved_shot("shot-001", 5000),
         make_resolved_shot("shot-002", 10000),
     ];
@@ -97,7 +97,7 @@ fn position_at_first_shot() {
 
 #[test]
 fn position_at_second_shot() {
-    let shots = vec![
+    let shots = [
         make_resolved_shot("shot-001", 5000),
         make_resolved_shot("shot-002", 10000),
         make_resolved_shot("shot-003", 3000),
@@ -110,7 +110,7 @@ fn position_at_second_shot() {
 
 #[test]
 fn position_at_last_shot() {
-    let shots = vec![
+    let shots = [
         make_resolved_shot("shot-001", 5000),
         make_resolved_shot("shot-002", 10000),
         make_resolved_shot("shot-003", 3000),

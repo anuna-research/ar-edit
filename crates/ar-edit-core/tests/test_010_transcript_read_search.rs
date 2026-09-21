@@ -120,7 +120,7 @@ fn read_returns_full_transcript() {
     let tmp = TempDir::new().unwrap();
     let manifest = make_manifest(vec![make_source("src-001", true)]);
     let t = make_transcript("src-001", &[("Hello", 0, 500), ("world", 500, 1000)]);
-    setup_project(tmp.path(), &manifest, &[t.clone()]);
+    setup_project(tmp.path(), &manifest, std::slice::from_ref(&t));
 
     let result = transcript_ops::read(tmp.path(), "src-001").unwrap();
     assert_eq!(result, t);
@@ -149,7 +149,7 @@ fn read_matches_stored_json() {
             ("test", 1000, 1500),
         ],
     );
-    setup_project(tmp.path(), &manifest, &[t.clone()]);
+    setup_project(tmp.path(), &manifest, std::slice::from_ref(&t));
 
     let result = transcript_ops::read(tmp.path(), "src-001").unwrap();
 

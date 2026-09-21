@@ -188,7 +188,7 @@ fn single_shot_duration() {
 /// Total duration of a multi-shot edit is the sum of all shot durations.
 #[test]
 fn multi_shot_total_duration() {
-    let shots = vec![
+    let shots = [
         make_resolved_shot("shot-001", "src-001", 0, 1200),
         make_resolved_shot("shot-002", "src-001", 5230, 6800),
         make_resolved_shot("shot-003", "src-001", 0, 3000),
