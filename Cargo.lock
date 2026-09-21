@@ -139,7 +139,7 @@ checksum = "ac436601d6bdde674a0d7fb593e829ffe7b3387c351b356dd20e2d40f5bf3ee5"
 
 [[package]]
 name = "ar-edit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "ar-edit-collab",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "ar-edit-collab"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ar-edit-core",
  "base64",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "ar-edit-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "jsonschema",
